@@ -1,0 +1,38 @@
+# Generated — rebuild with `bash build-preview.sh`
+safelane-brief.local.html
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+# Node
+node_modules/
+dist/
+.vite/
+
+# Local cluster and secrets — never commit these
+kubeconfig
+*.kubeconfig
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Demo output
+outcomes.jsonl
+decision.json
+demo-backup.mp4
+rendered/
+
+# Editors and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini

@@ -1,0 +1,1012 @@
+<title>SafeLane — project brief</title>
+
+<style>
+  :root {
+    --ground: #F7F9FB;
+    --surface: #FFFFFF;
+    --surface-2: #F0F4F7;
+    --ink: #14202A;
+    --ink-2: #3C4E5D;
+    --ink-3: #6B7D8C;
+    --rule: #DCE4EA;
+    --rule-2: #C6D2DB;
+    --accent: #0F6E75;
+    --accent-ink: #0B565C;
+    --accent-wash: #E3EFF0;
+    --pass: #2C7A54;
+    --pass-wash: #E4F1EA;
+    --warn: #8A5D0C;
+    --warn-wash: #F6EEDC;
+    --fail: #A8362E;
+    --fail-wash: #F7E7E5;
+    --plate: #FBFCFD;
+    --plate-rule: #DCE4EA;
+
+    --sans: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif;
+    --display: "Segoe UI Variable Display", "Segoe UI Semibold", "Segoe UI", system-ui, sans-serif;
+    --mono: "Cascadia Mono", "Cascadia Code", ui-monospace, "SF Mono", Consolas, monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ground: #0F151B;
+      --surface: #161E26;
+      --surface-2: #1D272F;
+      --ink: #E7EDF2;
+      --ink-2: #B4C3CF;
+      --ink-3: #8496A4;
+      --rule: #26323C;
+      --rule-2: #34434F;
+      --accent: #55C0C4;
+      --accent-ink: #7FD4D6;
+      --accent-wash: #143133;
+      --pass: #5EB183;
+      --pass-wash: #162C22;
+      --warn: #D3A03F;
+      --warn-wash: #2E2617;
+      --fail: #E07A70;
+      --fail-wash: #2F1D1B;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --ground: #0F151B;
+    --surface: #161E26;
+    --surface-2: #1D272F;
+    --ink: #E7EDF2;
+    --ink-2: #B4C3CF;
+    --ink-3: #8496A4;
+    --rule: #26323C;
+    --rule-2: #34434F;
+    --accent: #55C0C4;
+    --accent-ink: #7FD4D6;
+    --accent-wash: #143133;
+    --pass: #5EB183;
+    --pass-wash: #162C22;
+    --warn: #D3A03F;
+    --warn-wash: #2E2617;
+    --fail: #E07A70;
+    --fail-wash: #2F1D1B;
+  }
+
+  :root[data-theme="light"] {
+    --ground: #F7F9FB;
+    --surface: #FFFFFF;
+    --surface-2: #F0F4F7;
+    --ink: #14202A;
+    --ink-2: #3C4E5D;
+    --ink-3: #6B7D8C;
+    --rule: #DCE4EA;
+    --rule-2: #C6D2DB;
+    --accent: #0F6E75;
+    --accent-ink: #0B565C;
+    --accent-wash: #E3EFF0;
+    --pass: #2C7A54;
+    --pass-wash: #E4F1EA;
+    --warn: #8A5D0C;
+    --warn-wash: #F6EEDC;
+    --fail: #A8362E;
+    --fail-wash: #F7E7E5;
+  }
+
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16.5px;
+    line-height: 1.62;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .page {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 0 clamp(18px, 4vw, 56px) 96px;
+  }
+
+  .col { max-width: 68ch; }
+
+  /* ---------- masthead ---------- */
+
+  .masthead {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    padding: clamp(40px, 7vw, 80px) 0 32px;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .wordmark {
+    font-family: var(--display);
+    font-size: clamp(38px, 6vw, 60px);
+    font-weight: 700;
+    letter-spacing: -0.028em;
+    line-height: 1;
+    margin: 0;
+  }
+
+  .wordmark em {
+    font-style: normal;
+    color: var(--accent);
+  }
+
+  .claim {
+    font-family: var(--display);
+    font-size: clamp(19px, 2.4vw, 25px);
+    font-weight: 400;
+    line-height: 1.35;
+    letter-spacing: -0.012em;
+    color: var(--ink);
+    text-wrap: balance;
+    max-width: 30ch;
+    margin: 0;
+  }
+
+  .subclaim {
+    color: var(--ink-2);
+    max-width: 62ch;
+    margin: 0;
+  }
+
+  .chiprow {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 6px;
+  }
+
+  .chip {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.09em;
+    padding: 5px 10px;
+    border-radius: 3px;
+    border: 1px solid var(--rule-2);
+    color: var(--ink-2);
+    background: var(--surface);
+    white-space: nowrap;
+  }
+
+  .chip.live { border-color: var(--accent); color: var(--accent-ink); background: var(--accent-wash); }
+  .chip.hold { border-color: var(--warn); color: var(--warn); background: var(--warn-wash); }
+
+  /* ---------- sections ---------- */
+
+  .section {
+    padding-top: clamp(48px, 6vw, 76px);
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.16em;
+    color: var(--ink-3);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 0;
+  }
+
+  .eyebrow::after {
+    content: "";
+    height: 1px;
+    flex: 1;
+    background: var(--rule);
+  }
+
+  h2 {
+    font-family: var(--display);
+    font-size: clamp(25px, 3.1vw, 33px);
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    line-height: 1.18;
+    text-wrap: balance;
+    margin: 0;
+    max-width: 34ch;
+  }
+
+  h3 {
+    font-family: var(--display);
+    font-size: 18.5px;
+    font-weight: 600;
+    letter-spacing: -0.008em;
+    line-height: 1.3;
+    margin: 0;
+    text-wrap: balance;
+  }
+
+  p { margin: 0; max-width: 68ch; }
+
+  .lede { font-size: 17.5px; color: var(--ink-2); }
+
+  a { color: var(--accent-ink); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+  a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+
+  code {
+    font-family: var(--mono);
+    font-size: 0.88em;
+    background: var(--surface-2);
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    padding: 1px 5px;
+  }
+
+  strong { font-weight: 650; }
+
+  .stack { display: flex; flex-direction: column; gap: 16px; }
+  .stack-tight { display: flex; flex-direction: column; gap: 8px; }
+
+  ul { margin: 0; padding-left: 1.2em; max-width: 68ch; display: flex; flex-direction: column; gap: 7px; }
+  li::marker { color: var(--ink-3); }
+
+  /* ---------- cards ---------- */
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 5px;
+    padding: clamp(18px, 2.5vw, 26px);
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .card-warn { border-left: 3px solid var(--warn); }
+  .card-fail { border-left: 3px solid var(--fail); }
+  .card-accent { border-left: 3px solid var(--accent); }
+
+  .grid-2 {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
+    gap: 16px;
+  }
+
+  /* ---------- lane strip ---------- */
+
+  .lanes { display: flex; flex-direction: column; gap: 14px; }
+
+  .lane {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 5px;
+    padding: 20px clamp(16px, 2.2vw, 24px);
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .lane-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .lane-name {
+    font-family: var(--mono);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.13em;
+    color: var(--ink);
+  }
+
+  .lane-verdict {
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.04em;
+  }
+
+  .verdict-pass { color: var(--pass); }
+  .verdict-fail { color: var(--fail); }
+
+  .steps { display: flex; flex-direction: column; gap: 7px; }
+
+  .step {
+    display: grid;
+    grid-template-columns: 96px auto 1fr;
+    align-items: center;
+    gap: 14px;
+  }
+
+  .step-label {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    color: var(--ink-3);
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+  }
+
+  .pods { display: flex; gap: 4px; }
+
+  .pod {
+    width: 26px;
+    height: 20px;
+    border-radius: 2px;
+    background: var(--surface-2);
+    border: 1px solid var(--rule-2);
+  }
+
+  .pod.new { background: var(--accent); border-color: var(--accent); }
+  .pod.bad { background: var(--fail); border-color: var(--fail); }
+
+  .step-note { font-size: 13.5px; color: var(--ink-3); }
+
+  /* ---------- tables ---------- */
+
+  .scroller {
+    overflow-x: auto;
+    border: 1px solid var(--rule);
+    border-radius: 5px;
+    background: var(--surface);
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14.5px;
+    min-width: 560px;
+  }
+
+  th {
+    text-align: left;
+    font-family: var(--mono);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-weight: 400;
+    color: var(--ink-3);
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--rule-2);
+    white-space: nowrap;
+    vertical-align: bottom;
+  }
+
+  td {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--rule);
+    color: var(--ink-2);
+    vertical-align: top;
+  }
+
+  tbody tr:last-child td { border-bottom: none; }
+
+  td.num, th.num { font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  td.key { color: var(--ink); font-weight: 600; }
+  td.mono { font-family: var(--mono); font-size: 13px; color: var(--ink); white-space: nowrap; }
+
+  .tag {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    padding: 2px 7px;
+    border-radius: 3px;
+    white-space: nowrap;
+    display: inline-block;
+  }
+
+  .tag-pass { background: var(--pass-wash); color: var(--pass); }
+  .tag-warn { background: var(--warn-wash); color: var(--warn); }
+  .tag-fail { background: var(--fail-wash); color: var(--fail); }
+  .tag-flat { background: var(--surface-2); color: var(--ink-3); }
+
+  /* ---------- diagram plates ---------- */
+
+  .plate {
+    background: var(--plate);
+    border: 1px solid var(--plate-rule);
+    border-radius: 5px;
+    padding: 20px 16px;
+    overflow-x: auto;
+    color: #14202A;
+  }
+
+  .plate .mermaid { display: block; min-width: 620px; }
+  .plate-caption {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+
+  /* ---------- phases ---------- */
+
+  .phases { display: flex; flex-direction: column; gap: 10px; }
+
+  .phase {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 5px;
+    padding: 18px 20px;
+  }
+
+  @media (min-width: 720px) {
+    .phase { grid-template-columns: 150px minmax(0, 1fr) 160px; align-items: start; gap: 22px; }
+  }
+
+  .phase-tag {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.11em;
+    color: var(--accent-ink);
+  }
+
+  .phase-budget {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    color: var(--ink-3);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .phase-gate {
+    font-size: 13.5px;
+    color: var(--ink-2);
+    padding-top: 2px;
+  }
+
+  .phase-gate span {
+    display: block;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--ink-3);
+    margin-bottom: 3px;
+  }
+
+  /* ---------- refs ---------- */
+
+  .refgroup { display: flex; flex-direction: column; gap: 9px; }
+
+  .refgroup h3 { margin-bottom: 3px; }
+
+  .reflist {
+    list-style: none;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 14.5px;
+  }
+
+  .reflist li { color: var(--ink-3); }
+  .reflist a { color: var(--ink); text-decoration-color: var(--rule-2); }
+  .reflist a:hover { text-decoration-color: var(--accent); }
+  .reflist .note { color: var(--ink-3); font-size: 13.5px; }
+
+  footer {
+    margin-top: clamp(56px, 7vw, 88px);
+    padding-top: 24px;
+    border-top: 1px solid var(--rule);
+    color: var(--ink-3);
+    font-size: 13.5px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    a { transition: text-decoration-color 120ms ease; }
+  }
+</style>
+
+<div class="page">
+
+  <header class="masthead">
+    <h1 class="wordmark">Safe<em>Lane</em></h1>
+    <p class="claim">Every change gets the rollout it deserves.</p>
+    <p class="subclaim">The first open-source tool that compiles a risk score into real rollout parameters for Argo&nbsp;Rollouts. Score the change before it ships; let the score decide how carefully it ships.</p>
+    <div class="chiprow">
+      <span class="chip live">Track 1 — automate deployment &amp; operations</span>
+      <span class="chip">15 working days to the demo</span>
+      <span class="chip">2 people</span>
+      <span class="chip hold">Blocked on: Argo running on Ahmed's machine</span>
+    </div>
+  </header>
+
+  <section class="section">
+    <p class="eyebrow">The idea</p>
+    <h2>Most teams ship every change the same way, however dangerous it is.</h2>
+    <div class="stack col">
+      <p class="lede">A one-word copy fix and a change to the payment retry logic get the identical rollout. The dangerous one is only caught after it is already hurting people.</p>
+      <p>SafeLane reads the change before it ships and asks one question: <strong>how risky is this specific change?</strong> It answers from what the change actually touches — how big it is, which services it hits, whether it is config or code, how hard it would be to undo, whether those files have caused incidents before, and when it is shipping. Then it puts the change in the lane it deserves, and hands the actual release to Argo Rollouts.</p>
+      <p>Two halves of this already exist separately. Tools that score risk, and tools that run careful rollouts. What nothing open-source does is let the score <em>set the rollout's numbers</em>.</p>
+    </div>
+  </section>
+
+  <section class="section">
+    <p class="eyebrow">The two lanes</p>
+    <h2>The whole idea, on one screen.</h2>
+    <p class="lede col">Five copies of the service are running. The lane decides how many of them get the new version, and how long anyone waits before trusting it.</p>
+
+    <div class="lanes">
+      <div class="lane">
+        <div class="lane-head">
+          <span class="lane-name">Fast lane · safe change</span>
+          <span class="lane-verdict verdict-pass">ships · stays green</span>
+        </div>
+        <div class="steps">
+          <div class="step">
+            <span class="step-label">one step</span>
+            <span class="pods">
+              <span class="pod new"></span><span class="pod new"></span><span class="pod new"></span><span class="pod new"></span><span class="pod new"></span>
+            </span>
+            <span class="step-note">Straight to all five. No pause, no analysis, minimal friction.</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="lane">
+        <div class="lane-head">
+          <span class="lane-name">Guarded lane · risky change</span>
+          <span class="lane-verdict verdict-fail">fails at step two · rolled back automatically</span>
+        </div>
+        <div class="steps">
+          <div class="step">
+            <span class="step-label">20%</span>
+            <span class="pods">
+              <span class="pod new"></span><span class="pod"></span><span class="pod"></span><span class="pod"></span><span class="pod"></span>
+            </span>
+            <span class="step-note">One pod of five carries the new version. Error rate watched every 10 seconds.</span>
+          </div>
+          <div class="step">
+            <span class="step-label">40%</span>
+            <span class="pods">
+              <span class="pod bad"></span><span class="pod bad"></span><span class="pod"></span><span class="pod"></span><span class="pod"></span>
+            </span>
+            <span class="step-note">Error rate breaks the 1% threshold. One failed measurement is enough.</span>
+          </div>
+          <div class="step">
+            <span class="step-label">abort</span>
+            <span class="pods">
+              <span class="pod"></span><span class="pod"></span><span class="pod"></span><span class="pod"></span><span class="pod"></span>
+            </span>
+            <span class="step-note">Argo takes the canary to zero and restores all five stable pods. 30–45 seconds, no human involved.</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="scroller">
+      <table>
+        <thead>
+          <tr>
+            <th>Tier</th>
+            <th>Lane</th>
+            <th>Steps, as weight and pods</th>
+            <th class="num">Error threshold</th>
+            <th class="num">Check every</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="key">safe</td>
+            <td class="mono">fast</td>
+            <td class="mono">100% — all 5 at once</td>
+            <td class="num">Argo health only</td>
+            <td class="num">—</td>
+          </tr>
+          <tr>
+            <td class="key">guarded</td>
+            <td class="mono">guarded</td>
+            <td class="mono">40% (2) → 100% (5)</td>
+            <td class="num">3%</td>
+            <td class="num">10s</td>
+          </tr>
+          <tr>
+            <td class="key">risky</td>
+            <td class="mono">guarded</td>
+            <td class="mono">20% (1) → 40% (2) → 60% (3)</td>
+            <td class="num">1%</td>
+            <td class="num">10s</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="col" style="font-size:14.5px;color:var(--ink-3)">Low confidence in a score always routes to the guarded lane, whatever the number says. A missing or invalid decision is treated as risky. Being wrong sends a change to a slower rollout, never a faster one.</p>
+  </section>
+
+  <section class="section">
+    <p class="eyebrow">Honest limit — say this before a judge finds it</p>
+    <h2>These are pod counts, not true traffic percentages.</h2>
+    <div class="card card-warn col">
+      <p>With no service mesh or ingress controller, Argo Rollouts does not split traffic by percentage — it <strong>approximates the weight using replica counts</strong>. At five replicas, weights of 1, 5, 10 and 20 all produce exactly one canary pod. So "1%" was never achievable on a laptop; it would need a hundred replicas.</p>
+      <p>Which is why the ladder is <code>20 → 40 → 60</code>. At five pods those are the only values that are literally true, and every step visibly moves a pod.</p>
+      <p><strong>The sentence for the room:</strong> <em>"On a laptop with no service mesh, Argo approximates weight with replica counts — so this is one pod in five, not one percent. With ingress-nginx or Istio the same policy emits real traffic weights. That's a configuration line, not a redesign."</em></p>
+      <p style="font-size:14.5px;color:var(--ink-3)">Saying it yourself turns the weakest point in the demo into evidence that you understand your own tooling. A second limit worth owning: if the injected fault fails nearly every request, the 1% and 3% thresholds trip identically — so the tier difference is real in the file but invisible on screen. Do not claim it is demonstrated.</p>
+    </div>
+  </section>
+
+  <section class="section">
+    <p class="eyebrow">Mechanism</p>
+    <h2>How it fits together.</h2>
+    <p class="lede col">Two people, two tracks, and exactly two files where they touch: <code>decision.json</code> and <code>outcomes.jsonl</code>. Nothing else crosses, which is why neither person ever waits on the other.</p>
+    <div class="plate">
+      <pre class="mermaid">
+flowchart TD
+    subgraph AndrewTrack["Andrew - decision spine"]
+        PR["pull request opened"]
+        DIFF["diff parser<br/>files, lines added, lines removed"]
+        SIG["six signals<br/>size · config vs code · blast radius<br/>incident memory · reversibility · timing"]
+        POLICY["policy.yaml<br/>versioned thresholds, no LLM"]
+        SCORER["scorer<br/>score 0-100, tier, plain English reasons"]
+        DEC["decision.json"]
+        LANE["lane generator<br/>tier to canary steps and analysis args"]
+        RENDER["rendered rollout.yaml<br/>steps, thresholds, injected fault rate"]
+    end
+
+    subgraph AhmedTrack["Ahmed - cluster spine"]
+        APPLY["lint, then ONE kubectl apply<br/>never patch"]
+        ROLLOUT["Argo Rollouts controller"]
+        PODS["1 canary pod, 4 stable pods"]
+        PROM["Prometheus<br/>scraped every 5s"]
+        AR["AnalysisRun<br/>canary error rate"]
+        ABORT["abort - canary to zero,<br/>back to 5 stable"]
+    end
+
+    subgraph Shared["seeded files on disk"]
+        TOPO["topology.json<br/>which service calls which"]
+        INC["incidents - stamped synthetic"]
+        OUT["outcomes.jsonl<br/>one line per rollout"]
+    end
+
+    PANEL["SafeLane risk panel<br/>score, reasons, aim metric"]
+
+    PR --> DIFF --> SIG --> SCORER
+    POLICY --> SCORER
+    TOPO --> SIG
+    INC --> SIG
+    SCORER --> DEC
+    DEC --> LANE --> RENDER --> APPLY --> ROLLOUT --> PODS
+    PODS -- "metrics on /metrics" --> PROM
+    ROLLOUT --> AR
+    PROM -- "PromQL over HTTP" --> AR
+    AR -- "AnalysisRun Failed" --> ABORT
+    ABORT --> ROLLOUT
+    DEC --> OUT
+    ROLLOUT -- "final status" --> OUT
+    OUT --> PANEL
+      </pre>
+    </div>
+    <p class="plate-caption">Component and data flow</p>
+
+    <div class="grid-2">
+      <div class="card card-accent">
+        <h3>Render the manifest. Never patch it.</h3>
+        <p style="font-size:14.5px">Patching a Rollout mid-flight resets the step index to zero, and patching one that has already aborted <strong>clears the abort and resumes toward the broken version</strong> — destroying the one thing the demo exists to prove. Render the whole file from a template, lint it, apply it once. Never mix <code>apply</code> with <code>set image</code>; they silently undo each other.</p>
+      </div>
+      <div class="card card-accent">
+        <h3>Burn a warm-up release first.</h3>
+        <p style="font-size:14.5px">Argo skips all canary steps on a service's very first deploy and goes straight to 100%. So the demo needs one throwaway revision applied during setup, off camera. Miss this and the risky change ships instantly in front of the judges.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section">
+    <p class="eyebrow">The demo</p>
+    <h2>From opening the risky pull request to the automatic rollback.</h2>
+    <div class="plate">
+      <pre class="mermaid">
+sequenceDiagram
+    autonumber
+    participant P as Presenter
+    participant S as safelane score
+    participant G as safelane lane
+    participant A as Argo Rollouts
+    participant M as Prometheus
+
+    P->>S: open the risky PR - bump payout retry limit
+    S->>S: 3 files, 47 lines, config not code
+    S->>S: payouts-api has 3 seeded incidents in 90 days
+    S->>S: 2 downstream services depend on it
+    S->>P: score 72, tier risky, 3 reasons read aloud
+    P->>G: generate the lane from decision.json
+    G->>G: risky maps to 20, 40, 60 and a 1 percent threshold
+    G->>A: lint, then one kubectl apply
+    A->>A: new revision - 1 canary pod of 5
+    A->>M: canary error rate over the last 30s
+    M-->>A: 0.34
+    A->>A: measurement failed - failureLimit is 1
+    A->>A: AnalysisRun Failed - abort
+    A->>A: canary to zero, rolling back to 5 stable
+    Note over P,A: 30 to 45 seconds from apply to rolled back
+      </pre>
+    </div>
+    <p class="plate-caption">The risky-change path, live</p>
+    <div class="stack col">
+      <h3>The two beats</h3>
+      <ul>
+        <li><strong>Trivial change, about 45 seconds.</strong> Score 8, tier safe, one reason. Straight to 100%, stays green.</li>
+        <li><strong>Risky change, about 3 minutes.</strong> Score 72, tier risky, three reasons — <em>read all three out loud, this is the money shot.</em> Then show the two rendered manifests side by side: same service, same template, different lane. That is the entire idea on one screen.</li>
+      </ul>
+      <p style="font-size:14.5px;color:var(--ink-3)">Escape hatch if the analysis stalls: aborting by hand still tells the rollback story. The backup recording exists precisely so a bad network never costs the demo.</p>
+    </div>
+  </section>
+
+  <section class="section">
+    <p class="eyebrow">Ownership</p>
+    <h2>Two tracks that never block each other.</h2>
+    <div class="grid-2">
+      <div class="card">
+        <h3>Ahmed Anany — cluster spine</h3>
+        <p style="font-size:14.5px">kind, Argo Rollouts, Prometheus, the demo service, the injected fault, and the rendering-and-applying script. Consumes <code>decision.json</code>.</p>
+        <p style="font-size:14.5px;color:var(--ink-3)">Unblocked from day one: hand-write <code>decision.json</code> files and build the whole cluster path against them.</p>
+      </div>
+      <div class="card">
+        <h3>Andrew — decision spine</h3>
+        <p style="font-size:14.5px">The risk scorer, the policy file, the lane generator, and the risk panel. Produces <code>decision.json</code>.</p>
+        <p style="font-size:14.5px;color:var(--ink-3)">Unblocked from day one: validate output against the schema, no cluster needed.</p>
+      </div>
+    </div>
+    <div class="card card-accent">
+      <h3>The interface is the plan's best decision</h3>
+      <p style="font-size:14.5px">One file, frozen early. Every step in it carries <strong>both</strong> the percentage and the honest pod count, side by side, so the two can never drift apart. It records whether weights are real or approximated, so nobody reading it has to guess. And the default-safe posture lives in the schema, not just in the pitch: low confidence routes guarded, a missing decision is treated as risky.</p>
+    </div>
+  </section>
+
+  <section class="section">
+    <p class="eyebrow">Sequence, not calendar</p>
+    <h2>Three phases, riskiest work first.</h2>
+    <p class="lede col">Fifteen working days total. The order matters far more than the dates: the thing most likely to sink the project is proven first, while there is still time to react.</p>
+    <div class="phases">
+      <div class="phase">
+        <span class="phase-tag">Phase 1 · Ahmed</span>
+        <div class="stack-tight">
+          <h3>The rollback actually works</h3>
+          <p style="font-size:14.5px">Cluster, Argo Rollouts, Prometheus, one demo service, a deliberate failure, and an automatic rollback — all reproducible from a script. Hand-written manifests only. No scorer, no panel, no SafeLane code at all.</p>
+        </div>
+        <div class="phase-gate"><span>Gate</span>Auto-rollback works from nothing on a fresh cluster. If not, the demo becomes a simulated rollout engine and we say so on stage.</div>
+      </div>
+      <div class="phase">
+        <span class="phase-tag">Phase 2 · Andrew</span>
+        <div class="stack-tight">
+          <h3>Score becomes a lane</h3>
+          <p style="font-size:14.5px">Six signals over a git diff, a versioned policy file, and the generator that turns a tier into steps and thresholds. Two demo pull requests: one trivial, one hitting the hot service. Runs in parallel with phase 1.</p>
+        </div>
+        <div class="phase-gate"><span>Gate</span>Both demo PRs produce correct, stable output with reasons a judge can read aloud.</div>
+      </div>
+      <div class="phase">
+        <span class="phase-tag">Phase 3 · both</span>
+        <div class="stack-tight">
+          <h3>Make it presentable</h3>
+          <p style="font-size:14.5px">The risk panel, one command that runs the whole demo, the backup recording, slides in English, and two full rehearsals against a stopwatch.</p>
+        </div>
+        <div class="phase-gate"><span>Hard order</span>Backup recording is finished <em>before</em> rehearsals begin, not after. It is the insurance, not the polish.</div>
+      </div>
+    </div>
+    <p class="col" style="font-size:14.5px;color:var(--ink-3)">Argo Rollouts already ships its own interactive dashboard, so the rollout view is free. Only the SafeLane-specific panel gets built — roughly a day of interface instead of three.</p>
+  </section>
+
+  <section class="section">
+    <p class="eyebrow">Impact</p>
+    <h2>Lead with how well the scoring aims, not with a claim about the world.</h2>
+    <div class="stack col">
+      <p class="lede">The demo runs on seeded history and says so. Which means "failure rate went down" is not a claim seeded data can support — a judge would be right to push back.</p>
+      <div class="card card-accent">
+        <p style="font-family:var(--display);font-size:19px;line-height:1.4;color:var(--ink)">We slowed down X% of changes, and that caught Y% of the failures.</p>
+        <p style="font-size:14.5px">That is a property of the policy itself, not an assertion about the world, so seeded history can demonstrate it honestly. Reported against a control group of changes deliberately left unscored.</p>
+      </div>
+      <p>Alongside it, the number that makes the point viscerally: <strong>how many requests were served the broken version before the rollback fired</strong>, with SafeLane and without. That is the real argument — a fast rollout hurts more people before the brake catches, and some failures never trip a simple error check at all.</p>
+      <p style="font-size:14.5px;color:var(--ink-3)">DORA metrics — change failure rate and mean time to recovery, split by tier — stay as the secondary view, since the evaluation criteria name them.</p>
+    </div>
+  </section>
+
+  <section class="section">
+    <p class="eyebrow">Prior art — name these first, unprompted</p>
+    <h2>Five neighbours, and exactly where each one stops.</h2>
+    <p class="lede col">A pitch that names its own nearest neighbours cannot be accused of not having looked. Every one of these turns risk into a <em>path choice</em> — approve or hold, gate or don't. None turns it into traffic weights, step counts and thresholds.</p>
+    <div class="scroller">
+      <table>
+        <thead>
+          <tr><th>Who</th><th>What they do</th><th>Where they stop</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="key">Meta<br/><span class="tag tag-flat">Diff Risk Score</span></td>
+            <td>Scores every change before it ships, and uses the score to pick one of four release-gating levels — in production.</td>
+            <td>Picks <em>whether and when</em> to gate. Not how much exposure. And it only exists inside Meta.</td>
+          </tr>
+          <tr>
+            <td class="key">ServiceNow<br/><span class="tag tag-warn">commercial</span></td>
+            <td>Machine-learned change-risk prediction. Auto-approves low-risk changes, routes risky ones to manual sign-off.</td>
+            <td>The approval layer — who signs off, how many gates. It never touches traffic.</td>
+          </tr>
+          <tr>
+            <td class="key">Digital.ai Release<br/><span class="tag tag-warn">commercial</span></td>
+            <td>Sells "a fast-lane for low-risk software release changes" — their words, nearly our tagline.</td>
+            <td>Fewer approval gates. Nothing found says it alters rollout mechanics — say the marketing is ambiguous, don't assert either way.</td>
+          </tr>
+          <tr>
+            <td class="key">Akuity / Kargo<br/><span class="tag tag-fail">re-check</span></td>
+            <td>Scores risk from the diff plus deployment history, inside a GitOps promotion tool. Published days before we started.</td>
+            <td>Advisory. It tells a human. It does not change canary weights or analysis strictness. <strong>The row most likely to move before the assessment.</strong></td>
+          </tr>
+          <tr>
+            <td class="key">DeployWhisper<br/><span class="tag tag-pass">MIT</span></td>
+            <td>The best open-source pre-deploy scorer: blast radius, incident matching, rollback complexity, evidence trails.</td>
+            <td>Refuses to act, by design — exits zero whatever the verdict, no rollout code at all. Literally the other half of SafeLane.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="grid-2">
+      <div class="card">
+        <h3>"Meta published this. Dell patented it. What's left?"</h3>
+        <p style="font-size:14.5px">Granularity and availability. They choose whether to gate; we choose how much exposure — weights, steps, pauses, thresholds. And none of it is usable without a big company's internal platform. <strong>Don't claim you invented the idea.</strong> Claim the first open, Argo-native implementation, and cite Meta yourself.</p>
+      </div>
+      <div class="card">
+        <h3>"Isn't this a YAML generator plus a policy file?"</h3>
+        <p style="font-size:14.5px">Mechanically, yes. That is exactly what it is. The value is one policy artifact instead of fifty hand-tuned canary files, plus a back-test that tells you when the policy is wrong. <strong>Conceding this is stronger than denying it.</strong></p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section">
+    <p class="eyebrow">Where we stand</p>
+    <h2>Honest odds, and the one thing that decides them.</h2>
+    <div class="scroller">
+      <table>
+        <thead><tr><th>Outcome</th><th class="num">Chance</th></tr></thead>
+        <tbody>
+          <tr><td>Core demo live — real cluster, real Argo, real error-rate-driven auto-rollback, scorer wired end to end</td><td class="num"><span class="tag tag-pass">72%</span></td></tr>
+          <tr><td>…plus the risk panel showing both lanes and the aim metric</td><td class="num"><span class="tag tag-warn">55%</span></td></tr>
+          <tr><td>…plus genuine fine-grained traffic weights instead of pod counts</td><td class="num"><span class="tag tag-fail">25%</span></td></tr>
+          <tr><td>A recorded backup of the full flow, ready to play if live fails</td><td class="num"><span class="tag tag-pass">90%</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="card card-fail col">
+      <h3>The single largest unknown</h3>
+      <p><strong>Nobody has yet run kind and Argo Rollouts on Ahmed's machine.</strong> Until that happens, every number above is soft. It is the first task, and it is the go/no-go for the whole plan.</p>
+    </div>
+    <div class="stack col">
+      <h3>Also open</h3>
+      <ul>
+        <li>Whether to attempt real traffic weights at all — decided together once the cluster is up, not before.</li>
+        <li><code>make</code> is not installed on Andrew's machine, so <code>make cluster</code> is not currently a command anyone can run.</li>
+        <li>Team names and roles still missing from the abstract.</li>
+        <li>A third-party notices file plus per-file headers for anything borrowed from DeployWhisper — required by MIT <em>and</em> by the hackathon's attribution rule.</li>
+        <li>Re-check Akuity midway through the build. If they ship actuation first, the honest line is: "they proved the demand; ours is open source and parameterises the rollout, not just the promotion."</li>
+        <li>The exact assessment slot is still unannounced. If it lands at the very start of the window, the risk panel gets cut immediately.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="section">
+    <p class="eyebrow">Risk</p>
+    <h2>What breaks, and what we already decided to do about it.</h2>
+    <div class="stack">
+      <div class="card card-fail">
+        <h3>An empty metrics query — the most likely on-stage failure</h3>
+        <p style="font-size:14.5px">If Prometheus returns nothing, Argo treats it as <em>a broken monitoring setup</em>, not as a failing app. The rollout still stops, but for the wrong reason, and the screen reads <em>"no data returned from the metric provider."</em> A demo that technically worked, showing a message that says your monitoring is broken.</p>
+        <p style="font-size:14.5px">Three fresh-cluster conditions make it likely: Prometheus scrapes once a minute by default, the error-rate maths needs at least two samples, and the canary-identifying label must be relabelled or the query is <em>always</em> empty.</p>
+        <p style="font-size:14.5px"><strong>Mitigations, all mandatory:</strong> scrape every 5 seconds, make an empty result fall back to zero, guard on result length, relabel the canary label, and run a check script during setup that <em>fails loudly</em> if metrics aren't flowing. One free win: configure only the failure condition and never the success condition — that makes the indefinite "inconclusive" hang structurally impossible.</p>
+        <p style="font-size:14.5px;color:var(--ink-3)"><strong>Cut-line:</strong> if error-rate analysis isn't reliably green by the end of phase 1, abort on pod readiness instead. You lose "we watch the error rate" and keep "it rolls back automatically" — and it deletes the largest technical surface in the project.</p>
+      </div>
+      <div class="card card-warn">
+        <h3>The rollback that un-happens</h3>
+        <p style="font-size:14.5px">Already designed out: render and apply, never patch. Worth re-reading before the demo, because it is the kind of shortcut that looks harmless while writing a script at 1am.</p>
+      </div>
+      <div class="card card-warn">
+        <h3>Someone in the room knows about the pod-count approximation</h3>
+        <p style="font-size:14.5px">Roughly even odds a judge names it. Costs nothing if you say it first, and makes every other claim suspect if they say it first. It is in the deck, in the abstract, and in the contract.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section">
+    <p class="eyebrow">Cut list — decided now, not on the day</p>
+    <h2>If we fall behind, this is the order things go.</h2>
+    <p class="lede col">The point of writing it now is to never re-litigate it while tired. Start at the top and keep cutting until the remaining work fits the days left.</p>
+    <div class="scroller">
+      <table>
+        <thead><tr><th class="num">#</th><th>Cut</th><th class="num">Frees</th><th>What it costs</th></tr></thead>
+        <tbody>
+          <tr><td class="num">1</td><td class="key">Real weighted traffic</td><td class="num">2 days</td><td>Nothing you had. Removes a claim that was never true.</td></tr>
+          <tr><td class="num">2</td><td class="key">The pull-request comment</td><td class="num">½ day</td><td>Run the scorer in a terminal instead. Minor polish.</td></tr>
+          <tr><td class="num">3</td><td class="key">The live risk panel</td><td class="num">1 day</td><td>Becomes a static chart in the slides; Argo's own dashboard covers the live view.</td></tr>
+          <tr><td class="num">4</td><td class="key">Incident memory as a signal</td><td class="num">1 day</td><td>Weakens the memory story — which we already concede is a cold-start problem.</td></tr>
+          <tr><td class="num">5</td><td class="key">DORA metrics</td><td class="num">½ day</td><td>Real cost: the criteria name DORA. Show raw outcome counts instead.</td></tr>
+          <tr><td class="num">6</td><td class="key">Error-rate analysis</td><td class="num">1½ days</td><td>Abort on pod readiness. Painful, but the largest risk reduction available.</td></tr>
+          <tr><td class="num">7</td><td class="key">The trivial-change lane</td><td class="num">½ day</td><td>Loses the contrast, which is the whole idea. Near-last resort.</td></tr>
+          <tr><td class="num">8</td><td class="key">The live demo itself</td><td class="num">all of it</td><td>Present entirely from the recording. Technical implementation drops to an assertion.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="card card-accent col">
+      <h3>Never cut, at any point</h3>
+      <p style="font-size:14.5px">The decision file and the policy — that is the idea. The automatic rollback — that is the proof. The backup recording — that is the insurance. The honest-limitations slide — that is the difference between a demo and a claim.</p>
+    </div>
+  </section>
+
+  <section class="section">
+    <p class="eyebrow">Deliberately not building</p>
+    <h2>The out-of-scope list, so nobody quietly re-adds it.</h2>
+    <div class="stack col">
+      <ul>
+        <li>Any service mesh — Istio, Linkerd, ambient mode. If fine-grained weights are needed it is ingress-nginx or nothing.</li>
+        <li>More than one Rollout object, and more than one demo service.</li>
+        <li>Argo CD. This is Argo <em>Rollouts</em> — a different product, and only one of them is needed.</li>
+        <li>Multi-cluster, authentication, real incident ingestion, infrastructure-as-code parsing.</li>
+        <li>Any machine learning or trained model. The policy is deterministic and versioned.</li>
+        <li>Any LLM in the decision path. Turn every model off and SafeLane behaves identically.</li>
+        <li>The back-test loop stays a stretch goal. Until it exists it is a seeded chart, and we say so.</li>
+      </ul>
+      <p style="font-size:14.5px;color:var(--ink-3)">One idea worth saying and not building: deriving the canary size from the error budget rather than a fixed number. It is the strongest possible answer to "who picked your thresholds?" — and it needs plumbing that does not fit. Say it as the next step; spend zero days on it.</p>
+    </div>
+  </section>
+
+  <section class="section">
+    <p class="eyebrow">References</p>
+    <h2>Everything load-bearing, with a source.</h2>
+
+    <div class="grid-2">
+      <div class="refgroup">
+        <h3>Argo Rollouts — the mechanism</h3>
+        <ul class="reflist">
+          <li><a href="https://argo-rollouts.readthedocs.io/en/stable/features/canary/">Canary strategy</a> <span class="note">— weight is approximated by replica count without traffic routing</span></li>
+          <li><a href="https://github.com/argoproj/argo-rollouts/blob/master/utils/replicaset/canary.go">utils/replicaset/canary.go</a> <span class="note">— the actual approximation code</span></li>
+          <li><a href="https://argo-rollouts.readthedocs.io/en/stable/features/analysis/">Analysis and progressive delivery</a></li>
+          <li><a href="https://argo-rollouts.readthedocs.io/en/stable/analysis/prometheus/">Prometheus provider</a> <span class="note">— plain HTTP, no operator needed</span></li>
+          <li><a href="https://argo-rollouts.readthedocs.io/en/stable/features/specification/">Rollout specification</a> <span class="note">— steps are skipped on initial deploy</span></li>
+          <li><a href="https://argo-rollouts.readthedocs.io/en/stable/dashboard/">Built-in dashboard</a> <span class="note">— interactive, free, on port 3100</span></li>
+          <li><a href="https://argo-rollouts.readthedocs.io/en/stable/installation/">Installation</a> <span class="note">— install.yaml includes the CRDs; namespace-install.yaml does not</span></li>
+          <li><a href="https://argo-rollouts.readthedocs.io/en/stable/features/traffic-management/nginx/">NGINX traffic management</a> <span class="note">— the path to real weights</span></li>
+          <li><a href="https://argo-rollouts.readthedocs.io/en/stable/features/scaledown-aborted-rs/">Scale-down of aborted ReplicaSets</a></li>
+        </ul>
+      </div>
+
+      <div class="refgroup">
+        <h3>Prior art</h3>
+        <ul class="reflist">
+          <li><a href="https://arxiv.org/abs/2410.06351">Meta — Diff Risk Score</a> <span class="note">— arXiv 2410.06351, the strongest counter-example</span></li>
+          <li><a href="https://arxiv.org/abs/2605.30208">Meta — RADAR</a> <span class="note">— risk-calibrated automation, and the control-group framing worth copying</span></li>
+          <li><a href="https://patents.google.com/patent/US10789057B2/en">US10789057B2 (Dell)</a> <span class="note">— "select a deployment strategy … based on the risk score"</span></li>
+          <li><a href="https://www.servicenow.com/products/devops-change-velocity.html">ServiceNow DevOps Change Velocity</a></li>
+          <li><a href="https://digital.ai/products/release/">Digital.ai Release</a> <span class="note">— owns the "fast lane" phrasing</span></li>
+          <li><a href="https://akuity.io/blog/kargo-gitops-promotion-layer">Akuity — Kargo Promotion Advisor</a> <span class="note">— the row to re-check</span></li>
+          <li><a href="https://github.com/deploywhisper/deploywhisper">DeployWhisper</a> <span class="note">— MIT; the scorer with no actuator</span></li>
+          <li><a href="https://docs.gitstream.cm/">gitStream</a> <span class="note">— same idea, wrong half of the pipeline</span></li>
+          <li><a href="https://www.opsmx.com/deployment-firewall/">OpsMx Deployment Firewall</a> <span class="note">— blocks at a gate; score comes from telemetry, not the diff</span></li>
+        </ul>
+      </div>
+
+      <div class="refgroup">
+        <h3>Practice and framing</h3>
+        <ul class="reflist">
+          <li><a href="https://sre.google/workbook/canarying-releases/">Google SRE Workbook — Canarying Releases</a> <span class="note">— canary cost is proportional to traffic exposed to defects</span></li>
+          <li><a href="https://cloud.google.com/blog/products/gcp/introducing-kayenta-an-open-automated-canary-analysis-tool-from-google-and-netflix">Kayenta</a> <span class="note">— automated canary analysis, runtime judgement</span></li>
+          <li><a href="https://analystprep.com/study-notes/frm/part-2/market-risk-measurement-and-management/backtesting-var/">Kupiec proportion-of-failures test</a> <span class="note">— the formal way to reject a risk model for being too conservative</span></li>
+        </ul>
+      </div>
+
+      <div class="refgroup">
+        <h3>Cluster and metrics</h3>
+        <ul class="reflist">
+          <li><a href="https://prometheus.io/docs/prometheus/latest/configuration/configuration/">Prometheus configuration</a> <span class="note">— default scrape interval is one minute, and that is a trap</span></li>
+          <li><a href="https://kind.sigs.k8s.io/docs/user/ingress/">kind — ingress</a> <span class="note">— the documented kind path has been dropped</span></li>
+          <li><a href="https://kubernetes.github.io/ingress-nginx/deploy/">ingress-nginx — deploy</a> <span class="note">— the kind manifest still ships even though it is unlisted</span></li>
+          <li><a href="https://kubernetes.github.io/ingress-nginx/user-guide/nginx-configuration/annotations/">ingress-nginx annotations</a> <span class="note">— maximum one canary ingress per rule</span></li>
+          <li><a href="https://kubernetes.io/docs/reference/kubectl/generated/kubectl_patch/">kubectl patch</a> <span class="note">— why patching a CRD is the wrong tool here</span></li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <p>SafeLane · Track 1, Automate Deployment &amp; Operations · DevOpsDays Cairo 2026 Hackathon.</p>
+    <p>Internal working brief — a snapshot, not a live status board. Odds, gates and cut lines are honest working estimates, not promises. Source documents: <code>plan.md</code>, <code>contract.md</code>, <code>detailed-plan.md</code>, <code>research/prior-art.md</code>, <code>safelane-qa.md</code>.</p>
+  </footer>
+
+</div>
