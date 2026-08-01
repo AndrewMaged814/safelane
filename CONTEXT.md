@@ -32,6 +32,22 @@ _Avoid_: AI verdict
 The release behavior selected from the risk tier, such as a fast release or a slower guarded release.
 _Avoid_: Risk score
 
+**Rollout profile**:
+A named, versioned release pattern containing exposure stages and health checkpoints. A risk tier selects the minimum rollout profile a change must use.
+_Avoid_: Lane settings, deployment preset
+
+**Health checkpoint**:
+A period when rollout exposure is held steady while service health is measured before more users are exposed.
+_Avoid_: Pause, sleep
+
+**Service health limit**:
+The service-owned boundary between acceptable and unhealthy behavior during rollout. It does not become weaker for a lower-risk change.
+_Avoid_: Risk threshold, profile threshold
+
+**Profile override**:
+A deliberate choice to use a more careful rollout profile than the risk tier requires. An override can never make rollout faster.
+_Avoid_: Tier override, risk override
+
 **Fast-lane eligibility**:
 Positive proof that a change is small, fully understood, and has no verified danger. The absence of an AI risk finding alone is not enough.
 _Avoid_: No risks found, AI says safe

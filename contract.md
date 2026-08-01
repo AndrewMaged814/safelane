@@ -1,6 +1,6 @@
 # SafeLane — the interface between the two halves
 
-**v2, revised 2026-07-31** after verification against Argo Rollouts source (see `detailed-plan.md` §1.3).
+**v2, revised 2026-08-01** after verification against Argo Rollouts source and the Phase 1 risk-policy decisions.
 Andrew's half writes `decision.json`. Ahmed's half reads it and nothing else.
 Neither person needs the other's code to make progress. Changes need both people to agree.
 
@@ -29,29 +29,32 @@ While Ahmed's cluster doesn't exist yet, Andrew validates output against the sch
     "shipping_at": "2026-08-20T21:40:00+03:00"
   },
   "risk": {
-    "score": 72,
+    "score": 80,
     "tier": "risky",
     "confidence": "high",
     "reasons": [
-      "Touches payouts-api, which has 3 incidents in the last 90 days",
-      "Modifies retry/timeout configuration (config change, not code)",
-      "Hard to reverse: changes persisted state, so rollback is not just a redeploy",
-      "Shipping Thursday night, going into the Friday-Saturday weekend"
+      "AI finding: retry limit was removed in config/retries.yaml.",
+      "Incident connection: INC-003 identifies unlimited retries as the earlier trigger.",
+      "Impact: payouts-api has 3 downstream dependents."
     ]
   },
   "lane": {
-    "name": "guarded",
+    "name": "strict",
+    "profile_source": "built_in",
     "traffic_router": "none",
     "replicas": 5,
     "steps": [
       { "set_weight": 20, "exposure_pods": 1, "pause_seconds": 30 },
       { "set_weight": 40, "exposure_pods": 2, "pause_seconds": 30 },
-      { "set_weight": 60, "exposure_pods": 3, "pause_seconds": 30 }
+      { "set_weight": 60, "exposure_pods": 3, "pause_seconds": 30 },
+      { "set_weight": 100, "exposure_pods": 5, "pause_seconds": 0 }
     ],
     "analysis": {
-      "error_rate_threshold": 0.01,
+      "error_rate_threshold": 0.05,
       "interval_seconds": 10,
-      "failure_limit": 1
+      "measurement_count": 3,
+      "failure_limit": 1,
+      "consecutive_error_limit": 2
     }
   }
 }
@@ -60,10 +63,11 @@ While Ahmed's cluster doesn't exist yet, Andrew validates output against the sch
 ### Field rules
 
 - **`tier`** — exactly one of `safe` | `guarded` | `risky`. Nothing else, ever.
-- **`lane.name`** — `fast` | `guarded`. `safe` tier → `fast`; `guarded` and `risky` → `guarded`.
+- **`lane.name`** — the resolved rollout profile. Built-ins are `fast` | `guarded` | `strict`; custom names are allowed after policy validation.
+- **`profile_source`** — `built_in` | `custom` | `ai_assisted`. AI-assisted still means human-approved and normal-code validated.
 - **`score`** — integer 0–100. Advisory to humans; **the tier is what drives behaviour.** Never branch on the raw score.
 - **`reasons`** — 1 to 4 plain-English strings, each readable aloud on stage. This is the demo's money shot; a reason that needs explaining is a bug.
-- **`confidence`** — `high` | `low`. **`low` always routes to the guarded lane, whatever the score says.** Default-safe posture; must be visible in the code, not just the pitch.
+- **`confidence`** — `high` | `low`. **`low` requires at least the guarded profile, whatever the score says.** Default-safe posture; must be visible in the code, not just the pitch.
 - **`policy_version`** — bump whenever thresholds change, so a past decision stays explainable.
 - **`traffic_router`** — `none` | `nginx`. Documents what the weight numbers *mean*, so nobody has to guess. With `none`, weight is approximated by replica count — see below.
 - **`exposure_pods`** — the honest number when `traffic_router: none`. Always state it alongside `set_weight` so the two can never drift.
@@ -79,34 +83,30 @@ weight using replica counts (`utils/replicaset/canary.go`). At `replicas: 5`, we
 So the vocabulary of legal `set_weight` values at 5 replicas is **{20, 40, 60, 80, 100}** and nothing
 else. Any other number is a lie that a judge can catch with `kubectl get pods`.
 
-### Tier → lane, the whole policy
+### Tier → profile, the demo defaults
 
 At `replicas: 5`, `traffic_router: none`:
 
-| tier | lane | steps (weight → pods) | error-rate threshold |
+| tier | profile | steps (weight → pods) | health behavior |
 |---|---|---|---|
-| `safe` | fast | 100% immediately | none (Argo health only) |
-| `guarded` | guarded | 40% (2 pods) → 100% | 3% |
-| `risky` | guarded | 20% (1) → 40% (2) → 60% (3) | 1% |
+| `safe` | fast | 100% (`all`) immediately | Kubernetes readiness only |
+| `guarded` | guarded | 40% (2 pods) → checkpoint → 100% (`all`) | service limit |
+| `risky` | strict | 20% (1) → checkpoint → 40% (2) → checkpoint → 60% (3) → checkpoint → 100% (`all`) | service limit |
 
-Analysis for both guarded tiers: `interval: 10s`, `failureLimit: 1`. That is ~30–45 s to a visible
-rollback, which is right for a live demo.
+The demo service limit is a configurable 5% maximum error rate. Each checkpoint lasts about 30
+seconds and reads Prometheus every 10 seconds. `failureLimit: 1` rolls back on the second unhealthy
+or empty reading during a checkpoint. `consecutiveErrorLimit: 2` rolls back on the second
+consecutive Prometheus connection or query error. Missing data is never considered healthy.
 
-**Known honesty limit:** if the injected fault fails ~100% of canary requests, the 1% and 3%
-thresholds trip identically. The tier difference is then real in the file but invisible on screen.
-Do **not** claim on stage that the threshold difference is demonstrated. Making it visible needs a
-~2% fault rate — that is a stretch beat, not baseline.
+These values are versioned defaults in `policy.yaml`, not hardcoded constants or universal
+recommendations. Full profile behavior and custom-profile validation are defined in
+[`docs/rollout-profiles.md`](docs/rollout-profiles.md).
 
 ### Scoring inputs (Andrew's side)
 
-Six signals, all deterministic, no LLM:
-
-1. Size — lines and files changed
-2. Services touched, and how many services depend on them (blast radius)
-3. Config change vs code change
-4. Incident history on the touched paths (seeded, and the seed file says so)
-5. **Reversibility** — is this a plain redeploy to undo, or does it touch persisted state / migrations? Hard-to-undo earns a slow lane regardless of size.
-6. **Timing** — shipping into a Friday–Saturday weekend, or late at night, raises the tier.
+Risk inputs, bounded AI findings, evidence requirements, and tier effects are defined in
+[`docs/risk-signals.md`](docs/risk-signals.md) and
+[`docs/adr/0001-bound-ai-to-risk-findings.md`](docs/adr/0001-bound-ai-to-risk-findings.md).
 
 ## Handoff mechanics
 
@@ -120,4 +120,4 @@ Six signals, all deterministic, no LLM:
 - **A warm-up revision is required.** Argo skips canary steps on a service's very first deploy and
   goes straight to 100%. Burn one throwaway revision during setup, off-camera.
 - **Failure mode:** no `decision.json`, or one that fails schema validation → treat as `tier: risky`,
-  `confidence: low`, guarded lane. Absence of a decision is never permission to go fast.
+  `confidence: low`, strict profile. Absence of a decision is never permission to go fast.
