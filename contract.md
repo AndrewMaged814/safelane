@@ -1,6 +1,6 @@
 # SafeLane — the interface between the two halves
 
-**v2, revised 2026-08-01** after verification against Argo Rollouts source and the Phase 1 risk-policy decisions.
+**v3, revised 2026-08-01** after verification against Argo Rollouts source and the Phase 1 risk-policy and Studio decisions.
 Andrew's half writes `decision.json`. Ahmed's half reads it and nothing else.
 Neither person needs the other's code to make progress. Changes need both people to agree.
 
@@ -32,6 +32,14 @@ While Ahmed's cluster doesn't exist yet, Andrew validates output against the sch
     "score": 80,
     "tier": "risky",
     "confidence": "high",
+    "main_risk": {
+      "category": "availability",
+      "title": "Retry protection was removed",
+      "explanation": "Without a retry limit, workers may exhaust the connection pool during an upstream failure. The same behavior caused incident INC-003.",
+      "source": "ai",
+      "evidence_verified": true,
+      "evidence": ["config/retries.yaml:18", "INC-003"]
+    },
     "reasons": [
       "AI finding: retry limit was removed in config/retries.yaml.",
       "Incident connection: INC-003 identifies unlimited retries as the earlier trigger.",
@@ -66,7 +74,8 @@ While Ahmed's cluster doesn't exist yet, Andrew validates output against the sch
 - **`lane.name`** — the resolved rollout profile. Built-ins are `fast` | `guarded` | `strict`; custom names are allowed after policy validation.
 - **`profile_source`** — `built_in` | `custom` | `ai_assisted`. AI-assisted still means human-approved and normal-code validated.
 - **`score`** — integer 0–100. Advisory to humans; **the tier is what drives behaviour.** Never branch on the raw score.
-- **`reasons`** — 1 to 4 plain-English strings, each readable aloud on stage. This is the demo's money shot; a reason that needs explaining is a bug.
+- **`main_risk`** — Studio's first explanation: the strongest verified failure scenario after considering the whole assessment. It is not a predicted incident root cause. Categories are `availability` | `data` | `security` | `compatibility` | `performance`; `source` is `ai` | `rule`. An AI-sourced Main risk is displayed only after normal code verifies every cited evidence reference.
+- **`reasons`** — 1 to 4 supporting plain-English strings, each readable aloud on stage. Studio collapses these by default so they do not compete with `main_risk`.
 - **`confidence`** — `high` | `low`. **`low` requires at least the guarded profile, whatever the score says.** Default-safe posture; must be visible in the code, not just the pitch.
 - **`policy_version`** — bump whenever thresholds change, so a past decision stays explainable.
 - **`traffic_router`** — `none` | `nginx`. Documents what the weight numbers *mean*, so nobody has to guess. With `none`, weight is approximated by replica count — see below.

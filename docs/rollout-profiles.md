@@ -69,7 +69,7 @@ Saving any profile change requires whole-policy validation, a preview of the YAM
 
 ## SafeLane Studio requirement
 
-Phase 1 includes one small local SafeLane Studio. It must:
+Phase 1 includes one small local SafeLane Studio. Its approved information architecture and interaction contract are defined in [`docs/safelane-studio.md`](safelane-studio.md). It must:
 
 - show the risk tier, plain reasons, AI findings, and exact evidence;
 - show the selected profile as pods and health checkpoints;

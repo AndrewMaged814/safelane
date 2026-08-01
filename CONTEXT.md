@@ -28,6 +28,18 @@ _Avoid_: Model confidence, probability
 The final `safe`, `guarded`, or `risky` policy result after failure propensity and every safety floor are considered.
 _Avoid_: AI verdict
 
+**Risk category**:
+A fixed label for the kind of harm a Main risk describes: availability, data, security, compatibility, or performance. It describes what could go wrong, not the type of file changed.
+_Avoid_: File category, AI tag
+
+**Main risk**:
+The strongest verified failure scenario shown first in an assessment. It is selected after considering the whole assessment, but it is not a claim that SafeLane knows the root cause of a failure that has not happened.
+_Avoid_: Root cause, AI conclusion
+
+**Assessment status**:
+Whether the latest version of a pull request still needs rollout approval or has been resolved. A new push always invalidates an older approval.
+_Avoid_: Deployment status, rollout status
+
 **Rollout lane**:
 The release behavior selected from the risk tier, such as a fast release or a slower guarded release.
 _Avoid_: Risk score
