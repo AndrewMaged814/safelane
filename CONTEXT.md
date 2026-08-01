@@ -31,3 +31,19 @@ _Avoid_: AI verdict
 **Rollout lane**:
 The release behavior selected from the risk tier, such as a fast release or a slower guarded release.
 _Avoid_: Risk score
+
+**Fast-lane eligibility**:
+Positive proof that a change is small, fully understood, and has no verified danger. The absence of an AI risk finding alone is not enough.
+_Avoid_: No risks found, AI says safe
+
+**Incident candidate**:
+A recent incident from an affected service that may be compared with a new change. Being from the same service does not make it connected and does not change the risk tier by itself.
+_Avoid_: Incident match, related incident
+
+**Incident connection**:
+A verified relationship between a new change and a past incident, backed by exact evidence from both. A shared service alone is not a connection.
+_Avoid_: Similar incident, AI memory, same-service match
+
+**Supported shipping window**:
+A time when the team has explicitly planned enough support coverage to watch and respond to a release.
+_Avoid_: Business hours, safe time
