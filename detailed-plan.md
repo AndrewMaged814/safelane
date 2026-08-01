@@ -9,6 +9,14 @@ as the interface, but **two fields in that contract are not achievable as writte
 Every technical claim below is either sourced to an official doc / upstream source file
 (URL given) or explicitly marked **unverified**.
 
+> **Risk-engine update — 2026-08-01:** The risk-scoring, AI, incident-matching, and code-reuse
+> instructions in this 2026-07-31 plan are superseded by
+> [`docs/risk-signals.md`](docs/risk-signals.md),
+> [`docs/adr/0001-bound-ai-to-risk-findings.md`](docs/adr/0001-bound-ai-to-risk-findings.md), and
+> [`research/phase1-reuse-boundary.md`](research/phase1-reuse-boundary.md). Phase 1 uses bounded
+> local AI findings plus fixed policy rules and copies no upstream source code. The cluster, Argo
+> Rollouts, and Prometheus research in this document remains useful.
+
 > ### Four decisions due Sunday 2 August. Nothing else matters until these are made.
 > 1. **Delete "1%" everywhere.** It is not achievable on kind without a traffic router (§1.1
 >    FINDING 1). Adopt pod-count framing and the revised tier→lane table (§1.3).
@@ -396,6 +404,12 @@ sequenceDiagram
 ---
 
 ## 3. Reuse map — DeployWhisper and friends
+
+> **Historical research only:** the `LIFT`, copied-line, attribution-file, and 20–25% reuse
+> instructions below are not the Phase 1 implementation plan. The later source-level review in
+> [`research/phase1-reuse-boundary.md`](research/phase1-reuse-boundary.md) found that adapting this
+> code would cost more than writing SafeLane's small versions. Reuse the credited design shapes;
+> do not copy upstream source or sample text.
 
 **Source of truth read for this section:** local clone at
 `C:\Andrew\personal\dev\hackathon\devops\deploywhisper`, remote

@@ -84,9 +84,9 @@ The back-test loop stays **stretch**; until it exists it is a seeded chart and w
 - [ ] `make` is not installed on Andrew's machine — so `make cluster` is not currently a command
       anyone can run. Install it or use plain scripts.
 - [ ] Names and roles into `safelane-abstract.md`.
-- [ ] `THIRD_PARTY_NOTICES.md` plus per-file headers for anything copied from DeployWhisper
-      (MIT). Required by the licence *and* by the hackathon's "proper attributions" rule.
-      Exact wording in `detailed-plan.md` §3.4.
+- [ ] Credit DeployWhisper as design inspiration for the service graph, incident-pack shape, and
+      missing-context rule. Phase 1 copies no upstream code, so no notice file is currently needed.
+      If that boundary changes, add the full MIT notice and per-file provenance before committing.
 - [ ] **Sun 16 Aug: re-check Akuity / Kargo.** Their Promotion Advisor (blog dated 29 Jul 2026) already
       scores risk from the diff plus deployment history, advisory-only today. This is the prior-art row
       most likely to move before the assessment.
