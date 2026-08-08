@@ -117,17 +117,13 @@
   }
 
   .wordmark {
-    font-family: var(--display);
-    font-size: clamp(38px, 6vw, 60px);
-    font-weight: 700;
-    letter-spacing: -0.028em;
-    line-height: 1;
     margin: 0;
   }
 
-  .wordmark em {
-    font-style: normal;
-    color: var(--accent);
+  .wordmark img {
+    display: block;
+    width: min(620px, 100%);
+    height: auto;
   }
 
   .claim {
@@ -504,7 +500,7 @@
 <div class="page">
 
   <header class="masthead">
-    <h1 class="wordmark">Safe<em>Lane</em></h1>
+    <h1 class="wordmark"><img src="assets/brand/safelane-logo.svg" alt="SafeLane"></h1>
     <p class="claim">Every change gets the rollout it deserves.</p>
     <p class="subclaim">The first open-source tool that compiles a risk score into real rollout parameters for Argo&nbsp;Rollouts. Score the change before it ships; let the score decide how carefully it ships.</p>
     <div class="chiprow">
