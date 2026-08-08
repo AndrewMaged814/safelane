@@ -8,6 +8,14 @@ SafeLane examines a software change and chooses how carefully it should be relea
 Facts SafeLane can point to in the code change, repository history, service map, or incident records.
 _Avoid_: AI opinion
 
+**Change assessment**:
+The evidence-backed evaluation of one exact pull-request version under one policy version. It contains SafeLane's findings and policy result but is not permission to deploy.
+_Avoid_: Risk report, deployment decision
+
+**Rollout decision**:
+The automatic or human-approved selection of a rollout profile for one exact change assessment. A new push invalidates it, and recording it does not itself deploy anything.
+_Avoid_: Assessment, deployment status
+
 **AI risk finding**:
 A warning found by AI while reading a change, backed by the exact file or code that caused it. An AI risk finding does not choose the rollout by itself.
 _Avoid_: AI score, AI verdict
@@ -37,7 +45,7 @@ The strongest verified failure scenario shown first in an assessment. It is sele
 _Avoid_: Root cause, AI conclusion
 
 **Assessment status**:
-Whether the latest version of a pull request still needs rollout approval or has been resolved. A new push always invalidates an older approval.
+Whether the latest change assessment still needs rollout approval or has been resolved. A new push always invalidates an older approval.
 _Avoid_: Deployment status, rollout status
 
 **Rollout lane**:

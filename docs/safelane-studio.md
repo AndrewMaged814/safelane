@@ -80,7 +80,7 @@ Local Ollama may propose the category, title, explanation, and evidence referenc
 
 The UI label is **AI finding · evidence verified** when both facts are true. Normal verified results do not show a confidence score. Studio shows a warning only when evidence is incomplete or the assessment fell back to rules.
 
-The approved prototype displays one Main risk. The engine evaluation will decide whether real changes require support for more than one independently serious Main risk.
+Phase 1 stores every verified finding and connection in the change assessment but displays exactly one Main risk. A `safe` assessment has no Main risk; its resolved view shows the positive proof that established fast-lane eligibility instead of inventing a “no risk found” scenario.
 
 ## Profiles page
 
@@ -116,5 +116,4 @@ The prototype keeps state in browser memory and never writes policy files or dep
 - a database;
 - historical analytics;
 - drag-and-drop rollout editing;
-- AI chat or multiple generated alternatives; and
-- deciding the final maximum number of Main risks before engine evaluation.
+- AI chat or multiple generated alternatives.

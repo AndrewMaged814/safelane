@@ -5,6 +5,18 @@
 
 SafeLane Phase 1 uses a small set of facts plus four bounded AI finding types. AI finds exact dangers in the change. Fixed policy rules choose the final risk tier. A rule may only keep or raise the tier; no reassuring signal can cancel a danger.
 
+## Failure propensity band
+
+Normal code assigns one coarse failure-propensity band before applying safety floors:
+
+- **Low** only when the change is small, exactly one known service is directly changed, and every changed path is recognized and mapped.
+- **High** when the change is large or directly changes at least three services.
+- **Medium** in every other case, including two changed services or a small change with an unknown path.
+
+The bands project to the schema-v2 display values `20`, `50`, and `80`. These are fixed labels, not probabilities or continuous scores. They establish the baseline `safe`, `guarded`, or `risky` tier respectively; fast-lane eligibility and every safety floor are then applied, so the final tier can only stay the same or become more careful.
+
+Incident candidates and connections, downstream impact, criticality, shipping support, evidence completeness, and AI findings do not inflate failure propensity. They remain separate facts because they constrain acceptable rollout behavior for different reasons.
+
 ## Fast lane requires positive proof
 
 A change is `safe` and eligible for the fast lane only when all of these are true:
@@ -23,9 +35,9 @@ The absence of an AI warning is not enough. Missing or uncertain evidence preven
 
 ### Change size
 
-- **Small:** at most 2 files and at most 50 changed lines. It may be `safe` only if every other fast-lane check passes.
-- **Medium:** larger than small but not large. It is at least `guarded`.
-- **Large:** at least 10 files or at least 500 changed lines. It is `risky`.
+- **Small:** at most 2 files and at most 50 changed lines. It can contribute to low propensity but may be `safe` only if every other fast-lane check passes.
+- **Medium:** larger than small but not large. It produces at least medium propensity.
+- **Large:** at least 10 files or at least 500 changed lines. It produces high propensity.
 
 Small never means safe by itself. These are configurable demo-policy defaults, not scientifically learned thresholds.
 
