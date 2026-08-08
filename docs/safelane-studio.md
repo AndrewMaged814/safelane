@@ -65,14 +65,7 @@ Exact evidence remains available but is collapsed by default so it does not comp
 
 The Main risk is the strongest verified failure scenario found after considering the whole assessment. It is not a claim that SafeLane knows the root cause of a failure that has not happened.
 
-For Phase 1, a Main risk contains:
-
-- `category` — one of `availability`, `data`, `security`, `compatibility`, or `performance`;
-- `title` — a short 5–10 word description used in the Changes list;
-- `explanation` — one or two plain-language sentences used on the assessment page;
-- `source` — `ai` or `rule`;
-- `evidence_verified` — whether normal code verified every cited source; and
-- `evidence` — exact changed lines, incident references, or repository facts that support it.
+The exact Main risk wire fields, source values, and `source_ref` rules are owned by [`contract.md`](../contract.md). Studio displays its category, short title, plain-language explanation, and a source badge resolved from that reference. Supporting code, incident, or rule evidence is reached through the verified reference rather than embedded in a second UI-specific wire shape.
 
 The category describes what could go wrong, not what type of file changed.
 

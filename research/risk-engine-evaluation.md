@@ -82,7 +82,7 @@ Every case must reach its documented safe state: at least `guarded`/low confiden
 Keep the live set deliberately small and inspectable:
 
 - **4 true hazards:** one database/stored-data danger, one login/permission/secret danger, one breaking API danger, and one retry/timeout/backoff danger;
-- **4 close negatives:** one look-alike for each hazard that the policy explicitly says should not become that finding, such as a read-only query, test fixture, new optional field, or bounded retry change;
+- **4 contrast cases:** three close negatives—a read-only query, test fixture, and new optional field—must produce no hazard finding; the bounded retry change must produce `retry_backoff` and remain Guarded without the unbounded/repeated-trigger escalation;
 - **4 incident pairs:** two genuine repeated behaviors/triggers and two hard distractors—one same-service but different behavior, and one with shared words but no meaningful connection.
 
 Each case manifest must contain: stable ID, synthetic/real provenance, diff and parent revision, service facts, incident candidates, expected allowed findings, forbidden findings, exact supporting spans, expected minimum tier, label rationale, author, review status, and creation date. TREC calls relevance judgments the “right answers” of a test collection and warns that judgments must match the collection; SafeLane should treat its incident-pair labels the same way ([NIST TREC relevance judgments](https://trec.nist.gov/data/reljudge_eng.html)). Dataset documentation should record motivation, composition, creation, intended use, and limits, following the original Datasheets for Datasets proposal ([Gebru et al.](https://arxiv.org/abs/1803.09010)).
@@ -120,17 +120,7 @@ Report:
 - each injected fallback as pass/fail;
 - valid-schema runs and timing per run as raw observations.
 
-Phase 1 release gates:
-
-- zero deterministic minimum-tier violations;
-- zero live under-triage and zero false-fast results across both runs;
-- every allowed finding kind found with valid support in its positive case on both runs;
-- zero hazard findings accepted in the four close-negative cases;
-- zero invalid references accepted;
-- zero false incident connections;
-- every fallback reaches the documented safe state.
-
-An over-triage is not a safety failure, but it must still be shown and reviewed because an engine that marks everything risky is not useful.
+The normative Phase 1 release gates are frozen in [`docs/golden-scenarios.md`](../docs/golden-scenarios.md). That later decision makes over-triage a failed challenge case and classifies `bounded-retry-change` as a tier contrast with one required finding. This research defines the rationale, metrics, and minimum safety properties; the evaluator implements the golden-scenario thresholds without maintaining a second gate list here.
 
 ## No conventional train/test split
 

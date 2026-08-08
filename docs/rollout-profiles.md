@@ -55,13 +55,16 @@ A user creates a custom profile by cloning `fast`, `guarded`, or `strict`, then 
 
 A custom profile must remain at least as careful as its base:
 
-- it cannot start with more exposed pods;
-- it cannot remove health checkpoints;
-- it cannot shorten a required checkpoint;
-- it cannot allow more than one unhealthy reading;
-- it cannot weaken the service health limit;
-- guarded and strict descendants must keep health analysis;
-- exposure stages must be positive, strictly increasing, below the service replica count, and end with `all`.
+- let the base and candidate integer stages be the values before `all`; the candidate must have at least as many integer stages, and for every base-stage index its value must be less than or equal to the base value at that index;
+- extra candidate stages are allowed only after those compared positions and remain below the service replica count;
+- when the base has a checkpoint, candidate `checkpoint.seconds` is greater than or equal to the base, `interval_seconds` is less than or equal to the base, `failure_limit` and `consecutive_error_limit` are less than or equal to the base, and `max_error_rate` is less than or equal to both the base and service limits;
+- `measurement_count` must equal `floor(checkpoint.seconds / interval_seconds)`, so longer or more frequent observation cannot be hidden by a lower sample count;
+- a candidate with any integer stage must keep health analysis; and
+- all integer stages must be positive, strictly increasing, below the service replica count, and end with `all`.
+
+For example, a Strict-derived `[1, 3, 4, all]` profile is invalid because its second stage exposes more pods than Strict's second stage `[1, 2, 3, all]`. `[1, 2, 3, 4, all]` is valid because it preserves every Strict stage and adds another checkpoint before full exposure. A Fast-derived `[1, all]` profile is also valid when it supplies a valid checkpoint.
+
+The exact persisted `base` and `source` fields are defined in [`docs/input-contracts.md`](input-contracts.md). `source` is `custom` for a manually approved profile and `ai_assisted` for an approved generated draft; this value is copied into `decision.json.profile_source`.
 
 SafeLane automatically selects the minimum profile required by the risk tier. A developer may make a one-way profile override to something more careful, such as guarded to strict. A faster override is invalid.
 
@@ -94,42 +97,8 @@ Ollama may draft:
 
 It cannot change service replicas, risk-tier mappings, the service's normal health limit, validation rules, or the approval requirement. The result is one structured draft, not a chat or multiple alternatives. Normal code validates it, Studio shows a visual and YAML preview, and a person must approve it before saving. Invalid AI output changes nothing.
 
-## Illustrative policy shape
+## Canonical policy shape
 
-The exact parser structure may be refined during implementation, but it must preserve these meanings:
-
-```yaml
-policy_version: 2026.08.2
-
-services:
-  demo-api:
-    replicas: 5
-    max_error_rate: 0.05
-
-tier_profiles:
-  safe: fast
-  guarded: guarded
-  risky: strict
-
-profiles:
-  fast:
-    steps: [all]
-
-  guarded:
-    steps: [2, all]
-    checkpoint_seconds: 30
-    interval_seconds: 10
-    measurement_count: 3
-    failure_limit: 1
-    consecutive_error_limit: 2
-
-  strict:
-    steps: [1, 2, 3, all]
-    checkpoint_seconds: 30
-    interval_seconds: 10
-    measurement_count: 3
-    failure_limit: 1
-    consecutive_error_limit: 2
-```
+The exact `policy.yaml` structure, including service topology, supported shipping windows, thresholds, profiles, and validation rules, is frozen in [`docs/input-contracts.md`](input-contracts.md). Implementation must not refine that parser shape independently.
 
 The lane generator resolves this configuration into exact Argo steps. No raw AI output is ever rendered or applied.

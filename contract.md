@@ -387,12 +387,13 @@ Use each artifact only for the concern it owns:
 1. `CONTEXT.md` owns SafeLane's domain vocabulary.
 2. Accepted ADRs own hard architectural boundaries.
 3. `contract.md` owns artifact boundaries, lifecycle, field semantics, wire values, validation, and handoff behavior.
-4. `docs/risk-signals.md` owns policy predicates and safety-floor effects.
-5. `docs/rollout-profiles.md` owns profile behavior and profile-validation rules.
-6. `docs/safelane-studio.md` owns the review and profile-management interaction.
-7. `docs/golden-scenarios.md` and `research/risk-engine-evaluation.md` own acceptance and reporting rules.
-8. Research files explain rationale and evidence but are non-normative when a later accepted decision differs.
-9. README, brief, Q&A, schedule, and pitch files are narrative surfaces and never override the sources above.
+4. `docs/input-contracts.md` owns caller-supplied request, policy, incident, profile-draft, and evaluation-fixture shapes.
+5. `docs/risk-signals.md` owns policy predicates and safety-floor effects.
+6. `docs/rollout-profiles.md` owns profile behavior and profile-validation rules.
+7. `docs/safelane-studio.md` owns the review and profile-management interaction.
+8. `docs/golden-scenarios.md` owns acceptance and reporting rules.
+9. Research files explain rationale and evidence but are non-normative when a later accepted decision differs.
+10. README, brief, Q&A, schedule, and pitch files are narrative surfaces and never override the sources above.
 
 When implemented, JSON Schema files are executable mirrors of this contract's wire shape. A discrepancy between a schema and this contract is a build-blocking defect to reconcile explicitly; neither side may silently choose one.
 
@@ -400,11 +401,11 @@ When implemented, JSON Schema files are executable mirrors of this contract's wi
 
 The following existing descriptions are not build instructions:
 
-- `README.md` and `safelane-brief.html`: six deterministic signals, generic config-versus-code scoring, continuous-score language, and “no LLM” claims;
+- `safelane-brief.html`: six deterministic signals, generic config-versus-code scoring, continuous-score language, and “no LLM” claims;
 - `detailed-plan.md`: additive/composite scoring, copied DeployWhisper code, PyDriller in the hot path, the old dashboard, and the original day-by-day implementation sequence;
 - `plan.md`: reversibility and timing described as additive scoring signals rather than safety floors, plus past-due traffic-router indecision;
 - `safelane-qa.md`: config-versus-code scoring and any claim that the model can be turned off with identical assessment behavior;
 - `research/risk-engine-options.md`: the earlier 90-day incident propensity match where it conflicts with the later verified-connection policy;
 - `research/ollama-phase1.md`: the illustrative model-returned `confidence` field, superseded by normal-code evidence completeness in this contract.
 
-Those files may be rewritten later as publishing and execution work. Implementers must follow the canonical sources above now; no implementation decision remains hidden in the stale narratives.
+Those files may be rewritten later as publishing and execution work. Implementers must follow the canonical sources above now; no implementation decision remains hidden in the stale narratives. The current `README.md` is a publishing surface aligned to this hierarchy, but remains non-normative.

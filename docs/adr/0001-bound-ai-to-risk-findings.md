@@ -10,7 +10,7 @@ SafeLane will use AI to read a code change and return structured risk findings w
 
 ## Consequences
 
-- The AI response needs a small structured format containing findings, evidence, and confidence.
+- The AI response needs a small structured format containing findings and exact evidence. SafeLane computes confidence from evidence completeness; the model does not return it.
 - Every AI finding shown to a user must point to the code that caused it.
 - SafeLane must still work safely when the AI call fails, times out, or returns invalid output.
 - The response format must not depend on one Ollama model, so the model can be replaced without changing the safety policy.
