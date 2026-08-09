@@ -1,104 +1,103 @@
-# Phase 1 rollout profiles
+# Pre-final rollout profiles and trusted analysis
 
-**Decision date:** 2026-08-01
-**Decision owner:** Andrew
+**Version:** 2 · **decision date:** 2026-08-09
 
-SafeLane maps each risk tier to a configurable rollout profile. Profiles live in `policy.yaml`; application code contains no rollout constants. Every `decision.json` records the policy version, selected profile, and fully resolved settings used for that release.
+SafeLane uses three immutable built-in profiles for one five-replica service without a traffic router.
+Pod counts are the honest primary unit; `setWeight` is the Argo representation, not a promise of an
+exact request or user percentage.
 
-## Built-in demo profiles
+The Rollout fixes `maxSurge: 1` and `maxUnavailable: 0`. “1 of 5 pods” means one canary pod for a
+service configured with five desired replicas; surge may temporarily keep an additional stable pod,
+so it is never presented as an exact traffic fraction.
 
-The Phase 1 demo service has 5 replicas and no traffic router. Pod counts are therefore the honest primary unit. SafeLane converts them to Argo weights and records both.
+## Built-in profiles
 
-| Risk tier | Profile | Studio color | Exposure and health checkpoints |
-|---|---|---|---|
-| `safe` | `fast` | Green | `all` immediately; Kubernetes readiness only |
-| `guarded` | `guarded` | Amber | 2 pods → health checkpoint → `all` |
-| `risky` | `strict` | Red | 1 pod → checkpoint → 2 pods → checkpoint → 3 pods → checkpoint → `all` |
+| Risk tier | Profile | Resolved stages |
+|---|---|---|
+| `safe` | `Fast` | all 5 pods immediately; readiness only |
+| `guarded` | `Guarded` | 2 pods → trusted Job analysis → all 5 pods |
+| `risky` | `Strict` | 1 pod → analysis → 2 pods → analysis → 3 pods → analysis → all 5 pods |
 
-Profile names describe rollout behavior, not the danger of the change. Custom or AI-assisted profiles use purple in SafeLane Studio. Every color is accompanied by a name and icon so color is not the only signal.
+The exact decision stages are:
 
-## Demo health defaults
+| Exposure | `setWeight` | Trusted analysis |
+|---:|---:|---|
+| 1 of 5 pods | 20 | yes |
+| 2 of 5 pods | 40 | yes |
+| 3 of 5 pods | 60 | yes |
+| all 5 pods | 100 | no |
 
-The guarded and strict built-ins share the service's normal health limit. Risk changes exposure and observation, not the definition of a broken service.
+Fast uses only the final row. Guarded uses the second and final rows. Strict uses all rows. The
+compiler rejects any different replica count, surge/unavailable setting, weight/pod pair, order,
+analysis flag, profile source, or router. Each `analysis: true` emits one inline analysis step directly
+after its `setWeight`; no timed pause is emitted. The compiler does not derive stages from the tier; `decision.json`
+already contains the resolved profile.
 
-- maximum error rate: 5%;
-- checkpoint duration: about 30 seconds;
-- reading interval: 10 seconds;
-- readings per checkpoint: 3;
-- second unhealthy or empty reading during a checkpoint: rollback;
-- first Prometheus connection or query error: retry;
-- second consecutive connection or query error: rollback.
+## Trusted compatibility analysis
 
-The 5% value is a configurable demo default, not a universal recommendation. The planned healthy fixture is near 0% errors and the broken fixture is around 35%, leaving a reliable visible gap.
+Guarded and Strict use `demo-api-public-quote-v1`, a `job_http_contract_probe` resolved from the
+versioned trusted-probe catalog. Its probe image key resolves through image catalog v1; image
+references and IDs do not live in the probe catalog. The AnalysisTemplate launches the pinned Job through
+`canaryService`, which must select only the current head-SHA ReplicaSet.
 
-Argo implements the unhealthy-reading rule with `failureLimit: 1`: it permits one failed measurement and fails on the second. It does not require those two unhealthy readings to be consecutive. Argo implements provider/query errors separately with `consecutiveErrorLimit: 2`. See Argo's [analysis behavior](https://argo-rollouts.readthedocs.io/en/stable/features/analysis/) and [failure-versus-error explanation](https://argo-rollouts.readthedocs.io/en/latest/FAQ/#what-is-the-difference-between-failures-and-errors).
+The frozen Job behavior is:
 
-An empty Prometheus result is explicitly treated as a failed health reading, never as zero errors or success. Argo documents this result handling in its [empty-array examples](https://argo-rollouts.readthedocs.io/en/stable/features/analysis/#empty-array).
+- request `GET /v1/quote` against the trusted canary-Service target;
+- expect HTTP 200;
+- make exactly 3 attempts, 10 seconds apart, each with a 2-second request timeout;
+- permit 1 failed request and exit nonzero when failures exceed that allowance;
+- use `restartPolicy: Never`, `backoffLimit: 0`, and `activeDeadlineSeconds: 45`; and
+- emit one final schema-checked probe-result-v1 JSON log line for the verification receipt.
 
-## Replica count and resolved weights
+The exact log shape is:
 
-Each service configuration is the single source of truth for replica count. For the five-replica demo, Studio offers pod choices 1 through 5 and SafeLane resolves them as follows:
+```json
+{
+  "schema_version": "1",
+  "probe_id": "demo-api-public-quote-v1",
+  "observations": [
+    {"attempt": 1, "outcome": "http_response", "http_status": 404},
+    {"attempt": 2, "outcome": "timeout", "http_status": null},
+    {"attempt": 3, "outcome": "connection_error", "http_status": null}
+  ],
+  "failures": 3,
+  "failure_allowance": 1,
+  "result": "failed"
+}
+```
 
-| Profile value | Argo weight | Honest exposure |
-|---|---:|---:|
-| 1 pod | 20 | 1 of 5 pods |
-| 2 pods | 40 | 2 of 5 pods |
-| 3 pods | 60 | 3 of 5 pods |
-| 4 pods | 80 | 4 of 5 pods |
-| `all` | 100 | 5 of 5 pods |
+Every field is required and unknown fields are rejected. Attempts are contiguous from 1 through 3.
+`outcome` is `http_response`, `timeout`, or `connection_error`; `http_status` is an integer from 100
+through 599 only for `http_response` and otherwise null. `failures` must equal the number of outcomes
+other than HTTP 200, and `result` is `failed` exactly when failures exceed the allowance. A missing,
+duplicate, malformed, or internally inconsistent final line makes receipt verdict `inconclusive`.
+The Job treats transport errors as failures for rollout safety, but receipt semantics do not treat
+them as evidence of the predicted HTTP response: the positive prediction verdict needs more than one
+actual non-200 HTTP response, and “not observed” needs all observations to be HTTP 200. Mixed or
+transport-only evidence is inconclusive.
 
-The last profile step is always `all`, not a fixed number. If a service's replica count changes, SafeLane recalculates weights and rejects any earlier step that now exceeds the total.
+The application keeps Kubernetes readiness on `/ready`. In the Strict fixture the canary remains
+Ready but the compatibility probe observes 404, separating a client-contract regression from a
+startup failure.
 
-## Custom profiles
+A Job that starts and exits nonzero may fail the AnalysisRun and trigger Argo's automatic abort. A
+Job that never starts is `inconclusive`, not evidence that the predicted application failure occurred.
+The compiler annotates the Rollout with canonical decision and release-request hashes under
+`safelane.dev/decision-sha256` and `safelane.dev/release-request-sha256`. The release
+adapter starts from that exact Rollout, requires metadata/observed generation equality, and follows
+Kubernetes owner UIDs through each AnalysisRun, Job, and probe Pod; it never selects a resource by
+name prefix or newest timestamp. While each probe runs, it snapshots the canary Service selector and
+EndpointSlice, proves every endpoint Pod belongs to the head ReplicaSet, and records application and
+probe runtime image IDs for comparison with image catalog v1. To prove
+analysis-triggered abort on Argo v1.9.1, the receipt requires `status.abort: true`, non-null
+`status.abortedAt`, phase `Degraded`, and the `Progressing=False` condition reason `RolloutAborted`
+whose message contains `Step-based analysis phase error/failed`, as well as a preceding linked failed
+AnalysisRun completion timestamp. Normal code classifies any abort without that exact signature as
+`external_or_unknown`; it never claims Kubernetes state identifies a human actor. Any such abort or
+missing link is inconclusive.
 
-A user creates a custom profile by cloning `fast`, `guarded`, or `strict`, then changing pod stages, checkpoint duration, reading interval, or the error-rate limit.
+## Studio boundary
 
-A custom profile must remain at least as careful as its base:
-
-- let the base and candidate integer stages be the values before `all`; the candidate must have at least as many integer stages, and for every base-stage index its value must be less than or equal to the base value at that index;
-- extra candidate stages are allowed only after those compared positions and remain below the service replica count;
-- when the base has a checkpoint, candidate `checkpoint.seconds` is greater than or equal to the base, `interval_seconds` is less than or equal to the base, `failure_limit` and `consecutive_error_limit` are less than or equal to the base, and `max_error_rate` is less than or equal to both the base and service limits;
-- `measurement_count` must equal `floor(checkpoint.seconds / interval_seconds)`, so longer or more frequent observation cannot be hidden by a lower sample count;
-- a candidate with any integer stage must keep health analysis; and
-- all integer stages must be positive, strictly increasing, below the service replica count, and end with `all`.
-
-For example, a Strict-derived `[1, 3, 4, all]` profile is invalid because its second stage exposes more pods than Strict's second stage `[1, 2, 3, all]`. `[1, 2, 3, 4, all]` is valid because it preserves every Strict stage and adds another checkpoint before full exposure. A Fast-derived `[1, all]` profile is also valid when it supplies a valid checkpoint.
-
-The exact persisted `base` and `source` fields are defined in [`docs/input-contracts.md`](input-contracts.md). `source` is `custom` for a manually approved profile and `ai_assisted` for an approved generated draft; this value is copied into `decision.json.profile_source`.
-
-SafeLane automatically selects the minimum profile required by the risk tier. A developer may make a one-way profile override to something more careful, such as guarded to strict. A faster override is invalid.
-
-Saving any profile change requires whole-policy validation, a preview of the YAML change, and human approval. An approved save updates `policy.yaml` and creates a new policy version. Phase 1 runs locally and relies on Git for review and history; it has no accounts or permission system.
-
-## SafeLane Studio requirement
-
-Phase 1 includes one small local SafeLane Studio. Its approved information architecture and interaction contract are defined in [`docs/safelane-studio.md`](safelane-studio.md). It must:
-
-- show the risk tier, plain reasons, AI findings, and exact evidence;
-- show the selected profile as pods and health checkpoints;
-- offer the color-coded built-in profiles;
-- create and edit custom profiles;
-- validate and preview policy changes before saving; and
-- include the required one-shot **Generate with AI** action.
-
-Argo's existing dashboard remains responsible for live rollout controls. SafeLane Studio does not add deployment controls, accounts, a database, drag-and-drop editing, or historical analytics.
-
-## Generate with AI
-
-The user describes the rollout they want. Ollama reads only the description, current profiles, service replica count, service health settings, fixed validation rules, and a few built-in valid examples.
-
-Ollama may draft:
-
-- a profile name and description;
-- pod stages;
-- checkpoint duration;
-- health-reading interval; and
-- a health limit equal to or stricter than the service default.
-
-It cannot change service replicas, risk-tier mappings, the service's normal health limit, validation rules, or the approval requirement. The result is one structured draft, not a chat or multiple alternatives. Normal code validates it, Studio shows a visual and YAML preview, and a person must approve it before saving. Invalid AI output changes nothing.
-
-## Canonical policy shape
-
-The exact `policy.yaml` structure, including service topology, supported shipping windows, thresholds, profiles, and validation rules, is frozen in [`docs/input-contracts.md`](input-contracts.md). Implementation must not refine that parser shape independently.
-
-The lane generator resolves this configuration into exact Argo steps. No raw AI output is ever rendered or applied.
+Studio displays the three built-ins and the resolved pod-count preview. It does not create, edit, or
+generate profiles. There is no custom profile, AI profile generator, policy mutation, deploy button,
+Argo dashboard, or exact traffic-percentage claim in the pre-final runtime.

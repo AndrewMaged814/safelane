@@ -1,85 +1,92 @@
 # SafeLane
 
-SafeLane examines a software change and chooses how carefully it should be released.
+SafeLane examines one exact software change and chooses how carefully that revision may be released.
 
 ## Language
 
 **Change evidence**:
-Facts SafeLane can point to in the code change, repository history, service map, or incident records.
-_Avoid_: AI opinion
+Facts SafeLane can point to in the submitted code change and its declared release context.
+_Avoid_: AI opinion, intuition
 
 **Change assessment**:
-The evidence-backed evaluation of one exact pull-request version under one policy version. It contains SafeLane's findings and policy result but is not permission to deploy.
-_Avoid_: Risk report, deployment decision
+The evidence-backed evaluation of one exact change under one policy version. It may recommend release
+behavior, but it is not permission to deploy.
+_Avoid_: Deployment decision, release status
 
-**Rollout decision**:
-The automatic or human-approved selection of a rollout profile for one exact change assessment. A new push invalidates it, and recording it does not itself deploy anything.
-_Avoid_: Assessment, deployment status
+**AI safety case**:
+An AI-proposed, source-backed account of an endangered contract, its possible impact, and an intended
+safeguard. It does not choose or execute rollout behavior.
+_Avoid_: AI verdict, AI risk score, generated deployment
 
-**AI risk finding**:
-A warning found by AI while reading a change, backed by the exact file or code that caused it. An AI risk finding does not choose the rollout by itself.
-_Avoid_: AI score, AI verdict
+**Failure hypothesis**:
+The bounded behavior that an AI safety case predicts could fail because of the cited change.
+_Avoid_: Root cause, verified prediction
 
-**Failure propensity**:
-A rough low, medium, or high estimate of how likely a change is to fail. It is not an exact probability.
-_Avoid_: Failure probability, precise risk score
+**Verification intent**:
+A closed, non-executable description of what contract should be preserved during rollout.
+_Avoid_: Generated test, probe command
+
+**Source reference verified**:
+Confirmation that cited code text exists at the claimed location and side of the exact change. It
+does not confirm that the AI interpretation is correct.
+_Avoid_: AI reasoning verified, risk verified
+
+**Trusted probe**:
+A pre-approved runtime check that SafeLane may bind to a validated verification intent. Its execution
+contract is not authored by AI.
+_Avoid_: AI-generated test, dynamic probe
+
+**Approval question**:
+A source-grounded prompt that calls attention to the unresolved assumption a human should consider
+before authorizing a careful rollout. Answering it is not part of the release contract.
+_Avoid_: Approval gate answer, questionnaire
+
+**Bounded remediation**:
+A source-grounded, advisory description of how the identified contract might be preserved. It never
+changes code and never guarantees a faster rollout.
+_Avoid_: Generated patch, automatic fix
+
+**Change-scope band**:
+A coarse policy baseline derived from the supported change's size and mapping completeness. It is not
+a probability.
+_Avoid_: Failure propensity, risk score
 
 **Safety floor**:
-A rule that prevents SafeLane from choosing a faster rollout when there is serious impact, difficult recovery, poor support coverage, or missing evidence.
+A policy rule that prevents SafeLane from choosing a faster rollout when danger or uncertainty is
+present.
 _Avoid_: Risk points, score bonus
 
-**Confidence**:
-Whether SafeLane received and understood all evidence required by the policy. It does not mean that an AI prediction is probably correct.
+**Evidence confidence**:
+Whether SafeLane received and validated all evidence required by the bounded policy. It does not
+measure whether an AI prediction is probably correct.
 _Avoid_: Model confidence, probability
 
 **Risk tier**:
-The final `safe`, `guarded`, or `risky` policy result after failure propensity and every safety floor are considered.
+The final `safe`, `guarded`, or `risky` policy result after the change-scope band and every safety
+floor are applied.
 _Avoid_: AI verdict
 
-**Risk category**:
-A fixed label for the kind of harm a Main risk describes: availability, data, security, compatibility, or performance. It describes what could go wrong, not the type of file changed.
-_Avoid_: File category, AI tag
-
-**Main risk**:
-The strongest verified failure scenario shown first in an assessment. It is selected after considering the whole assessment, but it is not a claim that SafeLane knows the root cause of a failure that has not happened.
-_Avoid_: Root cause, AI conclusion
-
-**Assessment status**:
-Whether the latest change assessment still needs rollout approval or has been resolved. A new push always invalidates an older approval.
-_Avoid_: Deployment status, rollout status
-
-**Rollout lane**:
-The release behavior selected from the risk tier, such as a fast release or a slower guarded release.
-_Avoid_: Risk score
-
-**Rollout profile**:
-A named, versioned release pattern containing exposure stages and health checkpoints. A risk tier selects the minimum rollout profile a change must use.
-_Avoid_: Lane settings, deployment preset
-
-**Health checkpoint**:
-A period when rollout exposure is held steady while service health is measured before more users are exposed.
-_Avoid_: Pause, sleep
-
-**Service health limit**:
-The service-owned boundary between acceptable and unhealthy behavior during rollout. It does not become weaker for a lower-risk change.
-_Avoid_: Risk threshold, profile threshold
-
-**Profile override**:
-A deliberate choice to use a more careful rollout profile than the risk tier requires. An override can never make rollout faster.
-_Avoid_: Tier override, risk override
-
 **Fast-lane eligibility**:
-Positive proof that a change is small, fully understood, and has no verified danger. The absence of an AI risk finding alone is not enough.
+Positive proof that every bounded Fast precondition passed and no accepted danger exists. An empty AI
+response alone is insufficient.
 _Avoid_: No risks found, AI says safe
 
-**Incident candidate**:
-A recent incident from an affected service that may be compared with a new change. Being from the same service does not make it connected and does not change the risk tier by itself.
-_Avoid_: Incident match, related incident
+**Assessment status**:
+Whether a change assessment still requires rollout authorization or has been resolved. A new change
+revision invalidates an earlier resolution.
+_Avoid_: Deployment status, rollout status
 
-**Incident connection**:
-A verified relationship between a new change and a past incident, backed by exact evidence from both. A shared service alone is not a connection.
-_Avoid_: Similar incident, AI memory, same-service match
+**Rollout decision**:
+The automatic or human-approved release behavior for one exact change assessment. Recording it does
+not deploy anything.
+_Avoid_: Assessment, deployment result
 
-**Supported shipping window**:
-A time when the team has explicitly planned enough support coverage to watch and respond to a release.
-_Avoid_: Business hours, safe time
+**Rollout profile**:
+A named, versioned release pattern containing exposure stages and trusted analysis steps. A risk tier
+sets its minimum required care.
+_Avoid_: AI-generated rollout, deployment preset
+
+**Verification receipt**:
+A post-run evidence record that binds the predicted contract check, exact release identities, trusted
+probe outcome, and rollout result.
+_Avoid_: AI explanation, deployment decision

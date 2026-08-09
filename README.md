@@ -19,7 +19,12 @@
 </p>
 
 > [!IMPORTANT]
-> SafeLane is a pre-alpha hackathon project. The risk policy, contracts, evaluation, and Studio interaction are specified; the runtime scorer and end-to-end rollout integration are not implemented yet. Nothing in this repository is production-ready.
+> SafeLane is a pre-alpha hackathon project. The risk policy, contracts, evaluation, and Studio interaction are specified; the runtime engine and end-to-end rollout integration are not implemented yet. Nothing in this repository is production-ready.
+>
+> The product narrative below predates the 2026-08-09 pre-final v3.2 scope and is scheduled for its
+> publishing rewrite before recording. It is not a build instruction. Follow [`CONTEXT.md`](CONTEXT.md),
+> [`contract.md`](contract.md), [`plan.md`](plan.md), and [`detailed-plan.md`](detailed-plan.md), plus
+> the canonical documents they name.
 
 ## Why SafeLane?
 

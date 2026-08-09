@@ -1,112 +1,104 @@
-# Phase 1 SafeLane Studio
+# Pre-final SafeLane Studio
 
-**Decision date:** 2026-08-01
-**Decision owner:** Andrew
-**Status:** approved prototype direction
+**Version:** 2 · **decision date:** 2026-08-09
 
-SafeLane Studio is a small local review and policy tool. Its first job is to help a developer understand why a pull request needs a careful rollout. Its second job is to manage the rollout profiles used by that decision.
+SafeLane Studio is one local review surface for the current assessment. It explains why a specific
+change needs a specific safeguard and records explicit approval when required. It does not deploy or
+monitor releases.
 
-It is not a deployment dashboard. Argo remains responsible for showing and controlling live rollouts.
+## Navigation and lifecycle
 
-## Navigation
+The runtime has one current-assessment route; an inbox may be added only if time remains. It loads a
+fixed local workspace. A new head SHA creates a new assessment identity and invalidates the prior
+page and approval. All workspace commands share one exclusive local lock; after validating the new
+request/Git/policy inputs, `assess` removes the prior decision before publishing the replacement
+assessment, so the old head cannot remain releasable beside a newer unresolved page.
 
-Phase 1 has two main navigation items:
+Fast resolves automatically. Guarded/Risky remains unresolved until the user approves a built-in
+profile at least as careful as the policy minimum. The page always says that approval records the
+rollout plan but does not deploy it.
 
-- **Changes** — pull-request assessments that need review, plus resolved assessments.
-- **Profiles** — built-in and custom rollout profiles.
+## Fast view
 
-Opening a change or creating a profile uses a focused subpage inside those areas. This keeps the main pages simple without forcing complex work into a modal.
+Show:
 
-## Change lifecycle
+- repository, pull request, full head SHA, and policy version;
+- every positive Fast eligibility check;
+- Safe tier and Fast profile preview; and
+- `Resolved automatically`.
 
-Studio stores one assessment per pull request, not one row per push.
+Do not invent a failure hypothesis, safeguard, approval question, or remediation for Fast.
 
-- A new push replaces the current assessment for that PR.
-- A new push invalidates any earlier human approval.
-- `safe` changes resolve automatically with the Fast profile.
-- `guarded` and `risky` changes stay in **Needs review** until a person approves the suggested rollout or chooses something more careful.
-- Approval records the rollout decision and moves the PR to **Resolved**. It does not deploy anything.
+## Risky safety-case view
 
-Phase 1 may keep this state in local files or Git-backed artifacts. It does not require accounts or a database.
+Use one linear reading order:
 
-## Changes page
-
-The default page is one combined **Needs review** list. It is ordered by risk tier first (`risky` before `guarded`) and latest push second. Risky and Guarded are not separate page sections.
-
-Each row shows only:
-
-- service and PR identity;
-- change title, branch, and latest-push time;
-- one compact risk-tier label;
-- one fixed risk category;
-- the short Main risk title; and
-- the suggested rollout lane.
-
-Risk tier and suggested lane remain separate fields. A developer may choose a stricter profile, a custom profile may be based on Strict, and an organization may configure a tier to use a more careful profile. Therefore `Strict` does not always mean the change was classified `risky`.
-
-The **Resolved** view contains automatically resolved safe changes and human-approved guarded or risky changes. It is ordered newest first.
-
-## Assessment details
-
-The assessment uses one reading column rather than a dashboard grid. Its order is fixed:
-
-1. PR identity and risk tier.
-2. Suggested rollout profile.
-3. Main risk.
-4. Rollout stages and health checks.
-5. Collapsed supporting evidence.
-6. Approval actions.
-
-The primary action names the plan, such as **Approve Strict rollout**. A secondary **Choose a safer profile** action never allows a faster override. Helper text must say that approval records the plan but does not deploy it.
-
-Exact evidence remains available but is collapsed by default so it does not compete with the Main risk.
-
-## Main risk
-
-The Main risk is the strongest verified failure scenario found after considering the whole assessment. It is not a claim that SafeLane knows the root cause of a failure that has not happened.
-
-The exact Main risk wire fields, source values, and `source_ref` rules are owned by [`contract.md`](../contract.md). Studio displays its category, short title, plain-language explanation, and a source badge resolved from that reference. Supporting code, incident, or rule evidence is reached through the verified reference rather than embedded in a second UI-specific wire shape.
-
-The category describes what could go wrong, not what type of file changed.
-
-Local Ollama may propose the category, title, explanation, and evidence references. Normal code verifies the references, and fixed policy rules still choose the risk tier and rollout lane. Unsupported AI output is rejected. If Ollama is unavailable or no AI finding survives verification, Studio shows the strongest rule-based reason instead.
-
-The UI label is **AI finding · evidence verified** when both facts are true. Normal verified results do not show a confidence score. Studio shows a warning only when evidence is incomplete or the assessment fell back to rules.
-
-Phase 1 stores every verified finding and connection in the change assessment but displays exactly one Main risk. A `safe` assessment has no Main risk; its resolved view shows the positive proof that established fast-lane eligibility instead of inventing a “no risk found” scenario.
-
-## Profiles page
-
-Profiles are separate from change assessment so profile editing does not distract someone reviewing a PR.
-
-The page shows:
-
-- the Fast, Guarded, and Strict built-ins;
-- existing custom profiles;
-- a primary **Generate profile with AI** action; and
-- a secondary **Start manually** action.
-
-Both creation paths use the same editor and fixed validation. AI pre-fills one draft; manual creation starts from a built-in profile. Both show a YAML preview and require human approval.
-
-## Prototype
-
-The approved throwaway prototype lives in `prototypes/safelane-studio`.
-
-Run it from the repository root:
-
-```powershell
-python -m http.server 4173 --directory prototypes/safelane-studio
+```text
+Breaking contract
+    -> removed and added source spans
+    -> AI-proposed failure hypothesis
+    -> 2/2 source references verified
+    -> trusted compatibility probe selected by SafeLane
+    -> first exposure: 1 of 5 pods
+    -> approval question and bounded remediation
+    -> Approve Strict rollout
 ```
 
-Then open <http://localhost:4173/?page=changes>.
+The page shows the deterministic policy trace and exact rendered strings owned by `contract.md`.
+Every selectable stage preview comes from the assessment's normal-code `rollout_options`; Studio does
+not load or reinterpret policy.
+Labels must distinguish:
 
-The prototype keeps state in browser memory and never writes policy files or deploys anything.
+- **AI proposed** — the semantic hypothesis/intent came from the bounded model response;
+- **source references verified** — normal code found the exact cited diff spans; and
+- **trusted probe selected by SafeLane** — normal code resolved the verified intent to the catalog.
+
+The probe preview reads only the normal-code `selected_safeguard.probe_preview` projection inside the
+assessment: `GET /v1/quote`, expected 200, three attempts, and canary-only targeting. Studio does not
+load the raw model response, policy, or either catalog, and it never displays raw model content as
+executable configuration.
+
+The approval question is informational; Studio does not collect an answer. The remediation is
+advisory; Studio does not generate or apply a patch and never promises that it will earn Fast.
+
+## Non-Fast views without an AI-linked safeguard
+
+Whenever `selected_safeguard` is null on a Guarded/Risky assessment, Studio shows `Policy fallback
+analysis will run after approval`; it does not invent a hypothesis or selected safeguard. This covers
+both kinds of state:
+
+- a medium Guarded or high Risky scope baseline may have complete empty AI evidence, high confidence,
+  and no uncertainty floor; show the baseline reason and its minimum profile; and
+- a low-confidence assessment shows every uncertainty floor. If a verified Risky finding survived a
+  rejected proposal, show that finding and floor, label the AI-linked safeguard unavailable, and never
+  render rejected proposal values.
+
+In every case the page offers only built-in profiles at least as careful as the minimum and remains
+unresolved until approval.
+
+## Approval contract
+
+The only state-changing production UI action is **Approve selected rollout** (shown as **Approve
+Strict rollout** in the demo Risky case). The browser submits the
+expected assessment ID, head SHA, assessment-input hash, and assessment-result hash. The server loads
+the current assessment, compare-and-swaps all four values, and calls `SafeLaneEngine.approve`; it does
+not accept a client-supplied assessment object.
+
+The server atomically replaces the resolved assessment first and creates/replaces `decision.json`
+last. A stale page, wrong hash, wrong SHA, invalid profile, or already changed workspace is rejected.
+After success, Studio shows `Resolved` and the decision path.
+
+## Visual requirements
+
+- Present source evidence, safeguard or fallback notice, and rollout preview in one column that works at laptop width.
+- Pair color with text/icon; Fast is green and Strict is red, but color is never the only signal.
+- Render code spans in a readable monospace block with removed/added labels.
+- Keep the causal chain visible without animation; polish must not introduce a frontend framework.
 
 ## Out of scope
 
-- live deployment controls or rollout monitoring;
-- accounts, roles, or permissions;
-- a database;
-- historical analytics;
-- drag-and-drop rollout editing;
-- AI chat or multiple generated alternatives.
+- policy/profile creation, editing, overrides, or Generate with AI;
+- chat, multiple AI alternatives, self-critique, or free-form narrative;
+- deploy buttons, kubectl, rollout polling, verification-receipt ingestion, history, accounts, RBAC,
+  database, notifications, and analytics; and
+- generated tests, commands, patches, or arbitrary probe configuration.

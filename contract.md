@@ -1,411 +1,733 @@
-# SafeLane — Phase 1 assessment and decision contract
+# SafeLane — pre-final artifact and lifecycle contract
 
-**Contract document:** v4, frozen 2026-08-08
+**Contract document:** v5, frozen 2026-08-09
 
-**Wire schemas:** `assessment.json` v1 and `decision.json` v2
+**Wire schemas:** assessment request v2, policy v2, AI response v2, assessment v2, decision v3,
+release request v1, image catalog v1, trusted-probes v1, probe-result v1, and verification receipt v1
 
-This document is the canonical Phase 1 artifact and lifecycle contract. It separates the evidence SafeLane Studio reviews from the small approved handoff Ahmed's rollout work consumes.
+This document is the canonical pre-final artifact and lifecycle contract. Input policy details live in
+`docs/input-contracts.md`, risk predicates in `docs/risk-signals.md`, rollout stages in
+`docs/rollout-profiles.md`, and UI behavior in `docs/safelane-studio.md`.
+
+## Product boundary
+
+SafeLane has one evidence-to-enforcement path:
+
+```text
+exact Git change
+    -> one bounded AI attempt
+    -> verified finding and optional trusted safeguard
+    -> fixed policy result
+    -> automatic Fast resolution or explicit human resolution
+    -> decision.json
+    -> independently identified release
+    -> trusted canary probe and Argo outcome
+    -> verification receipt
+```
+
+AI supplies semantic candidates. It never supplies a probe ID, host, URL, request body, expected
+status, image, command, credential, tier, profile, stage, approval, or Kubernetes field. Normal code
+verifies source references, renders prose, resolves a trusted probe, and applies policy. The release
+consumer reads no raw AI fields.
 
 ## Artifact boundary
 
-SafeLane produces two different artifacts for one exact pull-request head SHA:
+- `assessment.json` v2 is Andrew-owned review state. It contains exact change identity, accepted AI
+  findings, an optional validated safeguard, deterministic policy trace, evidence confidence, and
+  resolution state.
+- `decision.json` v3 is the only SafeLane-to-release runtime handoff. It contains the exact identity,
+  authorization event, fully resolved built-in profile, and resolved trusted analysis profile.
+- `release-request.json` v1 is independently produced by the release command. It identifies the
+  expected base/head revisions and inspected application image.
+- `image-catalog.json` v1 and `trusted-probes.yaml` are shared, read-only integration contracts.
+- `verification-receipt.json` v1 is post-run evidence. It is not authorization and is never an input
+  to compilation or deployment.
 
-- **`assessment.json`** is Andrew-owned. It contains change evidence, bounded AI risk findings, incident connections, failure propensity, safety floors, explanations, confidence, the minimum rollout profile, and review state. SafeLane Studio reads it.
-- **`decision.json`** is the approved projection of that assessment. It contains the exact change identity, final risk result, readable explanation, approval mode, and fully resolved rollout profile. Ahmed's release script reads it and nothing else.
+## Lifecycle and authorization
 
-The artifacts are deliberately separate. Deployment must not depend on Ollama response details, incident-corpus shape, Studio state, or future explanation fields. Studio still needs those details to make a guarded or risky assessment reviewable.
+1. `assess` validates request v2 and policy v2, reads the exact Git range, and calls the pinned model
+   at most once.
+2. Assessment, approval, and release commands take the same exclusive local-workspace lock. After a
+   new assessment has passed request/Git/policy validation, `assess` removes any prior decision
+   before atomically publishing the new assessment; a Fast replacement decision is written last.
+   A crash can therefore leave no decision, never an old decision beside a newer assessment.
+3. The engine validates AI components independently, applies policy, writes assessment v2, and:
+   - resolves Fast automatically only when every Fast precondition passes; or
+   - leaves Guarded/Risky unresolved.
+4. Studio may resolve the current Guarded/Risky assessment with a built-in profile at least as
+   careful as its minimum. Approval records a plan; it does not deploy.
+5. Resolution atomically replaces the resolved assessment first and creates/replaces decision v3
+   last. The decision is the authorization commit point.
+6. The release adapter independently constructs release request v1 and validates it with decision v3
+   and the trusted catalogs before rendering.
+7. Missing, malformed, unresolved, stale, identity-mismatched, or unapproved decisions reject release
+   before manifest output. A Strict diagnostic preview is never substitute authorization.
+8. After an analysis-bearing apply, the release adapter observes the exact
+   Job/AnalysisRun/Rollout chain and writes receipt v1. Fast has no prediction or analysis Job, so it
+   writes only the normal terminal/e2e log and no verification receipt.
 
-The architectural reason is recorded in [`docs/adr/0002-separate-assessment-from-rollout-decision.md`](docs/adr/0002-separate-assessment-from-rollout-decision.md).
-
-## Lifecycle
-
-1. SafeLane assesses one repository, pull request, and full head SHA under one policy version.
-2. It writes `assessment.json` for that exact SHA.
-3. A `safe` assessment resolves automatically with the policy-selected minimum profile and emits `decision.json`.
-4. A `guarded` or `risky` assessment remains `needs_review`. A person may approve the suggested profile or choose a more careful valid profile. Only then does SafeLane emit `decision.json`.
-5. Approval records a rollout decision; it does not deploy anything.
-6. A new head SHA replaces the current assessment, invalidates the earlier approval, and makes the earlier decision stale.
-7. Before rendering a Rollout, the consumer validates `decision.json` and confirms that its repository and full SHA match the release being attempted.
-
-An absent or invalid decision is never approval to go fast. The release consumer uses its local fail-closed Strict fallback if it is invoked without a usable decision. That fallback is a safety behavior, not a substitute for the upstream human-approval gate.
-
-## `assessment.json` v1
-
-The assessment is the complete review record. This representative shape is normative; explanatory text is illustrative.
-
-```json
-{
-  "schema_version": "1",
-  "assessment_id": "AndrewMaged814/safelane-demo#42@a1b2c3d4e5f6789012345678901234567890abcd:2026.08.2",
-  "policy_version": "2026.08.2",
-  "change": {
-    "repository": "AndrewMaged814/safelane-demo",
-    "pr": 42,
-    "base_sha": "0123456789abcdef0123456789abcdef01234567",
-    "head_sha": "a1b2c3d4e5f6789012345678901234567890abcd",
-    "title": "Remove payout retry limit",
-    "files_changed": 1,
-    "lines_changed": 2,
-    "services": ["payouts-api"],
-    "shipping_at": "2026-08-20T14:00:00+03:00",
-    "pushed_at": "2026-08-20T10:15:00Z"
-  },
-  "evidence_status": {
-    "diff": "complete",
-    "service_map": "complete",
-    "incident_history": "checked_candidates",
-    "ai_analysis": "complete"
-  },
-  "ai_analysis": {
-    "model": "qwen2.5-coder:7b",
-    "model_digest": "dae161e27b0e",
-    "prompt_sha256": "<64 lowercase hexadecimal characters>",
-    "response_schema_sha256": "<64 lowercase hexadecimal characters>",
-    "chunk_count": 1
-  },
-  "failure_propensity": {
-    "band": "low",
-    "projection": 20
-  },
-  "ai_findings": [
-    {
-      "id": "finding-001",
-      "kind": "retry_backoff",
-      "category": "availability",
-      "title": "Retry limit was removed",
-      "explanation": "Workers can retry without a bound during an upstream failure.",
-      "evidence": {
-        "file": "src/workers/payouts.py",
-        "line": 18,
-        "added_line": "while True:"
-      },
-      "evidence_verified": true
-    }
-  ],
-  "incident_history": {
-    "candidate_ids": ["INC-003"],
-    "connections": [
-      {
-        "incident_id": "INC-003",
-        "classification": "repeated_trigger",
-        "category": "availability",
-        "title": "Unlimited retries repeated an earlier trigger",
-        "explanation": "The change repeats the retry behavior recorded as the earlier incident trigger.",
-        "change_evidence": {
-          "file": "src/workers/payouts.py",
-          "line": 18,
-          "added_line": "while True:"
-        },
-        "incident_quote": "Workers retried indefinitely and exhausted the connection pool.",
-        "evidence_verified": true
-      }
-    ]
-  },
-  "risk": {
-    "confidence": "high",
-    "tier": "risky",
-    "main_risk": {
-      "category": "availability",
-      "title": "Retry limit was removed",
-      "explanation": "Workers can retry without a bound and repeat an earlier connection-pool failure.",
-      "source": "ai_finding",
-      "source_ref": "finding-001",
-      "evidence_verified": true
-    },
-    "reasons": [
-      "AI finding: the payout worker now retries without a bound.",
-      "Incident connection: INC-003 records the same unlimited-retry trigger."
-    ],
-    "minimum_profile": "strict"
-  },
-  "review": {
-    "status": "needs_review",
-    "resolution": null
-  }
-}
-```
-
-### Assessment identity
-
-- `assessment_id` is deterministic: `<repository>#<pr>@<full-head-sha>:<policy-version>`.
-- `base_sha` and `head_sha` are full 40-character lowercase Git SHAs. Short SHAs are display-only and never enter either artifact.
-- `repository`, pull-request number, head SHA, and policy version identify the assessment. A different value in any of them means a different assessment.
-- Generated wall-clock time is not part of assessment identity. `pushed_at` and `shipping_at` are canonical inputs, so identical canonical inputs and mocked AI output can still produce byte-stable artifacts.
-
-Every field shown in the assessment shape is required. Arrays may be empty where the evidence status permits it. Counts are non-negative integers, `services` contains unique service names in lexical order, and every modeled object rejects unknown fields. `ai_findings` and incident candidates are each capped at five items.
-
-### Evidence status and confidence
-
-Allowed evidence-status values are:
-
-| Field | Values |
-|---|---|
-| `diff` | `complete`, `chunked`, `over_budget`, `unavailable` |
-| `service_map` | `complete`, `incomplete`, `unavailable` |
-| `incident_history` | `checked_none`, `checked_candidates`, `unavailable` |
-| `ai_analysis` | `complete`, `fallback_model`, `partial`, `invalid`, `timeout`, `unavailable` |
-
-Assessment confidence is `high` only when the diff and service map are complete, incident history was checked, the primary-model analysis is complete, every changed path is recognized and mapped as required, and every accepted AI or incident reference was verified. Every other combination is `low` and applies at least the Guarded safety floor. A deliberately disabled optional source is represented in the versioned policy, not disguised as an unavailable source.
-
-The 3B fallback always produces `fallback_model` and `low` confidence. Its verified findings may make the result more careful, but it can never permit `safe`.
-
-### Failure propensity and the legacy projection
-
-`failure_propensity.band` is exactly `low`, `medium`, or `high`.
-
-`failure_propensity.projection` is a compatibility projection, not a probability or continuous score:
-
-| Band | Projection |
-|---|---:|
-| `low` | `20` |
-| `medium` | `50` |
-| `high` | `80` |
-
-No other projection value is valid. The final risk tier may be more careful than the propensity band because safety floors are applied afterward.
-
-The normative band decision table lives in `docs/risk-signals.md`. Incident candidates, downstream impact, criticality, supported shipping windows, missing evidence, and AI findings do not inflate this propensity band; they apply independent safety floors or fast-lane eligibility rules.
-
-### AI risk finding wire kinds
-
-The four Phase 1 semantic findings have exactly these wire values:
-
-| Wire value | Meaning | Minimum policy effect |
-|---|---|---|
-| `stored_data` | Database, schema, persisted-data, or encoding danger | `risky` |
-| `access_control` | Login, permission, token, session, or real-secret danger | `risky` |
-| `breaking_api` | Breaking request, response, field, endpoint, or permission contract | `risky` |
-| `retry_backoff` | Retry-count, timeout, delay, or backoff behavior changed | `guarded`; escalates under the rules in `docs/risk-signals.md` |
-
-The wire kind does not contain severity. Normal code maps verified facts to safety floors. AI never returns a risk tier, score, lane, profile, or approval.
-
-`ai_findings` contains only findings whose file and exact added line were verified. A finding with unsupported evidence is rejected, sets `ai_analysis` to at least `partial`, and makes assessment confidence low. Other independently verified dangerous findings remain; one invalid item must not erase real danger found elsewhere.
-
-Verified findings are sorted by wire kind, file, line, and added line, then assigned stable IDs `finding-001` through `finding-005`. Incident connections are sorted by incident ID and classification. This ordering makes source references and mocked-output artifacts deterministic.
-
-### Incident connections
-
-`incident_history.candidate_ids` records the bounded candidates normal code supplied. A candidate does not change risk by itself.
-
-Only verified connections appear in `connections`. Their wire classifications are:
-
-- `meaningful` — the change and incident share a verified component or behavior; minimum `guarded`;
-- `repeated_trigger` — the change repeats the incident trigger or root cause; `risky`.
-
-A shared service, shared words, or vague similarity is not a connection and is not emitted. Each connection must verify exact evidence from both the change and incident record.
-
-### Main risk and reasons
-
-`main_risk` is one display scenario, not the complete evidence store. Its source is `ai_finding`, `incident_connection`, or `rule`; `source_ref` must resolve inside the assessment or to a named policy rule.
-
-Main risk selection is deterministic:
-
-1. prefer a candidate that applies the strongest policy effect (`risky`, then `guarded`, then no floor);
-2. break ties with the versioned `main_risk_priority` list in `policy.yaml`;
-3. break any remaining tie by lexical `source_ref`.
-
-The Phase 1 default priority is `stored_data`, `access_control`, `breaking_api`, `retry_backoff`, `incident_connection`, `impact_rule`, `propensity_rule`, `operations_rule`, then `confidence_rule`.
-
-Normal code verifies all source references before display. Ollama may draft titles and explanations, but unsupported text is rejected. If no AI or incident scenario survives verification, SafeLane derives Main risk from the strongest rule reason.
-
-`main_risk` is required for `guarded` and `risky`. It is `null` for `safe`, because fast-lane eligibility is positive proof and not a failure scenario. Studio displays the positive-proof reasons instead of inventing “no risk found.”
-
-`reasons` contains one to four plain-English strings derived from the exact predicates that produced the result. They are ordered by policy effect, then the same policy priority, and must not invent evidence.
-
-### Review state
-
-`review.status` is exactly `needs_review` or `resolved`.
-
-- `safe` resolves automatically. `resolution.mode` is `automatic`.
-- `guarded` and `risky` require a human action. `resolution.mode` is `human`.
-- A human may select the minimum profile or a more careful valid profile, never a faster one.
-- An unresolved assessment has `resolution: null` and cannot produce a normal `decision.json`.
-- Resolution stores the selected profile name, profile source, whether it is an override, and the approval timestamp. Phase 1 stores no approver identity because accounts and roles are out of scope.
-
-A resolved assessment uses this exact object:
+## Assessment request v2
 
 ```json
 {
-  "mode": "human",
-  "profile_name": "strict",
-  "profile_source": "built_in",
-  "profile_override": false,
-  "resolved_at": "2026-08-20T10:20:00Z"
+  "schema_version": "2",
+  "repository": "AndrewMaged814/safelane-demo",
+  "pull_request": 42,
+  "base_sha": "0123456789abcdef0123456789abcdef01234567",
+  "head_sha": "a1b2c3d4e5f6789012345678901234567890abcd"
 }
 ```
 
-All five fields are required. `mode` is `automatic` or `human`; `profile_source` is `built_in`, `custom`, or `ai_assisted`; and `resolved_at` is an ISO 8601 timestamp. For deterministic tests, the approval event and its timestamp are canonical inputs.
+All fields are required. SHAs are full lowercase 40-character hexadecimal commit IDs and must resolve
+inside the supplied clean worktree. The range must be linear and `head_sha` must be a direct child of
+`base_sha` for the frozen demo. The request contains no caller-supplied changed paths, counts,
+services, diff text, tier, profile, image, or shipping time.
 
-## Bounded Ollama response contract
+## AI response v2
 
-Ollama returns candidate evidence, not an assessment. The response contains only:
+The model returns one JSON object with exactly two top-level fields:
 
 ```json
 {
   "findings": [
     {
-      "kind": "retry_backoff",
-      "category": "availability",
-      "title": "Retry limit was removed",
-      "explanation": "Workers can now retry without a bound.",
-      "file": "src/workers/payouts.py",
-      "added_line": "while True:"
+      "kind": "breaking_api",
+      "spans": [
+        {
+          "file": "src/demo_api/app.py",
+          "side": "removed",
+          "line": 17,
+          "text": "@app.get(\"/v1/quote\")"
+        },
+        {
+          "file": "src/demo_api/app.py",
+          "side": "added",
+          "line": 18,
+          "text": "@app.get(\"/v2/quote\")"
+        }
+      ]
     }
   ],
-  "incident_connections": [
+  "safeguard_proposal": {
+    "finding_index": 0,
+    "hypothesis_kind": "removed_http_route_unavailable",
+    "verification_intent_kind": "preserve_removed_http_route",
+    "approval_question_kind": "confirm_callers_migrated",
+    "remediation_kind": "retain_removed_route_as_alias"
+  }
+}
+```
+
+Fast output is:
+
+```json
+{
+  "findings": [],
+  "safeguard_proposal": null
+}
+```
+
+### Structural limits
+
+- The envelope, finding, span, and proposal objects reject unknown fields.
+- `findings` contains zero or one item. `breaking_api` is the only accepted pre-final kind.
+- A finding contains exactly two spans for the executable quote-contract fixture.
+- `side` is `removed` or `added`; `line` is a positive integer; all strings are bounded by the
+  executable schema.
+- The four proposal kinds are the exact enum values shown above. The model returns no narrative.
+- `safeguard_proposal` must be `null` when `findings` is empty. When present, it refers to index `0`.
+
+Validation is deliberately two-phase. The duplicate-key-rejecting JSON decoder first validates a
+shallow envelope: the root is an object with exactly `findings` and `safeguard_proposal`, `findings`
+is an array of at most one raw value, and the proposal key is present. The engine then validates the
+raw finding and proposal independently against the `$defs` in `ai-response-v2.schema.json`, followed
+by relationship validation. A malformed envelope invalidates the AI attempt. An invalid proposal is
+rejected without erasing a structurally valid finding; an invalid finding discards its proposal and
+applies the documented uncertainty floor. The full document is never treated as an all-or-nothing
+schema result after the shallow envelope passes.
+
+### Source and relationship validation
+
+Normal code verifies every `(file, side, line, text)` tuple against the canonical Git diff. For the
+accepted safety case it additionally requires:
+
+- span 0 is the removed static `GET /v1/quote` decorator;
+- span 1 is the added static `GET /v2/quote` decorator;
+- both spans belong to the same mapped `demo-api` service;
+- the hypothesis, intent, question, and remediation enums are mutually valid for `breaking_api`; and
+- `(demo-api, breaking_api, removed_http_route_unavailable, preserve_removed_http_route, GET,
+  /v1/quote)` resolves to the sole versioned trusted-probe entry.
+
+Normal code renders these strings from verified values:
+
+- hypothesis/impact: `Existing callers of GET /v1/quote may receive a non-success response.`
+- approval question: `Have all callers migrated away from GET /v1/quote?`
+- remediation: `Retain GET /v1/quote as an alias while introducing GET /v2/quote, then reassess.`
+
+The UI says `source references verified`, never `AI reasoning verified`. A valid finding with an
+invalid or absent proposal remains a Risky finding; the selected safeguard is omitted, evidence
+confidence becomes low, and no rejected proposal is displayed or executed.
+
+## Assessment v2
+
+The normative shape is:
+
+```json
+{
+  "schema_version": "2",
+  "assessment_id": "AndrewMaged814/safelane-demo#42@a1b2c3d4e5f6789012345678901234567890abcd:2026.08.3",
+  "assessed_at": "2026-08-09T12:00:00Z",
+  "policy_version": "2026.08.3",
+  "assessment_input_sha256": "sha256:...",
+  "assessment_result_sha256": "sha256:...",
+  "change": {
+    "repository": "AndrewMaged814/safelane-demo",
+    "pull_request": 42,
+    "base_sha": "0123456789abcdef0123456789abcdef01234567",
+    "head_sha": "a1b2c3d4e5f6789012345678901234567890abcd",
+    "files_changed": 1,
+    "lines_changed": 2,
+    "services": ["demo-api"],
+    "all_paths_recognized": true
+  },
+  "evidence": {
+    "git_diff_sha256": "sha256:...",
+    "ai_status": "complete",
+    "ai_model_digest": "sha256:...",
+    "prompt_sha256": "sha256:...",
+    "response_schema_sha256": "sha256:...",
+    "incident_history": "disabled_by_policy"
+  },
+  "ai_findings": [
     {
-      "incident_id": "INC-003",
-      "classification": "repeated_trigger",
-      "category": "availability",
-      "title": "Earlier retry trigger was repeated",
-      "explanation": "Both records describe unbounded worker retries.",
-      "file": "src/workers/payouts.py",
-      "added_line": "while True:",
-      "incident_quote": "Workers retried indefinitely and exhausted the connection pool."
+      "id": "finding-001",
+      "kind": "breaking_api",
+      "spans": [
+        {
+          "file": "src/demo_api/app.py",
+          "side": "removed",
+          "line": 17,
+          "text": "@app.get(\"/v1/quote\")"
+        },
+        {
+          "file": "src/demo_api/app.py",
+          "side": "added",
+          "line": 18,
+          "text": "@app.get(\"/v2/quote\")"
+        }
+      ],
+      "source_reference_verified": true
+    }
+  ],
+  "selected_safeguard": {
+    "finding_ref": "finding-001",
+    "selection_source": "ai_safeguard",
+    "hypothesis_kind": "removed_http_route_unavailable",
+    "hypothesis": "Existing callers of GET /v1/quote may receive a non-success response.",
+    "verification_intent_kind": "preserve_removed_http_route",
+    "probe_id": "demo-api-public-quote-v1",
+    "catalog_entry_sha256": "sha256:...",
+    "probe_preview": {
+      "method": "GET",
+      "path": "/v1/quote",
+      "expected_status": 200,
+      "attempts": 3,
+      "interval_seconds": 10,
+      "failure_allowance": 1,
+      "request_timeout_seconds": 2,
+      "active_deadline_seconds": 45,
+      "canary_only": true
+    },
+    "approval_question_kind": "confirm_callers_migrated",
+    "approval_question": "Have all callers migrated away from GET /v1/quote?",
+    "remediation_kind": "retain_removed_route_as_alias",
+    "remediation": "Retain GET /v1/quote as an alias while introducing GET /v2/quote, then reassess."
+  },
+  "policy_trace": {
+    "baseline": {
+      "rule_id": "scope.low",
+      "tier": "safe",
+      "reason": "The change affects at most 2 recognized files and 50 changed lines."
+    },
+    "safety_floors": [
+      {
+        "rule_id": "finding.breaking_api",
+        "minimum_tier": "risky",
+        "reason": "An existing HTTP contract was removed or renamed."
+      }
+    ]
+  },
+  "policy_result": {
+    "final_tier": "risky",
+    "minimum_profile": "Strict",
+    "evidence_confidence": "high",
+    "fast_eligible": false,
+    "primary_reason": "An existing HTTP contract was removed or renamed."
+  },
+  "rollout_options": [
+    {
+      "name": "Strict",
+      "source": "built_in",
+      "traffic_router": "none",
+      "replicas": 5,
+      "max_surge": 1,
+      "max_unavailable": 0,
+      "stages": [
+        {"set_weight": 20, "exposure_pods": 1, "analysis": true},
+        {"set_weight": 40, "exposure_pods": 2, "analysis": true},
+        {"set_weight": 60, "exposure_pods": 3, "analysis": true},
+        {"set_weight": 100, "exposure_pods": 5, "analysis": false}
+      ]
+    }
+  ],
+  "review": {
+    "status": "unresolved",
+    "resolution": null
+  }
+}
+```
+
+Every shown field is required. `ai_findings` may be empty and `selected_safeguard` may be `null`.
+`selected_safeguard.probe_preview` is a non-executable, normal-code projection of the hash-matched
+trusted catalog plus policy-owned Job settings, allowing Studio to remain assessment-only. It never
+contains the target, image, command, or credentials.
+`rollout_options` is a normal-code copy of every built-in profile permitted by the final tier, ordered
+from minimum to most careful: `[Fast]`, `[Guarded, Strict]`, or `[Strict]`. Studio reads these complete
+previews from the assessment; it never loads policy. Resolution may select only an exact listed option,
+and decision v3 copies that option byte-for-byte.
+`evidence.ai_status` is `complete`, `partial`, `unavailable`, `skipped_invalid_diff`, or
+`skipped_over_budget`. `complete` means the shallow envelope and every supplied component and
+relationship passed; the valid empty-Fast response qualifies. `partial` means a model response
+arrived but JSON/envelope/component/source/relationship validation rejected any part. `unavailable`
+means the attempted transport timed out or failed. The two skipped states mean no call was made.
+Model metadata fields are nullable unless status is `complete` or `partial`.
+
+### Identity and hashes
+
+`assessment_input_sha256` hashes this exact field-ordered canonical JSON envelope:
+
+```json
+{
+  "schema_version": "1",
+  "request": {
+    "schema_version": "2",
+    "repository": "AndrewMaged814/safelane-demo",
+    "pull_request": 42,
+    "base_sha": "0123456789abcdef0123456789abcdef01234567",
+    "head_sha": "a1b2c3d4e5f6789012345678901234567890abcd"
+  },
+  "policy_sha256": "sha256:...",
+  "git_diff_sha256": "sha256:...",
+  "git_diff_byte_length": 2048,
+  "incident_history": "disabled_by_policy",
+  "trusted_probe_catalog_sha256": "sha256:...",
+  "ai_configuration": {
+    "provider": "ollama",
+    "model": "qwen2.5-coder:7b",
+    "ai_model_digest": "sha256:...",
+    "prompt_sha256": "sha256:...",
+    "response_schema_sha256": "sha256:...",
+    "max_diff_bytes": 16384,
+    "timeout_seconds": 60,
+    "attempts": 1,
+    "temperature": 0,
+    "seed": 42,
+    "num_ctx": 8192,
+    "num_predict": 768
+  }
+}
+```
+
+`policy_sha256` hashes the canonical JSON projection of validated policy v2. `git_diff_sha256`
+hashes the raw canonical Git-diff bytes and `git_diff_byte_length` counts those bytes; the envelope
+never embeds the diff, so even invalid UTF-8 has one reproducible representation. The incident value
+is the exact shown string. Every SHA-256 value uses the lowercase `sha256:<64 hex>` form in real
+artifacts.
+
+`assessment_result_sha256` hashes the immutable canonical assessment result excluding itself and the
+entire mutable `review` object. Accepted findings, selected safeguard, rendered text, probe binding,
+policy trace, rollout options, and evidence status are therefore covered by approval.
+
+`assessment_id` is `<repository>#<pull_request>@<head_sha>:<policy_version>`. It is an identifier, not
+a substitute for either content hash.
+
+### Resolution
+
+Fast assessments resolve automatically. Guarded and Risky assessments begin unresolved and emit no
+decision. A resolution event contains:
+
+```json
+{
+  "type": "human",
+  "selected_profile": "Strict",
+  "resolved_at": "2026-08-09T12:05:00Z",
+  "assessment_id": "...",
+  "head_sha": "a1b2c3d4e5f6789012345678901234567890abcd",
+  "assessment_input_sha256": "sha256:...",
+  "assessment_result_sha256": "sha256:..."
+}
+```
+
+`type` is `automatic` or `human`. Automatic resolution is valid only for Fast and uses the same
+`assessed_at` timestamp. Human resolution selects only a built-in profile at least as careful as the
+minimum. A stale ID, SHA, hash, policy, or faster profile rejects resolution. Phase 1 stores no
+approver identity because accounts and roles are out of scope.
+
+## Decision v3
+
+```json
+{
+  "schema_version": "3",
+  "assessment_id": "AndrewMaged814/safelane-demo#42@a1b2c3d4e5f6789012345678901234567890abcd:2026.08.3",
+  "assessment_input_sha256": "sha256:...",
+  "assessment_result_sha256": "sha256:...",
+  "repository": "AndrewMaged814/safelane-demo",
+  "pull_request": 42,
+  "base_sha": "0123456789abcdef0123456789abcdef01234567",
+  "head_sha": "a1b2c3d4e5f6789012345678901234567890abcd",
+  "service": "demo-api",
+  "policy_version": "2026.08.3",
+  "tier": "risky",
+  "primary_reason": "An existing HTTP contract was removed or renamed.",
+  "profile": {
+    "name": "Strict",
+    "source": "built_in",
+    "traffic_router": "none",
+    "replicas": 5,
+    "max_surge": 1,
+    "max_unavailable": 0,
+    "stages": [
+      {"set_weight": 20, "exposure_pods": 1, "analysis": true},
+      {"set_weight": 40, "exposure_pods": 2, "analysis": true},
+      {"set_weight": 60, "exposure_pods": 3, "analysis": true},
+      {"set_weight": 100, "exposure_pods": 5, "analysis": false}
+    ]
+  },
+  "analysis": {
+    "kind": "job_http_contract_probe",
+    "probe_id": "demo-api-public-quote-v1",
+    "catalog_entry_sha256": "sha256:...",
+    "selection_source": "ai_safeguard",
+    "attempts": 3,
+    "interval_seconds": 10,
+    "failure_allowance": 1,
+    "request_timeout_seconds": 2,
+    "active_deadline_seconds": 45
+  },
+  "resolution": {
+    "type": "human",
+    "resolved_at": "2026-08-09T12:05:00Z"
+  }
+}
+```
+
+Every field is required. `analysis` is `null` only for Fast. Guarded and Strict carry the policy-owned
+trusted Job profile. `decision.json` contains no raw model output, source spans, hypothesis,
+question, remediation, model metadata, or Studio state. Profile stages are already resolved; the
+compiler never maps a tier to a profile or modifies their order.
+
+`profile.stages[].analysis: true` compiles to exactly one inline Argo analysis step immediately after
+that stage's `setWeight`; it is not a timed pause. `false` emits no analysis or pause. The Job's
+attempt/interval/timeout/deadline fields own its actual duration.
+
+`analysis.selection_source` is normal-code output: `ai_safeguard` when a validated proposal resolved
+the probe or `policy_fallback` for every non-Fast decision whose assessment has
+`selected_safeguard: null`, whether the non-Fast tier came from scope or uncertainty. It is not model
+authority.
+
+Decision v3 and the compiler enforce this complete cross-field authorization matrix:
+
+| Tier | Allowed profile | Resolution | Analysis |
+|---|---|---|---|
+| `safe` | `Fast` only | `automatic` only | `null` |
+| `guarded` | `Guarded` or `Strict` | `human` only | trusted Job with `policy_fallback` |
+| `risky` | `Strict` only | `human` only | trusted Job with `ai_safeguard` or `policy_fallback` |
+
+The selected profile must byte-match its built-in definition, including stages and analysis flags.
+The JSON Schema uses cross-field conditions and the compiler repeats the matrix check; every other
+tier/profile/resolution/analysis combination rejects before manifest output.
+
+## Release request v1
+
+```json
+{
+  "schema_version": "1",
+  "repository": "AndrewMaged814/safelane-demo",
+  "service": "demo-api",
+  "base_sha": "0123456789abcdef0123456789abcdef01234567",
+  "head_sha": "a1b2c3d4e5f6789012345678901234567890abcd",
+  "policy_version": "2026.08.3",
+  "image_catalog_version": "2026.08.1",
+  "image_catalog_sha256": "sha256:...",
+  "image_ref": "safelane-demo:a1b2c3d4e5f6789012345678901234567890abcd",
+  "image_id": "sha256:...",
+  "runtime_image_id": "sha256:..."
+}
+```
+
+The release command creates this independently from explicit frozen arguments and trusted image
+catalog lookup. Before compilation it verifies that Argo's current stable ReplicaSet source-revision
+label equals `base_sha`.
+
+The compiler rejects unless decision, request, image catalog, trusted-probe catalog, and stable-base
+preflight agree on every applicable identity. It accepts only the one service, five replicas, three
+built-in profiles, router `none`, and the frozen Job profile. It emits a complete manifest bundle;
+patching an existing Rollout or using `kubectl argo rollouts set image` is outside the contract.
+`decision_sha256` and `release_request_sha256` are SHA-256 hashes of the complete canonical bytes of
+their respective validated input artifacts and are emitted as the exact Rollout annotations
+`safelane.dev/decision-sha256` and `safelane.dev/release-request-sha256`.
+
+## Image catalog v1
+
+`image-catalog.json` has this exact closed shape; the real file contains all three frozen application
+revisions and one probe image:
+
+```json
+{
+  "schema_version": "1",
+  "catalog_version": "2026.08.1",
+  "application_images": [
+    {
+      "repository": "AndrewMaged814/safelane-demo",
+      "service": "demo-api",
+      "source_revision": "a1b2c3d4e5f6789012345678901234567890abcd",
+      "image_ref": "safelane-demo:a1b2c3d4e5f6789012345678901234567890abcd",
+      "image_id": "sha256:...",
+      "runtime_image_id": "sha256:...",
+      "oci_revision": "a1b2c3d4e5f6789012345678901234567890abcd"
+    }
+  ],
+  "probe_images": [
+    {
+      "key": "demo-api-public-quote-probe@2026.08.1",
+      "probe_id": "demo-api-public-quote-v1",
+      "image_ref": "safelane-http-probe:2026.08.1",
+      "image_id": "sha256:...",
+      "runtime_image_id": "sha256:..."
     }
   ]
 }
 ```
 
-The response schema rejects unknown fields, caps each array at five items, and allows empty arrays. It contains no confidence, severity, risk tier, score, lane, profile, or approval. SafeLane computes confidence from evidence completeness and adapter status; it does not trust a model's self-reported confidence.
+Every object rejects unknown fields and every field is required. Application entries are unique by
+`(repository, service, source_revision)`; probe entries are unique by both `key` and `probe_id`.
+SHAs are full lowercase Git SHAs. `image_id` is the Docker-inspected config digest;
+`runtime_image_id` is the normalized digest inspected from kind's containerd after preload and is the
+value later compared with Kubernetes container status. Both use lowercase `sha256:<64 hex>`.
+Normalization requires exactly one terminal `sha256:<64 lowercase hex>` digest in the runtime value
+and stores that digest; missing or ambiguous digests reject preparation/observation.
+`image_ref` is a local immutable demo tag, and every application `oci_revision` must equal
+`source_revision`. The trusted
+probe entry owns only the probe image key; this catalog alone owns image references and IDs. The
+compiler resolves that key here and rejects any probe ID mismatch. Catalog version and SHA-256 in
+release request v1 cover the canonical JSON bytes of this entire validated model.
 
-A structurally invalid response is discarded. An individually unsupported item is rejected while other verified items remain. Either condition lowers assessment confidence and preserves every risk floor established by normal code or other verified findings.
-
-This response contract supersedes the illustrative `confidence` field in `research/ollama-phase1.md`; the model and context-size decision in that research remains valid.
-
-## `decision.json` v2
-
-`decision.json` is the stable handoff. It intentionally excludes the full AI response, incident candidates, rejected evidence, and Studio review history.
+## Verification receipt v1
 
 ```json
 {
-  "schema_version": "2",
-  "policy_version": "2026.08.2",
-  "assessment_id": "AndrewMaged814/safelane-demo#42@a1b2c3d4e5f6789012345678901234567890abcd:2026.08.2",
-  "change": {
-    "repository": "AndrewMaged814/safelane-demo",
-    "sha": "a1b2c3d4e5f6789012345678901234567890abcd",
-    "pr": 42,
-    "services": ["payouts-api"],
-    "shipping_at": "2026-08-20T14:00:00+03:00"
-  },
-  "risk": {
-    "failure_propensity": "low",
-    "score": 20,
-    "tier": "risky",
-    "confidence": "high",
-    "main_risk": {
-      "category": "availability",
-      "title": "Retry limit was removed",
-      "explanation": "Workers can retry without a bound and repeat an earlier connection-pool failure.",
-      "source": "ai_finding",
-      "source_ref": "finding-001",
-      "evidence_verified": true
+  "schema_version": "1",
+  "recorded_at": "2026-08-09T12:08:00Z",
+  "assessment_result_sha256": "sha256:...",
+  "decision_sha256": "sha256:...",
+  "release_request_sha256": "sha256:...",
+  "image_catalog_sha256": "sha256:...",
+  "base_sha": "0123456789abcdef0123456789abcdef01234567",
+  "head_sha": "a1b2c3d4e5f6789012345678901234567890abcd",
+  "probe_id": "demo-api-public-quote-v1",
+  "catalog_entry_sha256": "sha256:...",
+  "selection_source": "ai_safeguard",
+  "hypothesis_kind": "removed_http_route_unavailable",
+  "rollout": {
+    "name": "demo-api",
+    "uid": "10000000-0000-0000-0000-000000000000",
+    "decision_sha256_annotation": "sha256:...",
+    "release_request_sha256_annotation": "sha256:...",
+    "metadata_generation": 3,
+    "observed_generation": 3,
+    "phase": "Degraded",
+    "abort": true,
+    "abort_origin": "analysis_failure",
+    "aborted_at": "2026-08-09T12:07:00Z",
+    "progressing_condition": {
+      "type": "Progressing",
+      "status": "False",
+      "reason": "RolloutAborted",
+      "message": "Rollout aborted update to revision 3: Step-based analysis phase error/failed"
     },
-    "reasons": [
-      "AI finding: the payout worker now retries without a bound.",
-      "Incident connection: INC-003 records the same unlimited-retry trigger."
-    ]
+    "stable_revision": "0123456789abcdef0123456789abcdef01234567",
+    "current_revision": "a1b2c3d4e5f6789012345678901234567890abcd"
   },
-  "approval": {
-    "mode": "human",
-    "profile_override": false,
-    "resolved_at": "2026-08-20T10:20:00Z"
-  },
-  "lane": {
-    "name": "strict",
-    "profile_source": "built_in",
-    "traffic_router": "none",
-    "replicas": 5,
-    "steps": [
-      { "set_weight": 20, "exposure_pods": 1, "checkpoint_seconds": 30 },
-      { "set_weight": 40, "exposure_pods": 2, "checkpoint_seconds": 30 },
-      { "set_weight": 60, "exposure_pods": 3, "checkpoint_seconds": 30 },
-      { "set_weight": 100, "exposure_pods": 5, "checkpoint_seconds": 0 }
-    ],
-    "analysis": {
-      "error_rate_threshold": 0.05,
-      "interval_seconds": 10,
-      "measurement_count": 3,
-      "failure_limit": 1,
-      "consecutive_error_limit": 2
+  "analyses": [
+    {
+      "stage_index": 0,
+      "analysis_run": {
+        "name": "demo-api-...",
+        "uid": "20000000-0000-0000-0000-000000000000",
+        "owner_rollout_uid": "10000000-0000-0000-0000-000000000000",
+        "phase": "Failed",
+        "completed_at": "2026-08-09T12:06:55Z"
+      },
+      "canary_target": {
+        "service_name": "demo-api-canary",
+        "service_uid": "40000000-0000-0000-0000-000000000000",
+        "service_selector_pod_template_hash": "abc123",
+        "replica_set_uid": "50000000-0000-0000-0000-000000000000",
+        "replica_set_pod_template_hash": "abc123",
+        "source_revision": "a1b2c3d4e5f6789012345678901234567890abcd",
+        "exposure_pods": 1,
+        "endpoint_pod_uids": ["60000000-0000-0000-0000-000000000000"],
+        "application_image_ref": "safelane-demo:a1b2c3d4e5f6789012345678901234567890abcd",
+        "application_runtime_image_id": "sha256:..."
+      },
+      "job": {
+        "name": "demo-api-...",
+        "uid": "30000000-0000-0000-0000-000000000000",
+        "owner_analysis_run_uid": "20000000-0000-0000-0000-000000000000",
+        "phase": "Failed",
+        "container_started": true,
+        "probe_container_exit_code": 1,
+        "probe_pod_uid": "70000000-0000-0000-0000-000000000000",
+        "probe_pod_owner_job_uid": "30000000-0000-0000-0000-000000000000",
+        "probe_image_ref": "safelane-http-probe:2026.08.1",
+        "probe_runtime_image_id": "sha256:..."
+      },
+      "probe_result": {
+        "schema_version": "1",
+        "probe_id": "demo-api-public-quote-v1",
+        "observations": [
+          {"attempt": 1, "outcome": "http_response", "http_status": 404},
+          {"attempt": 2, "outcome": "http_response", "http_status": 404},
+          {"attempt": 3, "outcome": "http_response", "http_status": 404}
+        ],
+        "failures": 3,
+        "failure_allowance": 1,
+        "result": "failed"
+      }
     }
-  }
+  ],
+  "release_adapter_abort_requested": false,
+  "verdict": "prediction_observed_and_update_aborted",
+  "inconclusive_reason": null
 }
 ```
 
-### Decision rules
+The compiler annotates the Rollout with the canonical decision and release-request hashes. The
+observer starts from that exact annotated Rollout, requires equality between `metadata_generation`
+and `observed_generation`, then follows controller references to each AnalysisRun, Job, and probe Pod; it
+never joins by name prefix or newest timestamp. `analyses` is ordered by `stage_index`, so a
+successful Strict rollout can represent all three Jobs. For each stage, the observer snapshots the
+canary Service selector and EndpointSlice while the probe Pod is running, proves every endpoint Pod
+is owned by the recorded head ReplicaSet, and records the actual application/probe runtime image IDs
+from container status. Those normalized IDs must equal the hash-matched image catalog. A Job that
+never starts has `container_started: false`, a null exit code, null Pod/image fields, and null
+`probe_result`.
 
-- Every field shown in the decision shape is required. `lane.analysis` is present but may be `null`; `risk.main_risk` is present but may be `null` only for `safe`.
-- `assessment_id`, repository, SHA, policy version, risk result, explanation, and selected profile must equal the resolved assessment.
-- `risk.failure_propensity` is `low`, `medium`, or `high`.
-- `risk.score` is exactly `20`, `50`, or `80` and must match the propensity band. It remains only for schema-v2 compatibility and display; nothing branches on it.
-- `risk.tier` is exactly `safe`, `guarded`, or `risky`.
-- `risk.confidence` is exactly `high` or `low` and retains the assessment meaning: evidence completeness, never model probability.
-- `risk.reasons` contains one to four strings. Each string is non-empty, evidence-backed, and inherited byte-for-byte from the resolved assessment.
-- `approval.mode` is `automatic` only for an automatically resolved `safe` assessment; otherwise it is `human`.
-- `profile_override` is true only when the selected profile is more careful than the policy-selected minimum.
-- `profile_source` is `built_in`, `custom`, or `ai_assisted`. AI-assisted means a human approved a normal-code-validated draft.
-- `traffic_router` allows `none` or `nginx`, but the Phase 1 demo value is locked to `none`. No nginx work is required for Gate 2.
-- The final step always exposes all replicas, has weight `100`, and has `checkpoint_seconds: 0`.
-- With `traffic_router: none`, `exposure_pods` is authoritative and `set_weight` must be the honest weight derived from the configured replica count.
-- `analysis` is `null` for a Fast profile and required for every profile containing a health checkpoint.
-- The selected profile must be at least as careful as the minimum profile required by the risk tier.
+Rollout fields that have not been observed may be null only for the `inconclusive` variant.
+`aborted_at`, `abort_origin: analysis_failure`, and the aborting `progressing_condition` are required
+for `prediction_observed_and_update_aborted` and null for `prediction_not_observed`; both revision
+fields and equal generations are required for either conclusive verdict. `hypothesis_kind` is
+required for `ai_safeguard` and null for `policy_fallback`.
+`job.phase` is the adapter's normalized `Complete` or `Failed` value from Kubernetes Job conditions;
+`container_started` is true only when the named probe container has a terminated state with an exit
+code, not merely when the Job object exists.
 
-The exact built-in profile rules and custom-profile validation remain in [`docs/rollout-profiles.md`](docs/rollout-profiles.md).
+`abort_origin` is derived, never asserted by a caller: `release_adapter` when the adapter issued an
+abort; `analysis_failure` only when the linked AnalysisRun completed before `aborted_at` and Argo's
+condition has the exact step-analysis signature below; `external_or_unknown` when abort fields exist
+without either predicate; and null when no abort exists. This deliberately does not claim it can
+identify a human actor from Kubernetes state.
+
+Only normal code derives the verdict using this exhaustive order:
+
+1. `inconclusive` if any schema, hash, annotation, generation, revision, catalog/runtime-image,
+   canary-target, UID/owner, timestamp, probe-log, or expected resource check mismatches; any Job did
+   not start or finish; abort origin is not the one allowed by a conclusive rule; no AI prediction
+   exists; or the HTTP evidence/terminal combination matches neither rule below.
+   `inconclusive_reason` is then one closed enum naming the first failed check in the schema-defined
+   order.
+2. `prediction_observed_and_update_aborted` only for `ai_safeguard` when a started Job's validated log
+   contains more HTTP responses with status other than expected 200 than the failure allowance; a
+   timeout or connection error never counts as prediction evidence and any such transport outcome
+   makes the receipt inconclusive. That Job and its owner AnalysisRun
+   must be `Failed`, `analysis_run.completed_at < rollout.aborted_at`, `rollout.abort` true,
+   `abort_origin: analysis_failure`, phase `Degraded`, and the `Progressing=False` condition reason
+   `RolloutAborted` with a message containing `Step-based analysis phase error/failed`. The
+   stable/current revision labels must equal base/head.
+3. `prediction_not_observed` only for `ai_safeguard` when every configured analysis stage has one
+   started Job whose every observation is HTTP 200—zero non-200, timeout, or connection-error
+   observations—every Job and AnalysisRun is `Complete`/`Successful`, the Rollout is `Healthy` with
+   `abort: false` and null abort origin, and both its stable and current revision equal `head_sha`.
+
+`verification-receipt-v1.schema.json` is verdict-discriminated and enforces the corresponding
+nullability and array cardinality. A policy-fallback run can produce only `inconclusive` with
+`no_ai_prediction` after all earlier integrity/observability checks pass; it cannot claim that an AI
+prediction was tested. Receipt collection timing out also produces `inconclusive`, never a guessed
+terminal result.
+
+For `inconclusive`, the non-null `inconclusive_reason` is the first failed check in this exact order
+and closed enum: `artifact_binding_mismatch`, `catalog_binding_mismatch`,
+`rollout_annotation_mismatch`, `generation_mismatch`, `revision_mismatch`,
+`runtime_image_mismatch`, `canary_target_mismatch`, `resource_ownership_mismatch`,
+`timestamp_order_invalid`, `probe_job_not_started`, `probe_job_incomplete`,
+`probe_result_invalid`, `non_analysis_abort_observed`, `observer_timeout`, `no_ai_prediction`,
+`prediction_evidence_mixed`, `terminal_state_inconsistent`. The other two verdicts require
+`inconclusive_reason: null`.
+
+## Canonical serialization
+
+All JSON decoding rejects duplicate keys. All persisted JSON uses UTF-8 without BOM, LF line endings, declared model field order, two-space
+indentation, separators `,` and `: `, RFC 3339 UTC timestamps ending in `Z`, no NaN/Infinity, and one
+final newline. Hashes use those canonical bytes. Fixed fake-AI inputs and fixed clocks must produce
+byte-identical goldens.
+
+Validated YAML catalogs have two hashes. `trusted_probe_catalog_sha256` hashes the entire validated
+catalog model after conversion to the same canonical JSON representation. `catalog_entry_sha256`
+hashes the entire validated probe entry—`id`, `binding`, `assertion`, and `execution`—using the same
+declared field order and representation. YAML comments, whitespace, and key
+order therefore do not affect either hash. Catalog loading rejects duplicate keys, anchors, aliases,
+merge keys, unknown fields, and non-string map keys.
 
 ## Validation and failure behavior
 
-Both artifact schemas and the bounded Ollama response schema use `additionalProperties: false` at every modeled object. Unknown fields, missing required fields, wrong types, invalid enums, non-finite numbers, unsupported schema versions, or cross-field inconsistencies are hard validation errors. This supersedes the earlier rule that consumers ignore unknown fields.
+- Invalid request, policy, repository identity, Git range, or artifact schema: typed command error;
+  no assessment or decision.
+- Diff over 16,384 UTF-8 bytes, Ollama unavailable/timeout, malformed envelope, or unverifiable
+  finding: valid low-confidence Guarded-or-higher assessment; never Fast.
+- Valid finding plus invalid safeguard proposal: keep the finding and its Risky floor, omit the
+  safeguard, and use only the policy-owned non-Fast fallback probe after human resolution.
+- Invalid or stale resolution: no decision.
+- Successful replacement assessment: invalidate the prior decision under the workspace lock before
+  publishing; any interrupted replacement remains fail-closed with no decision.
+- Invalid, absent, stale, identity-mismatched, or unapproved decision/release inputs: reject before
+  rendering or kubectl.
+- Invalid tier/profile/resolution/analysis matrix: reject in schema and again in the compiler.
+- Probe Job never starts: receipt is `inconclusive`; never claim the prediction was observed or the
+  product caused an application-level abort.
 
-Before rendering a Rollout, the consumer must verify:
-
-1. `decision.json` passes schema and cross-field validation;
-2. repository and full SHA match the requested release;
-3. the selected profile is not faster than the risk tier permits;
-4. pod stages, weights, checkpoints, and analysis settings obey `docs/rollout-profiles.md`; and
-5. the complete Rollout manifest passes `kubectl argo rollouts lint`.
-
-If any check fails, the consumer must not use any lane values from the invalid artifact. It synthesizes the locally bundled Strict fallback for the known demo service, marks the result `risky` with `low` confidence and a contract-error reason, and continues only through the release workflow's existing authorization boundary.
-
-Missing Prometheus data is unhealthy. Provider or query errors use the configured consecutive-error limit. No contract error, missing evidence, or AI failure may produce a faster rollout.
-
-## Handoff mechanics
-
-- Andrew's side owns assessment, review, policy validation, and decision emission.
-- Ahmed's side consumes only schema-valid `decision.json` or its own fixed Strict fallback.
-- The two workstreams agree on the v2 decision schema before integration.
-- Ahmed may hand-write schema-valid decision fixtures while Andrew's side is absent.
-- Andrew validates against hand-written decisions while Ahmed's cluster is absent.
-- The release script renders a complete Rollout, runs `kubectl argo rollouts lint`, then performs one `kubectl apply -f`.
-- Never patch Rollout steps and never mix apply with `kubectl argo rollouts set image`.
-- Burn one warm-up revision off-camera because Argo skips canary steps on a service's first deployment.
+No uncertainty or accepted danger may lower the tier. No AI output may make a rollout faster.
 
 ## Canonical source hierarchy
 
-Use each artifact only for the concern it owns:
-
-1. `CONTEXT.md` owns SafeLane's domain vocabulary.
-2. Accepted ADRs own hard architectural boundaries.
-3. `contract.md` owns artifact boundaries, lifecycle, field semantics, wire values, validation, and handoff behavior.
-4. `docs/input-contracts.md` owns caller-supplied request, policy, incident, profile-draft, and evaluation-fixture shapes.
-5. `docs/risk-signals.md` owns policy predicates and safety-floor effects.
-6. `docs/rollout-profiles.md` owns profile behavior and profile-validation rules.
-7. `docs/safelane-studio.md` owns the review and profile-management interaction.
-8. `docs/golden-scenarios.md` owns acceptance and reporting rules.
-9. Research files explain rationale and evidence but are non-normative when a later accepted decision differs.
-10. README, brief, Q&A, schedule, and pitch files are narrative surfaces and never override the sources above.
-
-When implemented, JSON Schema files are executable mirrors of this contract's wire shape. A discrepancy between a schema and this contract is a build-blocking defect to reconcile explicitly; neither side may silently choose one.
+1. `CONTEXT.md` owns domain language.
+2. Accepted ADRs own hard architectural decisions.
+3. This contract and executable schemas own wire artifacts, authorization, and handoff behavior.
+4. `docs/input-contracts.md` and `docs/risk-signals.md` own supported inputs and policy predicates.
+5. `docs/rollout-profiles.md` owns built-in stages and trusted Job behavior.
+6. `docs/safelane-studio.md` owns the pre-final review UI.
+7. `docs/golden-scenarios.md` owns acceptance fixtures and thresholds.
+8. `plan.md` and `detailed-plan.md` own implementation order, gates, cuts, and schedule.
+9. Prototypes, research, README, abstract, Q&A, brief, and earlier Git history are explanatory or
+   publishing surfaces and never override the sources above.
 
 ## Superseded descriptions
 
-The following existing descriptions are not build instructions:
+The following are not build instructions:
 
-- `safelane-brief.html`: six deterministic signals, generic config-versus-code scoring, continuous-score language, and “no LLM” claims;
-- `detailed-plan.md`: additive/composite scoring, copied DeployWhisper code, PyDriller in the hot path, the old dashboard, and the original day-by-day implementation sequence;
-- `plan.md`: reversibility and timing described as additive scoring signals rather than safety floors, plus past-due traffic-router indecision;
-- `safelane-qa.md`: config-versus-code scoring and any claim that the model can be turned off with identical assessment behavior;
-- `research/risk-engine-options.md`: the earlier 90-day incident propensity match where it conflicts with the later verified-connection policy;
-- `research/ollama-phase1.md`: the illustrative model-returned `confidence` field, superseded by normal-code evidence completeness in this contract.
-
-Those files may be rewritten later as publishing and execution work. Implementers must follow the canonical sources above now; no implementation decision remains hidden in the stale narratives. The current `README.md` is a publishing surface aligned to this hierarchy, but remains non-normative.
+- `safelane-brief.html` and publishing files that describe six additive signals, continuous scores,
+  “no LLM,” self-learning, exact traffic percentages, or DORA predictions;
+- pre-2026-08-09 plan versions, additive/composite scoring, copied DeployWhisper code, PyDriller in
+  the hot path, the old dashboard/backtest, Prometheus, nginx, and the original sequence;
+- the Phase-1-wide incident corpus, four-finding runtime, profile editor, and Generate-with-AI
+  descriptions superseded by the bounded pre-final contract; and
+- any claim that missing authorization may silently continue with a local Strict profile.

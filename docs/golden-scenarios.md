@@ -1,139 +1,113 @@
-# Phase 1 golden scenarios and acceptance thresholds
+# Pre-final acceptance scenarios
 
-**Decision date:** 2026-08-08
+**Version:** 2 · **decision date:** 2026-08-09
 
-**Decision owner:** Andrew
+Acceptance proves one bounded AI-to-safeguard path and one real Argo abort. It is not an accuracy
+benchmark or production-safety claim.
 
-**Scope:** Gate 2 validation of SafeLane's fixed policy, bounded Ollama findings, incident connections, evidence verification, and fail-safer behavior.
+## Gate A — deterministic conformance
 
-## Decision
+Real temporary Git repositories plus a fake AI adapter must prove:
 
-Gate 2 has three separate checks:
+- Fast and quote-contract assessment/decision goldens are byte-identical with fixed inputs/clocks;
+- every scope boundary and Fast precondition in `docs/risk-signals.md`;
+- every baseline/floor rule ID, exact reason, trace order, final-tier tie, and primary-reason tie-break;
+- wrong file, side, line, text, missing span, reversed route roles, dynamic route, or fabricated
+  reference is rejected;
+- duplicate JSON keys at any artifact or AI-response level are rejected;
+- missing/extra proposal fields, bad finding index, and unsupported hypothesis, intent, question, or
+  remediation enum are rejected;
+- a valid `breaking_api` finding retains its Risky floor when the proposal is rejected;
+- shallow-envelope failure rejects the AI attempt, while component validation preserves a valid
+  finding when only its proposal is invalid;
+- rejected model content never appears as a trusted safeguard or executable value;
+- the verified quote contract resolves only to `demo-api-public-quote-v1` and its exact catalog hash;
+- adding uncertainty or danger never lowers tier and no invalid AI path produces Fast;
+- medium/high baseline cases with a complete empty AI response remain high-confidence non-Fast,
+  approve through Guarded/Strict as allowed, and receive `policy_fallback` analysis;
+- assessment `rollout_options` contains exactly `[Fast]`, `[Guarded, Strict]`, or `[Strict]` for its
+  tier; approval/decision rejects any altered or unlisted preview;
+- stale assessment identity/hash/policy resolution emits no decision;
+- approved head A → successful unresolved assessment of head B removes A's decision, after which an
+  A release request rejects; a simulated failure between invalidation and publish also leaves no
+  decision;
+- every invalid tier/profile/resolution/analysis matrix combination—including Risky + Fast,
+  non-Fast + automatic, Safe + human, Guarded + `ai_safeguard`, and non-Fast + null analysis—fails
+  both schema and compiler;
+- the exact assessment-input envelope reproduces for valid and invalid-UTF-8 diffs from raw-byte hash
+  and length;
+- both owners produce identical canonical whole-catalog and full-entry probe hashes from semantically
+  identical YAML with different comments/key order;
+- image catalog v1 accepts exactly the three frozen application identities and one probe image and
+  rejects wrong OCI revision, tag, build/runtime image ID, duplicate identity/key, or probe-key binding;
+- absent, invalid, unapproved, wrong-SHA/service/image/catalog decision inputs reject before manifest
+  output.
 
-1. **Deterministic conformance gate** — normal code must implement every policy branch, boundary, invariant, and safe fallback exactly.
-2. **Locked Ollama challenge** — twelve authored cases run twice must produce the intended semantic findings, evidence decisions, incident connections, and final risk tiers.
-3. **Real-history smoke gate** — the same assessment entry point must process one pinned historical `roots/trellis` diff and preserve its real provenance and limitations.
+Receipt schema/golden tests cover all three verdict variants: linked observed failure, all-stage probe
+success with all HTTP 200 and promotion, and inconclusive startup failure. Additional inconclusive
+goldens cover one tolerated 404, transport-only/mixed failures, a fully observed policy-fallback run
+with `no_ai_prediction`, metadata/observed generation mismatch, invalid AnalysisRun-completion versus
+abort ordering, wrong runtime image ID, and a canary Service/EndpointSlice not bound to the head
+ReplicaSet. Negative cases also include missing/incomplete statuses, malformed probe-result logs,
+wrong annotations, catalog/hash/revision mismatch, wrong Rollout/AnalysisRun/Job/Pod owner UID, and an
+external/manual abort represented as `abort_origin: external_or_unknown` with reason
+`non_analysis_abort_observed`. Each must either validate as the exact expected variant or fail schema
+validation; none may be silently coerced to a conclusive verdict.
 
-The deterministic gate requires byte-stable output. The Ollama gate requires **semantic stability**, not byte-identical prose: finding order, reason wording, and latency may vary, but accepted finding kinds, accepted evidence, incident-connection class, confidence, risk tier, and rollout profile may not.
+## Gate B — six one-shot Ollama observations
 
-This is a conformance and demo-readiness evaluation. It is not an accuracy estimate, calibration study, backtest, or claim about production incident reduction.
+With the pinned, warmed 7B model, run each case twice without retry or best-of selection:
 
-## Shared challenge baseline
+| Case | Change | Expected normalized result |
+|---|---|---|
+| `fast-copy` | bounded response-copy change | zero findings; null proposal |
+| `additive-route` | add `/v2/quote`, retain `/v1/quote` | zero findings; null proposal |
+| `quote-contract-break` | remove `/v1/quote`, add `/v2/quote` | one verified `breaking_api` finding, exact two spans, expected proposal enums, trusted probe binding |
 
-Unless a case says otherwise, each synthetic challenge uses:
+Gate B passes only when all 6 one-shot responses are envelope-valid, normalize to the expected result,
+accept zero fabricated references, and finish inside the configured timeout. Record model manifest
+digest, prompt/schema hashes, model settings, raw response, normalized result, and latency for every
+observation. Report `6/6 fixture observations`; never convert this tiny authored set into an accuracy
+percentage.
 
-- no more than two files and 50 changed lines;
-- exactly one mapped, non-critical service with no downstream dependents;
-- a supported shipping window;
-- successfully loaded policy, service map, and incident store;
-- no incident candidates;
-- the pinned `qwen2.5-coder:7b` setup from `research/ollama-phase1.md`; and
-- no danger outside the behavior named by the case.
+## Gate C — Studio and authorization
 
-This baseline makes the change eligible for `safe` when no verified danger or uncertainty is present. It prevents an unrelated normal-code rule from hiding an AI or incident-classification error.
+- Fast shows positive proof and automatic resolution without inventing a hypothesis.
+- Risky shows both spans, the deterministic safety-case text, validation ledger, trusted probe,
+  Strict preview, approval question, remediation, and unresolved state.
+- Medium Guarded/high Risky baseline-only views preserve high confidence and show no invented
+  uncertainty floor; low-confidence Guarded and Risky-with-rejected-proposal views show their actual
+  floors/evidence. All four show the policy-fallback notice and allowed approval action without
+  displaying rejected model content as a trusted safeguard.
+- Approval compare-and-swaps assessment ID, head SHA, input hash, and result hash.
+- A stale page or faster profile is rejected.
+- The exact resolved assessment is written before its decision, and only that decision authorizes the
+  release path.
 
-Each checked-in case manifest must include the fields required by `research/risk-engine-evaluation.md`: stable ID, provenance, parent and diff, service facts, incident candidates, expected and forbidden findings, exact supporting spans, expected confidence and tier, rationale, author, review status, and creation date.
+## Gate D — real integration twice
 
-The finding names below are semantic names. The contract-freeze decision must assign each one exactly one wire enum; changing the wire spelling must not change these labels or their policy meaning.
+Each counted run begins with the defined namespace reset and proves:
 
-## Twelve locked challenge cases
+1. Warm-up reaches five Ready stable pods.
+2. Fast promotes and becomes the stable base; `GET /v1/quote` returns 200.
+3. Human approval produces the exact SHA- and trusted-probe-bound Strict decision.
+4. The first Strict stage creates one Ready canary pod; `canaryService` selects only the head SHA.
+5. The trusted Job records 404 from `GET /v1/quote` and exits nonzero.
+6. Job and AnalysisRun become `Failed`; Argo automatically aborts and the Rollout is `Degraded`.
+7. The failed ReplicaSet scales down and the stable base serves `/v1/quote` successfully again.
+8. Receipt v1 binds the assessment, decision/release annotations, revisions, catalogs, prediction,
+   structured probe result, equal generations, actual runtime image IDs, the canary
+   Service/EndpointSlice → head ReplicaSet/pod snapshot, and the Rollout → AnalysisRun → Job → Pod
+   UID/owner-UID chain with verdict
+   `prediction_observed_and_update_aborted`.
+9. The Rollout has non-null `abortedAt` and its `Progressing=False` condition has reason
+   `RolloutAborted` with the step-analysis failure message; the linked AnalysisRun completed first,
+   `abort_origin` is `analysis_failure`, and the release adapter issued no abort.
 
-### True hazards
+An image/startup failure, wrong identity, missing status, or catalog mismatch fails the gate and
+produces `inconclusive`. The overall pre-final gate is `PASS` only after two clean runs.
 
-| ID | Changed behavior and required evidence | Expected accepted finding | Expected result |
-|---|---|---|---|
-| `stored-data-drop` | `db/migrations/042_payouts.sql` adds `ALTER TABLE payouts DROP COLUMN bank_reference;` | Stored-data danger, citing that exact added line | `high` confidence, `risky`, Strict profile |
-| `access-check-weakened` | `src/auth/authorize.py` replaces an administrator-only result with `return user.is_authenticated` | Access-control danger, citing that exact added line and the removed administrator check as context | `high` confidence, `risky`, Strict profile |
-| `required-api-field` | `src/api/models.py` replaces `currency: str | None = None` with `currency: str` in an existing request model | Breaking-API danger, citing the new required field and using the removed optional declaration as context | `high` confidence, `risky`, Strict profile |
-| `unbounded-retry` | `src/workers/payouts.py` replaces a bounded attempt loop with `while True:` around the existing retry body | Retry/backoff danger with the unbounded-retry escalation, citing `while True:` | `high` confidence, `risky`, Strict profile |
+## Deferred evaluation
 
-### Contrast cases
-
-| ID | Changed behavior and required evidence | Expected accepted or rejected finding | Expected result |
-|---|---|---|---|
-| `read-only-query` | `src/reports/payouts.sql` adds `SELECT id, status FROM payouts ORDER BY created_at DESC;` | No stored-data danger; reading and ordering data does not alter persisted state | `high` confidence, `safe`, Fast profile |
-| `marked-test-secret` | `tests/fixtures/auth.py` adds `TEST_API_TOKEN = "fixture-token-not-a-secret"` in a repository-recognized test fixture | No access/secret danger; the fixture is clearly synthetic and cannot be loaded by production code | `high` confidence, `safe`, Fast profile |
-| `new-optional-field` | `src/api/models.py` adds `note: str | None = None` to an existing request model | No breaking-API danger; an optional field is additive | `high` confidence, `safe`, Fast profile |
-| `bounded-retry-change` | `src/workers/payouts.py` changes `MAX_RETRIES = 3` to `MAX_RETRIES = 4` | Accept the retry/backoff finding, but forbid the unbounded/repeated-trigger escalation | `high` confidence, `guarded`, Guarded profile |
-
-`bounded-retry-change` is a **tier contrast**, not a no-finding case. The policy already says any retry-count change is at least guarded. Calling it a negative finding would contradict `docs/risk-signals.md`.
-
-### Incident pairs
-
-The incident cases use a small harmless diff under the shared baseline. Normal code supplies only the named incident candidate to Ollama and verifies exact quotes from both inputs.
-
-| ID | Change and incident candidate | Expected connection | Expected result |
-|---|---|---|---|
-| `incident-same-component` | `BATCH_FLUSH_SECONDS = 5` in `settlement-batcher`; candidate says, “Large settlement batches exhausted worker memory,” in the same component | Meaningful same-component/behavior-family connection, but not the same trigger or root cause | `high` confidence, `guarded`, Guarded profile |
-| `incident-repeated-trigger` | `BATCH_SIZE = 200` in `settlement-batcher`; candidate trigger says, “Increasing payout batches to 200 exhausted worker memory during settlement.” | Repeated trigger, citing the exact changed value and incident quote | `high` confidence, `risky`, Strict profile |
-| `incident-same-service-distractor` | `EMAIL_SUBJECT = "Your payout is ready"`; same-service candidate concerns settlement-batch memory exhaustion | No connection; sharing a service is candidate selection, not evidence | `high` confidence, `safe`, Fast profile |
-| `incident-shared-words-distractor` | Frontend text adds `retry_badge_text = "Retry payment"`; candidate concerns payout workers exhausting the connection pool through endless retries | No connection; shared words do not establish the same component or behavior | `high` confidence, `safe`, Fast profile |
-
-The final locked fixtures must contain fuller surrounding code and incident records, but they may not change the behavior, expected evidence, or classifications above. Development examples must use different text and components.
-
-## Acceptance thresholds
-
-### Gate A — deterministic conformance
-
-Gate A passes only when all of the following are true:
-
-- every decision-table row and numeric boundary in `research/risk-engine-evaluation.md` passes;
-- every monotonicity, positive-proof, determinism, and minimum-profile property passes;
-- every injected failure reaches its documented safe state;
-- every expected `decision.json` is schema-valid and byte-stable; and
-- there are **zero failures**.
-
-No percentage or flaky retry allowance applies to deterministic code.
-
-### Gate B — locked Ollama challenge
-
-Run all twelve cases twice with a warmed model, producing 24 observations. Gate B passes only with:
-
-- `24/24` schema-valid responses;
-- `24/24` expected confidence values, final risk tiers, and minimum rollout profiles;
-- every expected finding present in both runs of its case;
-- every finding backed by an exact accepted source reference;
-- zero forbidden findings or dangerous escalations in the contrast cases;
-- zero under-triage and zero false-fast results;
-- zero fabricated code or incident references accepted;
-- zero false incident connections; and
-- both genuine incident connections assigned the correct connection class.
-
-Over-triage is safer than under-triage in production, but it does not pass this tiny authored challenge: a system that marks every case risky has not demonstrated useful discrimination. An unexpected extra finding or higher tier is therefore a failed case and must be reported as over-triage.
-
-Exact reason prose, finding order, and latency are observations, not pass/fail criteria, provided every reason remains evidence-backed and readable. Record all timings and both raw runs.
-
-If the challenge causes a prompt, schema, parser, model, or policy change, the failed case moves into the development set. Replace it with a new unseen case covering the same boundary, repin every evaluated artifact, and perform one fresh reported run. Do not repeatedly tune against the locked set.
-
-### Gate C — real `roots/trellis` history
-
-Use commit [`5e884c1a9508173935096dc7e2fa6a7aab16743d`](https://github.com/roots/trellis/commit/5e884c1a9508173935096dc7e2fa6a7aab16743d) with parent `5890fc20b45821e20378a66c2a522a9ad35acf43`.
-
-Gate C passes only when SafeLane:
-
-- ingests the authentic two-file, three-line diff through the normal assessment entry point;
-- preserves the upstream repository, commit, parent, and license provenance;
-- identifies the permission-changing evidence `mode: 0775` and the added templated `mode` application;
-- accepts no fabricated evidence;
-- selects the permission/access danger and its `risky` safety floor under the declared demo service map; and
-- emits a schema-valid Strict-profile decision without inventing an incident connection.
-
-The result may be described only as an authentic historical diff linked by a published IaC defect dataset to a later fix. It must not be called a production incident, prediction, accuracy benchmark, or proof of causality.
-
-Do not select the documentation-only Trellis comparator until the prompt is frozen. It is a human-reviewed narrative comparator, not part of the pass/fail gate, because the source dataset does not label unlisted commits as clean.
-
-## Grading report
-
-The final report must show:
-
-- Gate A rows/properties/failures passed and failed as raw counts;
-- the full expected-tier × actual-tier table for all 24 Gate B observations;
-- under-triage, false-fast, and over-triage counts;
-- findings found, missed, wrong-kind, and forbidden;
-- invalid references emitted, rejected, and accepted;
-- true and false incident connections;
-- fallback results;
-- per-run timing and pin information; and
-- the Gate C result with the approved limitation wording.
-
-The only overall outcomes are `PASS` and `FAIL`. A failure may still be demonstrated honestly, but SafeLane must not call Gate 2 complete until every hard threshold above passes.
+The old 12-case × two-run challenge, incident pairs, Trellis history, other finding kinds, payout
+idempotency, and accuracy/confusion-matrix reporting are final-round or post-hackathon work.

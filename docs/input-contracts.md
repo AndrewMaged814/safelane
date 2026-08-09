@@ -1,232 +1,222 @@
-# Phase 1 input contracts
+# Pre-final input contracts
 
-**Contract version:** 1
-**Decision date:** 2026-08-08
-**Decision owner:** Andrew
+**Version:** 2 · **decision date:** 2026-08-09
 
-This document freezes every caller-supplied input needed to build and evaluate the Phase 1 risk engine. `contract.md` owns the emitted artifacts; this document owns the request, policy, incident, and challenge-fixture shapes that produce them.
-
-All JSON objects and YAML mappings reject unknown fields. All paths use forward slashes, are relative to their declared root, and must remain inside that root after normalization. UTF-8 without a byte-order mark is the only supported text encoding.
+This document owns caller inputs and the validated policy surface. Wire outputs are owned by
+[`contract.md`](../contract.md).
 
 ## Assessment invocation
 
-The CLI receives a repository worktree path and one `assessment-request.json` path. The worktree is trusted only as a source of Git objects; caller-supplied counts, changed paths, or patch text are never accepted.
-
-```json
-{
-  "schema_version": "1",
-  "repository": "AndrewMaged814/safelane-demo",
-  "pr": 42,
-  "base_sha": "0123456789abcdef0123456789abcdef01234567",
-  "head_sha": "a1b2c3d4e5f6789012345678901234567890abcd",
-  "title": "Remove payout retry limit",
-  "shipping_at": "2026-08-20T14:00:00+03:00",
-  "pushed_at": "2026-08-20T10:15:00Z"
-}
+```text
+safelane assess --worktree <clean-path> --request <request-v2.json> --assessed-at <rfc3339-utc> --output <workspace>
 ```
 
-Every field is required. `schema_version` is exactly `"1"`; `repository` is `<owner>/<name>`; `pr` is a positive integer; both SHAs are full 40-character lowercase hexadecimal object IDs; `title` is non-empty; and both timestamps are RFC 3339 date-times with an explicit offset.
+The request shape is frozen in `contract.md`. Git owns changed paths, line counts, source text, and
+commit relationships. Caller metadata cannot override them. The worktree must be clean, both full
+SHAs must exist, and the demo head must be a direct child of its base.
 
-Before assessment, SafeLane verifies that both commits exist, `base_sha` is an ancestor of `head_sha`, and the worktree's canonical `origin` repository matches `repository`. It reads the change with Git's rename-aware diff for `base_sha..head_sha`. `files_changed` is the number of diff entries; `lines_changed` is added lines plus deleted lines from Git numstat. A rename is one entry and maps by its destination path, while a deletion maps by its source path. Paths, added-line numbers, and evidence text are derived from the unified diff. A missing object, repository mismatch, or non-ancestor range is an invocation error and emits no assessment. A binary or undecodable changed file remains in the file count but makes the diff evidence incomplete and confidence low.
+The canonical diff is the raw stdout bytes from this exact operation in the clean worktree, with the
+two validated SHAs passed as separate argv values rather than interpolated shell text:
 
-## `policy.yaml`
+```text
+git -c core.quotePath=true diff --no-ext-diff --no-textconv --no-color --no-renames --unified=3 --src-prefix=a/ --dst-prefix=b/ <base_sha> <head_sha> --
+```
 
-One policy file owns thresholds, shipping support, service topology, risk-to-profile mappings, Main risk priority, and rollout profiles:
+Run with Git's pager disabled and locale fixed to `C`; nonzero exit or stderr is a typed input error.
+Binary patches are unsupported. Hash and byte length always use the raw stdout bytes. Only after that
+does the engine attempt strict UTF-8 decoding for path/span parsing and model input. Invalid UTF-8, an
+unrecognized path, or a diff over 16,384 bytes is handled by `docs/risk-signals.md`; the engine never
+truncates or chunks model input.
+
+## `policy.yaml` v2
+
+The pre-final accepts exactly this closed-world policy shape:
 
 ```yaml
-schema_version: "1"
-policy_version: 2026.08.2
-timezone: Africa/Cairo
-release_service: payouts-api
+schema_version: "2"
+policy_version: "2026.08.3"
 
-limits:
+release_service:
+  name: demo-api
+  replicas: 5
+  critical: false
+  downstream_dependents: []
+  path_prefixes:
+    - src/demo_api/
+
+scope:
   small_max_files: 2
   small_max_lines: 50
   large_min_files: 10
   large_min_lines: 500
-  incident_lookback_days: 180
-  incident_candidate_limit: 5
-  ai_max_chunks: 3
 
-supported_shipping_windows:
-  - days: [sun, mon, tue, wed, thu]
-    start: "09:00"
-    end: "18:00"
+ai:
+  provider: ollama
+  model: qwen2.5-coder:7b
+  max_diff_bytes: 16384
+  timeout_seconds: 60
+  attempts: 1
+  temperature: 0
+  seed: 42
+  num_ctx: 8192
+  num_predict: 768
+  accepted_finding_kinds:
+    - breaking_api
 
-services:
-  payouts-api:
-    path_globs: ["src/payouts/**", "db/payouts/**"]
-    critical: true
-    downstream: [ledger-api]
-    replicas: 5
-    max_error_rate: 0.05
-  ledger-api:
-    path_globs: ["src/ledger/**"]
-    critical: false
-    downstream: []
-    replicas: 5
-    max_error_rate: 0.05
+incident_history:
+  enabled: false
 
-tier_profiles:
-  safe: fast
-  guarded: guarded
-  risky: strict
+profile_for_tier:
+  safe: Fast
+  guarded: Guarded
+  risky: Strict
 
-main_risk_priority:
-  - stored_data
-  - access_control
-  - breaking_api
-  - retry_backoff
-  - incident_connection
-  - impact_rule
-  - propensity_rule
-  - operations_rule
-  - confidence_rule
+rollout:
+  traffic_router: none
+  max_surge: 1
+  max_unavailable: 0
 
 profiles:
-  fast:
-    base: fast
+  Fast:
     source: built_in
-    description: Expose all pods immediately.
-    steps: [all]
-    checkpoint: null
-  guarded:
-    base: guarded
+    stages:
+      - {set_weight: 100, exposure_pods: 5, analysis: false}
+    analysis: null
+  Guarded:
     source: built_in
-    description: Check health after exposing two pods.
-    steps: [2, all]
-    checkpoint:
-      seconds: 30
-      interval_seconds: 10
-      measurement_count: 3
-      max_error_rate: 0.05
-      failure_limit: 1
-      consecutive_error_limit: 2
-  strict:
-    base: strict
+    stages:
+      - {set_weight: 40, exposure_pods: 2, analysis: true}
+      - {set_weight: 100, exposure_pods: 5, analysis: false}
+    analysis_probe_id: demo-api-public-quote-v1
+  Strict:
     source: built_in
-    description: Increase exposure one stage at a time.
-    steps: [1, 2, 3, all]
-    checkpoint:
-      seconds: 30
-      interval_seconds: 10
-      measurement_count: 3
-      max_error_rate: 0.05
-      failure_limit: 1
-      consecutive_error_limit: 2
+    stages:
+      - {set_weight: 20, exposure_pods: 1, analysis: true}
+      - {set_weight: 40, exposure_pods: 2, analysis: true}
+      - {set_weight: 60, exposure_pods: 3, analysis: true}
+      - {set_weight: 100, exposure_pods: 5, analysis: false}
+    analysis_probe_id: demo-api-public-quote-v1
+
+trusted_probe_catalog:
+  path: demo/trusted-probes.yaml
+  non_fast_fallback_probe_id: demo-api-public-quote-v1
+
+job_analysis:
+  attempts: 3
+  interval_seconds: 10
+  failure_allowance: 1
+  request_timeout_seconds: 2
+  active_deadline_seconds: 45
 ```
 
 ### Policy validation
 
-- `schema_version` is exactly `"1"`. `policy_version` is a non-empty immutable identifier and changes on every approved policy edit. `timezone` is an IANA time-zone name. `release_service` resolves to exactly one configured service; its replicas and health limit are used to resolve the rollout lane.
-- Limit values are positive integers. Small thresholds must be below their corresponding large thresholds. `incident_candidate_limit` is at most 5 and `ai_max_chunks` is at most 3 in Phase 1.
-- Window days use `sun`, `mon`, `tue`, `wed`, `thu`, `fri`, or `sat`; times are zero-padded 24-hour `HH:MM`; `start` is before `end`. Cross-midnight and overlapping windows are invalid in Phase 1. A shipping time is supported when its instant, converted to `timezone`, falls inside a matching half-open interval `[start, end)`.
-- Service names and path globs are unique. Every downstream name resolves to another service and cannot reference itself. Graph cycles are valid; traversal uses a visited set. Every changed path must match exactly one service. Zero or multiple matches make the service map incomplete and confidence low.
-- `critical` is Boolean; `replicas` is a positive integer; and `max_error_rate` is greater than 0 and at most 1.
-- `tier_profiles` has exactly the three shown risk keys and each value resolves to a profile. The mapped profile must be at least as careful as its tier's built-in minimum.
-- `main_risk_priority` contains each supported finding or rule key exactly once.
-- Every profile has exactly `base`, `source`, `description`, `steps`, and `checkpoint`. `base` is `fast`, `guarded`, or `strict`; `source` is `built_in`, `custom`, or `ai_assisted`; `description` is non-empty; `steps` ends with `all`; preceding values are positive, strictly increasing integers below the release service's replica count.
-- `checkpoint` is `null` exactly when `steps` is `[all]`; otherwise it is required. Duration, interval, and measurement fields are positive integers; `failure_limit` is a non-negative integer; `consecutive_error_limit` is a positive integer; and `max_error_rate` is greater than 0 and at most the release service's value. `measurement_count` is exactly `floor(seconds / interval_seconds)` and must be at least 1.
-- The named built-ins have `source: built_in`, the matching `base`, and exactly the definitions shown above. No other profile may use `source: built_in`.
-- A custom or AI-assisted profile is at least as careful as its base only when it meets every comparison rule in `docs/rollout-profiles.md`. Its `source` is persisted into `decision.json.profile_source`; normal code, not the model, assigns `ai_assisted` after an approved generated draft.
+- Every object rejects unknown fields and every listed field is required.
+- `release_service` must be exactly the one non-critical, five-replica service shown above, with no
+  downstream dependents and at least one non-overlapping path prefix.
+- Thresholds are non-negative integers and `small` must not overlap `large`.
+- One model attempt is mandatory; no retry, fallback model, truncation, chunking, or best-of path is
+  configurable.
+- `incident_history.enabled` must be `false`. No incident file is accepted.
+- Profile names, stages, weights, pod counts, analysis flags, tier mapping, and analysis identities must
+  equal the built-ins above. There is no custom-profile or override parser.
+- Rollout strategy is fixed to no traffic router, `maxSurge: 1`, and `maxUnavailable: 0`.
+- Fast analysis is `null`; Guarded and Strict use the one trusted compatibility probe.
+- The whole validated catalog hash is included in `assessment_input_sha256`; the resolved entry hash
+  is copied into any accepted assessment safeguard, while every resolved non-Fast decision carries
+  the hash of its AI-selected or policy-fallback entry.
+- Catalog hashing follows `contract.md`: parse and validate YAML, reject duplicate keys and YAML
+  aliases/merges, convert the model to canonical JSON, then hash either the whole model or one entry.
+- The Ollama context/prediction pins are the measured 8,192/768 configuration from the nominated demo
+  laptop. Changing them requires a new policy version and a repeated live-model gate.
 
-The decision rules and default threshold meanings remain canonical in `docs/risk-signals.md`. This shape makes them parseable; it does not redefine them.
+## `trusted-probes.yaml` v1
 
-## `incidents.json`
+The shared catalog contains exactly one entry before the pre-final:
 
-Phase 1 uses one explicit local incident store rather than free-form Markdown:
+```yaml
+schema_version: "1"
+catalog_version: "2026.08.1"
+probes:
+  - id: demo-api-public-quote-v1
+    binding:
+      service: demo-api
+      finding_kind: breaking_api
+      hypothesis_kind: removed_http_route_unavailable
+      verification_intent_kind: preserve_removed_http_route
+      method: GET
+      path: /v1/quote
+    assertion:
+      expected_status: 200
+    execution:
+      target: http://demo-api-canary.safelane-demo.svc.cluster.local
+      probe_image_key: demo-api-public-quote-probe@2026.08.1
+```
+
+The engine reads the binding and assertion only. It resolves the entry after extracting method/path
+from verified source. The compiler revalidates the canonical entry hash, reads the target, and
+resolves `probe_image_key` against image catalog v1. The trusted-probe entry hash covers the complete
+`id`/`binding`/`assertion`/`execution` entry. The model receives no catalog execution values and cannot
+return the probe ID.
+
+## `image-catalog.json` v1
+
+The catalog produced by `prepare-demo.ps1` uses the exact JSON shape frozen in `contract.md`:
 
 ```json
 {
   "schema_version": "1",
-  "sample_data": true,
-  "incidents": [
+  "catalog_version": "2026.08.1",
+  "application_images": [
     {
-      "id": "INC-003",
-      "service": "payouts-api",
-      "component": "retry-worker",
-      "occurred_at": "2026-07-18T09:15:00Z",
-      "affected_paths": ["src/payouts/workers/retry.py"],
-      "summary": "Payout workers exhausted the connection pool.",
-      "trigger": "Workers retried indefinitely after an upstream timeout.",
-      "root_cause": "The retry loop had no attempt limit or backoff."
+      "repository": "AndrewMaged814/safelane-demo",
+      "service": "demo-api",
+      "source_revision": "a1b2c3d4e5f6789012345678901234567890abcd",
+      "image_ref": "safelane-demo:a1b2c3d4e5f6789012345678901234567890abcd",
+      "image_id": "sha256:...",
+      "runtime_image_id": "sha256:...",
+      "oci_revision": "a1b2c3d4e5f6789012345678901234567890abcd"
+    }
+  ],
+  "probe_images": [
+    {
+      "key": "demo-api-public-quote-probe@2026.08.1",
+      "probe_id": "demo-api-public-quote-v1",
+      "image_ref": "safelane-http-probe:2026.08.1",
+      "image_id": "sha256:...",
+      "runtime_image_id": "sha256:..."
     }
   ]
 }
 ```
 
-Every incident field is required. IDs are non-empty and unique. `service` must resolve in `policy.yaml`; `component`, `summary`, `trigger`, and `root_cause` are non-empty; `occurred_at` is an RFC 3339 date-time; and `affected_paths` contains unique repository-relative paths. `sample_data` is required so demos cannot silently present synthetic records as real history.
+The real catalog has exactly three application entries—Warm-up, Fast, Strict—and one probe entry.
+`image-catalog-v1.schema.json` rejects unknown fields, duplicate identities/keys, invalid full SHAs,
+image IDs, or runtime IDs, a tag not derived from the full application SHA, an OCI revision different
+from the source revision, and a probe key/ID mismatch with `trusted-probes.yaml`. The catalog is already
+JSON, so its SHA-256 uses the canonical JSON bytes defined in `contract.md`.
 
-Normal code filters incidents to directly affected services and the configured lookback from `shipping_at`, orders candidates by `occurred_at` descending then `id`, and supplies at most `incident_candidate_limit` records to Ollama. The exact stored strings are the only valid sources for `incident_quote` verification.
+## Image preparation
 
-## AI-generated profile draft
+`prepare-demo.ps1` builds each fixture from a detached clean worktree at its full SHA, labels the OCI
+image with `org.opencontainers.image.revision`, records the inspected image ID, preloads it into kind,
+records the normalized containerd runtime image ID, and writes image catalog v1. It also records the
+separately built and preloaded probe image in that
+catalog; `trusted-probes.yaml` owns only its key. The release command looks up both images
+independently; it never copies an image reference from `decision.json`.
 
-The one-shot Studio generator accepts a non-empty user description plus the already validated policy context described in `docs/rollout-profiles.md`. Ollama may return only this candidate object:
+## Evaluation inputs
 
-```json
-{
-  "schema_version": "1",
-  "name": "extra-careful",
-  "description": "Expose one pod before a longer health check.",
-  "base": "strict",
-  "steps": [1, 2, 3, "all"],
-  "checkpoint": {
-    "seconds": 60,
-    "interval_seconds": 10,
-    "measurement_count": 6,
-    "max_error_rate": 0.03,
-    "failure_limit": 1,
-    "consecutive_error_limit": 2
-  }
-}
-```
+Three small AI fixtures are checked in:
 
-The fields use the same types and rules as a policy profile except that model output has no `source` field. The name must be a lowercase ASCII slug and must not replace a built-in. Normal code validates the draft against the release service and base profile; invalid output changes nothing. A valid draft is still not policy until Studio shows the YAML diff and a person approves the save, at which point normal code persists `source: ai_assisted`.
+1. `fast-copy` — bounded response-copy change; expects no finding or proposal.
+2. `additive-route` — adds `/v2/quote` while retaining `/v1/quote`; expects no breaking finding or
+   proposal.
+3. `quote-contract-break` — removes `/v1/quote` and adds `/v2/quote`; expects the exact finding and
+   proposal defined in `contract.md`.
 
-## Challenge case manifest
-
-Each evaluation case is one directory containing this `case.json` plus the named immutable inputs:
-
-```json
-{
-  "schema_version": "1",
-  "id": "bounded-retry-change",
-  "provenance": {
-    "kind": "synthetic",
-    "source_url": null,
-    "license": null
-  },
-  "request": "assessment-request.json",
-  "repository_bundle": "repository.bundle",
-  "policy": "policy.yaml",
-  "incidents": "incidents.json",
-  "patch": "change.patch",
-  "expected": {
-    "confidence": "high",
-    "tier": "guarded",
-    "minimum_profile": "guarded",
-    "service_facts": {
-      "directly_changed": ["payouts-api"],
-      "downstream": [],
-      "critical": false
-    },
-    "incident_candidate_ids": [],
-    "findings": [
-      {"kind": "retry_backoff", "file": "src/workers/payouts.py", "line": 7, "added_line": "MAX_RETRIES = 4"}
-    ],
-    "forbidden_findings": [],
-    "incident_connections": [],
-    "forbidden_incident_connections": []
-  },
-  "label": {
-    "rationale": "A bounded retry-count change is guarded, not unbounded.",
-    "author": "Andrew",
-    "review_status": "reviewed",
-    "created_at": "2026-08-08T00:00:00+03:00"
-  }
-}
-```
-
-All fields are required; expectation arrays may be empty. `kind` is `synthetic` or `real`; real cases require non-null HTTPS `source_url` and SPDX-compatible `license`, while synthetic cases require both to be null. Referenced files are relative to the case directory and cannot escape it. `repository.bundle` is a Git bundle containing the request's base and head commits. The evaluator verifies the bundle, clones it to an isolated temporary worktree, configures its canonical origin identity from the request, and invokes the normal assessment entry point. `change.patch` must equal the Git-generated diff for those bundled commits byte-for-byte; it is retained as inspectable fixture evidence, never used as an alternate assessment input. `service_facts` and `incident_candidate_ids` are expected derivations, not alternate engine inputs. Finding kinds, incident classifications, confidence, tiers, and profiles use the canonical enums from `contract.md`.
-
-The evaluator hashes the manifest and every referenced file before a run and records those SHA-256 values in its report. Fixture expectations are owned by `docs/golden-scenarios.md`; this manifest only makes those labels executable.
+Each manifest contains its stable ID, canonical diff fixture and hash, expected normalized AI result,
+exact accepted spans, and forbidden result. Fast and breaking cases also name their frozen demo SHAs.
+`additive-route` is adapter-evaluation input only; it creates no fourth demo commit, application image,
+or release path. The manifests contain no incident candidates, historical repository, profile draft,
+or expected natural-language prose.

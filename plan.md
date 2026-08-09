@@ -1,96 +1,168 @@
-# SafeLane — Pre-final Plan (decisions and owners)
+# SafeLane — Pre-final execution plan
 
-**v2, revised 2026-07-31** after prior-art research and technical verification.
+**Version 3.2 · revised 2026-08-09 · finishing is the primary goal**
 
-- **The day-by-day schedule, diagrams, file tree, demo commands, risks and cut list live in
-  [`detailed-plan.md`](./detailed-plan.md).** That is the build document. This file holds only the
-  decisions, the owners, and the open items — so there is never a second competing schedule.
-- Prior-art landscape and the positioning problem: [`research/prior-art.md`](./research/prior-art.md)
-- The interface between the two people: [`contract.md`](./contract.md)
+This is the only summary schedule for the pre-final build. The expanded architecture, frozen
+contracts, slices, acceptance checks, risks, and demo flow are in
+[`detailed-plan.md`](detailed-plan.md). The pre-August-9 implementation plan is historical and remains
+available in Git history.
 
----
-
-## The deadline
-
-Passed screening 2026-07-30. Pre-final is a **20-minute virtual assessment**, live demo, **in English**,
-scheduled somewhere in **23 Aug – 8 Sep 2026**. Exact slot TBA by email.
-
-**We plan to Sunday 23 August.**
-
-That is **15 working days**, not 22. The Egyptian weekend is Friday–Saturday, which removes 7 days,
-and **both 1 and 22 August are Saturdays** — 22 August was the reserved rehearsal day. Realistic
-budget is about **70 hours per person**.
+The accepted Wayfinder decisions remain useful design input, but they describe more product than the
+pre-final needs. Version 3.2 keeps the v3.1 delivery boundary and strengthens one vertical feature:
+AI turns verified code evidence into a bounded safety case and trusted verification intent, fixed
+policy chooses the rollout, and Argo enforces it. The model does not generate deployment behavior.
 
 ## Definition of done
 
-> On a live call, two pull requests go through SafeLane. The trivial one ships straight to 100% and
-> stays green. The risky one is scored risky, released to 1 pod of 5, fails its error-rate check, and
-> is rolled back automatically by Argo Rollouts — while a panel shows the score, the reasons, and why
-> those rollout steps were chosen.
+> On one nominated laptop, SafeLane assesses two checked-in, SHA-backed changes to one five-replica
+> demo service. The Fast fixture resolves automatically to the Fast profile. For a consumer-facing
+> `/v1/quote` → `/v2/quote` rename, one bounded Ollama call produces a source-backed safety case:
+> the endangered contract, predicted client impact, trusted verification intent, approval question,
+> and bounded remediation. Normal code verifies both route spans, binds the intent to an allowlisted
+> compatibility probe, and renders the explanation. SafeLane Studio shows that causal chain and waits
+> for explicit Strict approval. The SHA-bound decision causes a real Argo Rollout to stop at its first
+> one-pod exposure stage after the canary-only probe observes the predicted contract failure. Argo
+> automatically aborts the update; the Rollout reports `Degraded`, the failed ReplicaSet scales down,
+> and the stable ReplicaSet serves again. A normal-code receipt binds the prediction, exact decision,
+> trusted probe, observed statuses, and Argo resources. The complete sequence succeeds twice from a
+> defined namespace reset, and a backup recording exists.
 
-If that is true, we are done. Nothing else is required.
+“Fast” means that every check in the bounded demo policy completed and no configured safety floor
+fired. It is not proof that a change is safe. With no traffic router, one canary pod is a pod-count
+stage, not a guaranteed percentage of requests or users.
 
-## Owners
+## Pre-final scope
 
-| | |
+The build must contain:
+
+- one local repository and one non-critical deployable demo service with five replicas;
+- a healthy warm-up revision, one Fast revision, and one consumer-facing `/v1/quote` → `/v2/quote`
+  revision, each built from and identified by its full Git SHA;
+- one bounded local `qwen2.5-coder:7b` call per assessment that returns only a typed
+  `breaking_api` safety case with exact diff spans, failure-hypothesis kind, verification intent,
+  approval-question kind, and remediation kind;
+- deterministic rejection of fabricated evidence and unknown fields, deterministic rendering of all
+  user-facing text, and normal-code binding from the verified intent to one trusted probe;
+- the small retained rule table in `detailed-plan.md`, with one-way safety floors;
+- `assessment.json` for review and a separate approved `decision.json` runtime handoff;
+- automatic Fast resolution and explicit human approval for the Risky/Strict path;
+- a minimal Studio assessment view with the evidence → impact → safeguard → rollout preview, a
+  visible validation ledger, and one approval action;
+- trusted local image and probe catalogs, strict decision validator, and complete-manifest Rollout
+  compiler;
+- a real kind cluster, Argo Rollouts v1.9.1, and a pinned canary-only compatibility Job with bounded
+  retry and deadline behavior;
+- fixture-level tests, one end-to-end integration test, a causally bound verification receipt, a safe
+  namespace reset, two complete runs, and a backup recording.
+
+Job analysis is locked for the pre-final. Prometheus is not a conditional branch in this schedule.
+
+## Ownership
+
+| Owner | Owns |
 |---|---|
-| **Ahmed Anany** (DevOps) | kind, Argo Rollouts, Prometheus, demo service, fault injection, auto-rollback, rendering and applying the Rollout. Consumes `decision.json`. |
-| **Andrew** (Dev) | Risk scorer, policy YAML, lane generator, CI glue, the SafeLane risk panel. Produces `decision.json`. |
+| **Andrew** | `SafeLaneEngine`, Ollama adapter, safety-case validation and rendering, policy and artifact schemas, demo Git fixtures, minimal Studio, and expected assessment/decision fixtures. |
+| **Ahmed** | `RolloutCompiler`, independently created release requests, trusted image/probe catalogs and image preparation, kind/Argo manifests, canary compatibility Job, receipt evidence collection, lint/dry-run/apply command, reset script, and rollout runbook. |
+| **Both** | Contract v5 sign-off, one fixture handshake before implementation diverges, organizer clarification, end-to-end integration, recording, slides, and rehearsals. |
 
-The two halves meet **only** at `decision.json`. Gate schedule: Gate 1 Sun 2 → Sun 9 Aug ·
-Gate 2 Mon 10 → Sun 16 Aug · Gate 3 Mon 17 → Sat 22 Aug. Details in `detailed-plan.md` §4.
+`decision.json` is the only runtime SafeLane-to-release handoff. Schemas, frozen fixture SHAs, release
+requests, and the trusted image/probe catalogs are shared integration contracts. Andrew does not render
+Kubernetes YAML; Ahmed does not recompute risk tiers or map them to profiles.
 
-## Decisions made 2026-07-31
+## Gates
 
-1. **Real kind cluster + real Argo Rollouts**, not a simulated rollout engine.
-2. **No "1%".** With no traffic router, Argo approximates weight by pod count — at 5 replicas, weights
-   of 1, 5, 10 and 20 all give one canary pod. Risky lane is **20% → 40% → 60%** (1 → 2 → 3 pods),
-   which is both visible and literally true. Fine-grained weights via ingress-nginx stay an **option
-   to decide on Sunday 2 August**, not a commitment.
-3. **Render and apply the Rollout manifest. Never patch it.** Patching while aborted clears the abort
-   and resumes the broken version.
-4. **Don't build the rollout dashboard** — `kubectl argo rollouts dashboard` already ships one, and
-   it's interactive. Build only the SafeLane risk panel. ~1 day of UI instead of 3.
-5. **Headline metric changes.** Instead of "change failure rate went down" — which is arguable on
-   seeded data — lead with **"we slowed down X% of changes and that caught Y% of the failures."**
-   That describes how well the scoring aims, which seeded data can honestly demonstrate. DORA stays
-   as a static backup slide, since the rules name it.
-6. **Two scoring signals added:** reversibility (hard-to-undo earns a slow lane regardless of size)
-   and timing (shipping into the Fri–Sat weekend raises the tier).
-7. **Backup video moves to Tuesday 19 August** and is treated as a hard deadline.
+| Gate | Target | Pass condition |
+|---|---|---|
+| **0 — decision lock and machine** | **10 Aug** | Contract-v5 semantics and wire versions—including the typed AI safety case and trusted-probe binding—are signed off; decision and release-request schemas validate one placeholder-identity Fast/Strict schema-example pair (the real identities freeze in Gate 1); the demo laptop runs Docker, kind, Ollama, kubectl, and the pinned Argo plugin; questions about the commercial-solution rule and presentation duration have been sent to the organizer. |
+| **1 — infrastructure kill shot** | **11 Aug** | From reset, a hand-written Fast revision first promotes as the stable base; the following hand-written Strict Rollout selects one canary pod, the pinned Job exits nonzero with retries disabled, and Argo automatically aborts and reports `Degraded` while that Fast stable ReplicaSet serves again. The sequence passes twice. |
+| **2 — walking skeleton** | **12 Aug** | A fake AI adapter drives assess → verified safety case or Fast result → automatic or human resolution → decision → compiled manifest. Fabricated spans, unknown intent kinds, and untrusted probe keys cannot reach render/apply. The three Git revisions, remaining executable schemas, and canonical goldens exist. |
+| **3 — Andrew decision spine** | **15 Aug** | Real Git evidence and live Ollama produce the expected Fast result, additive-route non-break result, and complete `/v1/quote` safety case twice each; Studio shows the validated causal chain and approval emits the expected Strict decision. Interface-level tests are green. |
+| **4 — integrated proof** | **17 Aug** | Each run follows reset → warm-up → Fast promotion → approved Strict rollout → trusted probe observes the predicted contract failure → first-stage automatic abort. The whole sequence passes twice and writes/renders the bound verification receipt. |
+| **5 — insured demo** | **19 Aug** | Prior-art and eligibility due diligence was frozen by 18 Aug; an eight-minute backup recording and first English slide deck exist. No new feature work after this gate. |
+| **6 — frozen** | **22 Aug** | Two timed rehearsals fit the confirmed slot, or both 10- and 20-minute run sheets are rehearsed if no answer arrived; demo state, reset/runbook, recording, and exact commands are frozen. |
 
-## Gate checkpoints
+Missing a gate is not “one day behind”; it invalidates the remaining schedule. Re-scope that day
+rather than compressing every later gate.
 
-- **Sun 9 Aug — Gate 1:** auto-rollback demonstrably works from a script on a fresh cluster. If not,
-  the demo becomes a simulated rollout engine and we say so on stage. Decide on the 9th, not the 20th.
-- **Sun 16 Aug — Gate 2:** both demo PRs produce correct, stable `decision.json` with reasons a judge
-  can read aloud.
-- **Tue 19 Aug — backup video recorded.** Hard deadline.
-- **Thu 20 Aug — two full rehearsals** with a stopwatch, after rereading `safelane-qa.md`.
+## Explicitly out of the pre-final critical path
 
-## Out of scope — say this plainly if asked
+- custom profile creation or editing;
+- Generate profile with AI;
+- incident-history ingestion or incident matching;
+- shipping-window risk or time-bounded decision reuse;
+- stored-data, access-control, and retry/backoff finding types;
+- multi-chunk or over-16-KiB AI analysis;
+- the 12-case × two-run model challenge and the Trellis historical smoke run;
+- arbitrary AI-authored prose, probes, tests, code, shell, URLs, images, credentials, Kubernetes YAML,
+  rollout stages, tiers, or approvals;
+- a second model pass, chat interface, self-critique loop, or AI-generated post-abort diagnosis;
+- payout-idempotency runtime behavior or probes in addition to the route-compatibility scenario;
+- backtesting, self-learning, DORA/CFR/MTTR, synthetic outcome charts, or a SafeLane rollout dashboard;
+- GitHub API ingestion, Actions, PR comments, webhooks, or CI glue;
+- Prometheus, nginx, a service mesh, fine-grained traffic routing, or exact request-percentage claims;
+- multi-service or multi-cluster release decisions;
+- custom profile overrides, accounts, RBAC, a database, or deployment controls in Studio;
+- a trained model, continuous risk probability, security-scanner ingestion, or secret deployment;
+- copied third-party source code.
 
-Multi-cluster. Auth/RBAC. Real incident ingestion. Any ML or trained model. Terraform/IaC parsing.
-More than one demo service. LLM narrative generation. Comparisons against Kargo/Flagger in code.
-**Service mesh of any kind** — if fine-grained weights are needed it is ingress-nginx or nothing.
-**More than one Rollout object.** **Argo CD** — this is Argo *Rollouts*, a different product.
-The back-test loop stays **stretch**; until it exists it is a seeded chart and we say so.
+These are not hidden promises. After the complete pre-final demo passes twice, the first final-round
+product choice is whether to **replace** the route fixture with a payout-idempotency invariant; never
+carry both demo implementations at once. Broader model evaluation and incident context come next,
+then profile authoring and CI integration. DORA or predictive claims wait for real deployment
+outcomes.
 
-## Open items
+## Locked implementation decisions
 
-- [ ] **Ahmed runs kind + Argo Rollouts on his own machine.** Target Sun 2 Aug. Every estimate in
-      `detailed-plan.md` is soft until this happens. This is the single biggest unknown.
-- [ ] **Sun 2 Aug joint decision:** `traffic_router` = `none` or `nginx`.
-- [ ] `make` is not installed on Andrew's machine — so `make cluster` is not currently a command
-      anyone can run. Install it or use plain scripts.
-- [ ] Names and roles into `safelane-abstract.md`.
-- [ ] Credit DeployWhisper as design inspiration for the service graph, incident-pack shape, and
-      missing-context rule. Phase 1 copies no upstream code, so no notice file is currently needed.
-      If that boundary changes, add the full MIT notice and per-file provenance before committing.
-- [ ] **Sun 16 Aug: re-check Akuity / Kargo.** Their Promotion Advisor (blog dated 29 Jul 2026) already
-      scores risk from the diff plus deployment history, advisory-only today. This is the prior-art row
-      most likely to move before the assessment.
-- [x] **Positioning rewrite — done 2026-07-31.** "Nobody connects them" is gone from
-      `safelane-abstract.md`, replaced with *"the first open-source tool that compiles a risk score into
-      real rollout parameters for Argo Rollouts."* `safelane-qa.md` now opens with the five nearest
-      neighbours and answers for the three hardest prior-art questions. See `research/prior-art.md`.
+The planning pass applied these decisions to contract v5 and the canonical domain documents. Gate 0
+signs them off and creates the executable schemas; it does not reopen them:
+
+1. Policy v2 accepts only the non-critical demo release service with no downstream dependents, so
+   Fast is reachable and unused topology branches do not enter the runtime.
+2. Missing, invalid, stale, identity-mismatched, or unapproved decisions reject release; Strict is not
+   a substitute for authorization. Workspace commands share a lock, and a successful replacement
+   assessment invalidates the prior decision before publish.
+3. Phase 1 releases exactly one directly changed service from a linear Warm-up → Fast → Strict Git
+   graph. Decisions and independent release requests bind both base and head SHAs; the release
+   adapter verifies the current stable ReplicaSet is the assessed base. A clean-worktree preparation
+   script ties each head SHA to one inspected local image tag, OCI revision label, Docker image ID,
+   and kind/containerd runtime image ID.
+4. Assessment output contains a deterministic policy trace, exact source spans, one validated safety
+   case, and a result hash over the immutable reviewed result. The quote-route rename requires both
+   the removed old route and added new route. The model proposes typed meanings and exact source-span
+   objects plus one bounded finding index; normal code verifies them, renders prose, and never labels
+   semantic interpretation as verified. A shallow envelope and finding/proposal components validate
+   separately, so a bad proposal cannot erase a valid dangerous finding.
+5. Incident history is explicitly `disabled_by_policy`, uses a fixed hashed sentinel, and neither
+   lowers confidence nor blocks Fast. Shipping time is not a retained signal.
+6. The incompatible request, policy, AI-response, assessment, and decision shapes receive new wire
+   versions; no migration compatibility is required because no runtime exists.
+7. The `breaking_api` safety-case schema, allowed hypothesis/question/remediation kinds,
+   intent-to-probe binding, Job-analysis decision shape, trusted probe catalog, retry/deadline
+   controls, and Argo outcome mapping are frozen before compiler work. Ollama cannot supply
+   executable fields.
+8. Evaluation gates assert assessments. Decision goldens add an explicit automatic or human
+   resolution event with a fixed timestamp.
+9. Canonical JSON serialization is fixed before golden files are written.
+10. Image catalog v1 alone owns application/probe image references and inspected IDs; the trusted
+    probe catalog owns semantic/execution binding and references the probe image by a versioned key.
+11. Resolved profile stages carry an analysis boolean, not an ambiguous timer. Policy-owned Job
+    settings—including the 45-second deadline—are copied into every non-Fast decision.
+12. Receipt v1 is verdict-discriminated. Positive proof requires the annotated Rollout plus the full
+    Rollout → AnalysisRun → Job → Pod UID chain, equal generations, actual runtime images, a
+    probe-time canary-to-head snapshot, structured HTTP evidence, and Argo's analysis-triggered abort
+    fields. Transport-only, mixed, fallback, missing, or external-abort evidence is inconclusive.
+13. The decision schema and compiler both enforce the only authorization matrix: Safe/Fast/automatic,
+    Guarded/(Guarded or Strict)/human with policy fallback, and Risky/Strict/human with AI-selected or
+    fallback analysis; analysis is null only for Fast.
+
+## Current facts, not assumptions
+
+- Runtime engine and end-to-end integration have not started in this repository.
+- On Andrew's machine, Python 3.12, `uv`, Ollama 0.32.1, the 7B model, Docker CLI, and kubectl exist.
+- The measured live-model configuration is `num_ctx: 8192` and `num_predict: 768`; policy v2 keeps
+  those pins unless a replacement configuration passes the same laptop gate.
+- Docker Desktop is currently stopped; `kind`, Helm, and `make` are absent.
+- The exact assessment slot and presentation duration are still unknown, so the plan targets the
+  earliest possible date, 23 August 2026, and treats the 20-minute format as provisional.
+- No pushed artifact proves Ahmed's earlier Argo/Prometheus gate. The revised plan removes
+  Prometheus and moves the real canary-Job abort to the first infrastructure slice.

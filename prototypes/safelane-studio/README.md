@@ -2,6 +2,10 @@
 
 Throwaway prototype for [Design the minimum Phase 1 SafeLane Studio](https://github.com/AndrewMaged814/safelane/issues/8).
 
+> **Superseded behavior:** this prototype predates the v3.2 safety-case screen and still contains
+> profile creation, incident, and Prometheus concepts that are outside the pre-final runtime. Reuse
+> visual styling only. [`docs/safelane-studio.md`](../../docs/safelane-studio.md) is authoritative.
+
 Run from the repository root:
 
 ```powershell

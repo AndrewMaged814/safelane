@@ -1,140 +1,109 @@
-# Phase 1 risk signals
+# Pre-final risk policy
 
-**Decision date:** 2026-08-01
-**Decision owner:** Andrew
+**Version:** 2 · **decision date:** 2026-08-09
 
-SafeLane Phase 1 uses a small set of facts plus four bounded AI finding types. AI finds exact dangers in the change. Fixed policy rules choose the final risk tier. A rule may only keep or raise the tier; no reassuring signal can cancel a danger.
+SafeLane uses deterministic scope facts plus one bounded AI finding. Normal code chooses the final
+tier. A rule may keep or raise rollout care; no reassuring signal may cancel danger or uncertainty.
 
-## Failure propensity band
+## Supported assessment
 
-Normal code assigns one coarse failure-propensity band before applying safety floors:
+The pre-final assesses exactly one directly changed, known `demo-api` service. Zero or more than one
+directly changed deployable service is unsupported and produces no decision. Policy validation has
+already fixed the service as non-critical with no downstream dependents; there are no dormant
+criticality, topology, incident, or shipping-window branches.
 
-- **Low** only when the change is small, exactly one known service is directly changed, and every changed path is recognized and mapped.
-- **High** when the change is large or directly changes at least three services.
-- **Medium** in every other case, including two changed services or a small change with an unknown path.
+## Change-scope band
 
-The bands project to the schema-v2 display values `20`, `50`, and `80`. These are fixed labels, not probabilities or continuous scores. They establish the baseline `safe`, `guarded`, or `risky` tier respectively; fast-lane eligibility and every safety floor are then applied, so the final tier can only stay the same or become more careful.
+- **Low / Safe baseline:** at most 2 files and at most 50 changed lines, with every path recognized.
+- **High / Risky baseline:** at least 10 files or at least 500 changed lines.
+- **Medium / Guarded baseline:** every other supported one-service change.
+- An unknown or incompletely decoded path is at least Guarded with low evidence confidence.
 
-Incident candidates and connections, downstream impact, criticality, shipping support, evidence completeness, and AI findings do not inflate failure propensity. They remain separate facts because they constrain acceptable rollout behavior for different reasons.
+These labels are policy categories, not failure probabilities or numeric scores.
 
-## Fast lane requires positive proof
+## Stable rule IDs and trace ordering
 
-A change is `safe` and eligible for the fast lane only when all of these are true:
+Exactly one baseline is emitted:
 
-- no more than 2 files and 50 changed lines;
-- exactly 1 known service is directly changed;
-- that service is not critical and has no downstream dependents;
-- every changed file is recognized;
-- incident history was checked successfully and no connection was found;
-- shipping is inside a supported shipping window;
-- Ollama returned a valid response with verifiable evidence and found no danger.
+| Rule ID | Predicate | Tier | Exact reason |
+|---|---|---|---|
+| `scope.low` | at most 2 files and 50 lines; all paths recognized | Safe | `The change affects at most 2 recognized files and 50 changed lines.` |
+| `scope.medium` | supported one-service change between the low and high bounds | Guarded | `The change is outside the bounded Fast scope.` |
+| `scope.high` | at least 10 files or at least 500 lines | Risky | `The change affects at least 10 files or 500 changed lines.` |
 
-The absence of an AI warning is not enough. Missing or uncertain evidence prevents the fast lane.
+Every applicable safety floor is emitted in this fixed order:
 
-## Normal-code signals
+| Order | Rule ID | Predicate | Minimum tier | Exact reason |
+|---:|---|---|---|---|
+| 1 | `finding.breaking_api` | accepted verified breaking finding | Risky | `An existing HTTP contract was removed or renamed.` |
+| 2 | `evidence.path_unrecognized` | any path is unknown or incompletely decoded | Guarded | `At least one changed path is unrecognized or incompletely decoded.` |
+| 3 | `evidence.diff_invalid_utf8` | canonical diff is not valid UTF-8 | Guarded | `The complete Git diff could not be decoded as UTF-8.` |
+| 4 | `evidence.diff_over_budget` | canonical diff exceeds 16,384 UTF-8 bytes | Guarded | `The complete Git diff exceeds the AI evidence budget.` |
+| 5 | `evidence.ai_incomplete` | an attempted AI call is unavailable, times out, has a malformed envelope, returns an unsupported/unverifiable finding, or supplies a proposal without an accepted finding | Guarded | `AI evidence was unavailable, invalid, unsupported, or unverifiable.` |
+| 6 | `evidence.safeguard_invalid` | an otherwise accepted finding has an absent, invalid, or unresolvable proposal | Guarded | `The AI safeguard proposal was invalid or could not resolve to a trusted probe.` |
 
-### Change size
+`policy_trace.baseline` contains the baseline rule ID, tier, and exact reason. Its
+`safety_floors` contains every applicable row above in table order; the engine never records only the
+winning rule. `final_tier` is the maximum of the baseline and all floors. `primary_reason` is the
+first safety-floor reason in the table whose tier equals `final_tier`; when no such floor exists it is
+the baseline reason. This fixes output order and tie-breaking for byte-identical goldens.
 
-- **Small:** at most 2 files and at most 50 changed lines. It can contribute to low propensity but may be `safe` only if every other fast-lane check passes.
-- **Medium:** larger than small but not large. It produces at least medium propensity.
-- **Large:** at least 10 files or at least 500 changed lines. It produces high propensity.
+Evidence confidence is `high` only when paths and the complete diff are valid, one schema-valid AI
+envelope completes, every accepted finding is source-verifiable, and any present proposal is valid.
+Any `evidence.*` floor makes it `low`; a verified finding itself does not.
 
-Small never means safe by itself. These are configurable demo-policy defaults, not scientifically learned thresholds.
+## AI evidence and uncertainty
 
-### Directly changed services
+- The canonical diff is sent to the model once only when it is valid UTF-8 and at most 16,384 bytes.
+- Over-budget input, timeout, unavailable model, malformed envelope, unsupported finding, or
+  unverifiable finding span applies the corresponding Guarded evidence floor with low confidence.
+- Normal-code floors remain effective when AI fails. Uncertainty can never create Fast.
+- A structurally valid finding and safeguard proposal are verified separately. Rejecting the proposal
+  cannot erase a verified finding.
 
-- 1 service adds no restriction.
-- 2 services is at least `guarded`.
-- 3 or more services is `risky`.
-- Any changed file that cannot be mapped to a service is at least `guarded`.
+## Breaking API finding
 
-### Downstream impact
+`breaking_api` applies when verified changed lines remove or rename an existing request, response,
+field, endpoint, permission, or meaning that callers may rely on. Adding a new endpoint while
+retaining the old one is not breaking by itself.
 
-- No downstream dependents adds no restriction.
-- 1 or 2 downstream dependents is at least `guarded`.
-- 3 or more downstream dependents is `risky`.
-- A directly changed critical service is always `risky`.
+The executable pre-final case is narrower: exactly one removed static `GET /v1/quote` decorator and
+one added static `GET /v2/quote` decorator. A verified finding sets the Risky floor and minimum Strict
+profile.
 
-### Shipping support
+The AI safeguard proposal does not affect the tier. When its source relationships are valid, normal
+code may bind its `preserve_removed_http_route` intent to the trusted compatibility probe. The
+hypothesis, approval question, and remediation are review-only deterministic projections. They never
+authorize, deploy, or lower care.
 
-- Shipping inside a configured supported window adds no restriction.
-- Late-night, weekend, or otherwise unsupported shipping is at least `guarded`.
-- Timing alone never makes a change `risky`.
+## Fast-lane eligibility
 
-Supported windows belong in `policy.yaml`; they are not hardcoded.
+Fast requires all of the following positive proof:
 
-### Evidence availability
+- the validated single release service is changed;
+- no more than 2 files and 50 lines changed;
+- every path is recognized and the complete diff is decodable and within budget;
+- one schema-valid AI response returned with zero accepted findings and a null safeguard proposal;
+- every deterministic check completed without uncertainty; and
+- the Safe baseline survived every floor.
 
-- A successful incident search with no incidents adds no restriction.
-- Unavailable or missing incident data is at least `guarded`.
-- An Ollama timeout, failure, invalid response, or unverifiable quote is at least `guarded`.
-- Normal rules still apply when AI fails. A large change or critical service therefore remains `risky`.
-- If SafeLane cannot produce a valid decision file at all, the existing contract fails closed as `risky` with low confidence.
+An empty or missing AI warning alone is insufficient.
 
-## AI finding types
+## Final tier and resolution
 
-Every finding must name its type and quote exact changed code. SafeLane verifies that the quoted added line exists in the diff before using the finding.
+- Safe maps to Fast and resolves automatically.
+- Guarded maps to Guarded and requires explicit human resolution.
+- Risky maps to Strict and requires explicit human resolution.
+- A human may select a more careful built-in profile but never a faster one. In the bounded policy,
+  the Risky fixture has no more-careful alternative than Strict.
+- Every resolved non-Fast assessment with no accepted `selected_safeguard` uses the policy-owned
+  fallback analysis, including high-confidence medium/high scope baselines with complete empty AI
+  evidence. Fallback does not manufacture an AI prediction.
 
-### Database or stored-data danger — `risky`
+## Explicitly excluded
 
-This finding applies when changed lines:
-
-- add or alter a database migration or schema;
-- delete, overwrite, or transform stored data; or
-- change how stored data is encoded or interpreted.
-
-A read-only query change is not automatically a stored-data danger. There is no separate vague rollback score: persisted-data evidence is the Phase 1 proof that a change may be hard to undo.
-
-### Login, permission, or secret danger — `risky`
-
-This finding applies when changed lines alter:
-
-- who can sign in or access something;
-- token, session, or permission checks; or
-- how secrets are loaded, stored, or validated.
-
-Documentation and clearly marked test fixtures do not count. A real secret committed in code also belongs to the separate security gate, which should block deployment.
-
-### Breaking API danger — `risky`
-
-This finding applies when changed lines:
-
-- remove or rename an existing endpoint or field;
-- change an existing field's type;
-- make an optional field required; or
-- change an existing endpoint's required permission or response meaning.
-
-Adding a new endpoint or optional field is not breaking by itself.
-
-### Retry, timeout, or backoff change — usually `guarded`
-
-Changing retry counts, delays, or timeouts is at least `guarded`.
-
-It becomes `risky` when it removes a retry limit, allows endless retries, disables backoff, or is combined with any of these facts:
-
-- a critical service is changed;
-- the changed service has at least 3 downstream dependents; or
-- a connected incident shows the same retry danger.
-
-## Incident history
-
-Normal code selects at most 5 recent incident candidates in total from the affected services, all within the last 180 days. The limit and lookback are configurable defaults. A shared service makes an incident a candidate only; it does not change the tier.
-
-Ollama checks each candidate against the new change and quotes exact evidence from both records. SafeLane verifies that both quotes exist.
-
-- A meaningful connection to the same component or behavior is at least `guarded`.
-- Repeating the incident's trigger or root cause is `risky`.
-- Vague similarity or a shared service alone has no effect.
-
-## Explicitly excluded from Phase 1
-
-- author experience or past-mistake scoring;
-- test results as a risk signal—failed CI stops the deployment before SafeLane;
-- vulnerability or security-scanner ingestion;
-- a generic config-versus-code weight;
-- a vague rollback or reversibility score;
-- fuzzy searches across every incident;
-- a catch-all AI finding such as `other`;
-- trained risk models or precise-looking continuous scores.
-
-These exclusions keep SafeLane focused on choosing how carefully an already-approved change should roll out.
+- stored-data, access-control, retry/backoff, incident-connection, and catch-all AI findings;
+- service criticality/downstream branches, shipping support, and decision-reuse clocks;
+- continuous scores, trained probabilities, author scoring, or self-learning;
+- tests, vulnerabilities, or DORA measurements as risk signals; and
+- AI-generated tier, rollout profile, probe, test, command, or remediation execution.
