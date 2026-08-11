@@ -100,6 +100,7 @@ SafeLane does not claim to calculate a precise probability of failure.
 | Risk tier | The final `safe`, `guarded`, or `risky` result after every floor |
 
 Fast-lane eligibility requires positive proof. The absence of an AI warning is not enough.
+Every displayed tier still comes from deterministic policy after evidence collection.
 
 See [`docs/risk-signals.md`](docs/risk-signals.md) for the complete Phase 1 policy and [`CONTEXT.md`](CONTEXT.md) for the project vocabulary.
 

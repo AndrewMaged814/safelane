@@ -5,6 +5,7 @@
 SafeLane Studio is one local review surface for the current assessment. It explains why a specific
 change needs a specific safeguard and records explicit approval when required. It does not deploy or
 monitor releases.
+The selected workspace remains explicit throughout the review flow.
 
 ## Navigation and lifecycle
 

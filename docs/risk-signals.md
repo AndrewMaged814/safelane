@@ -51,6 +51,7 @@ the baseline reason. This fixes output order and tie-breaking for byte-identical
 Evidence confidence is `high` only when paths and the complete diff are valid, one schema-valid AI
 envelope completes, every accepted finding is source-verifiable, and any present proposal is valid.
 Any `evidence.*` floor makes it `low`; a verified finding itself does not.
+Evidence confidence and rollout tier are reported as separate properties.
 
 ## AI evidence and uncertainty
 
