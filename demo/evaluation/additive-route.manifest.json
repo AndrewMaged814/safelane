@@ -1,0 +1,12 @@
+{
+  "schema_version": "1",
+  "id": "additive-route",
+  "diff_path": "demo/evaluation/additive-route.diff",
+  "git_diff_sha256": "sha256:18ce5ab930f56559deb2d8cd8175b61bc738709a97503c94f7a0748276b18dd3",
+  "expected_normalized_result": {
+    "findings": [],
+    "safeguard_proposal": null
+  },
+  "accepted_spans": [],
+  "forbidden_result": "breaking_api"
+}

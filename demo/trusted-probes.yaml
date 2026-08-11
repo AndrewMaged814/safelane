@@ -1,0 +1,16 @@
+schema_version: "1"
+catalog_version: "2026.08.1"
+probes:
+  - id: demo-api-public-quote-v1
+    binding:
+      service: demo-api
+      finding_kind: breaking_api
+      hypothesis_kind: removed_http_route_unavailable
+      verification_intent_kind: preserve_removed_http_route
+      method: GET
+      path: /v1/quote
+    assertion:
+      expected_status: 200
+    execution:
+      target: http://demo-api-canary.safelane-demo.svc.cluster.local
+      probe_image_key: demo-api-public-quote-probe@2026.08.1

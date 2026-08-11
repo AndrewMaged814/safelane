@@ -1,0 +1,15 @@
+diff --git a/src/demo_api/app.py b/src/demo_api/app.py
+index 1a2b3c4..5d6e7f8 100644
+--- a/src/demo_api/app.py
++++ b/src/demo_api/app.py
+@@ -14,6 +14,10 @@ def ready() -> dict[str, bool]:
+ # Public compatibility contract used by the trusted probe.
+
+ @app.get("/v1/quote")
++def quote_v1() -> dict[str, str]:
++    return {"quote": "EGP 50.00"}
++
++@app.get("/v2/quote")
+ def quote() -> dict[str, str]:
+     payload = {"quote": "EGP 50.00"}
+     return dict(payload)

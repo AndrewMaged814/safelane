@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://safelane.dev/schemas/decision-v3.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "assessment_id", "assessment_input_sha256", "assessment_result_sha256", "repository", "pull_request", "base_sha", "head_sha", "service", "policy_version", "tier", "primary_reason", "profile", "analysis", "resolution"],
+  "properties": {
+    "schema_version": {"const": "3"},
+    "assessment_id": {"type": "string", "minLength": 1, "maxLength": 300},
+    "assessment_input_sha256": {"$ref": "#/$defs/sha256"},
+    "assessment_result_sha256": {"$ref": "#/$defs/sha256"},
+    "repository": {"const": "AndrewMaged814/safelane-demo"},
+    "pull_request": {"type": "integer", "minimum": 1},
+    "base_sha": {"$ref": "#/$defs/git_sha"},
+    "head_sha": {"$ref": "#/$defs/git_sha"},
+    "service": {"const": "demo-api"},
+    "policy_version": {"const": "2026.08.3"},
+    "tier": {"enum": ["safe", "guarded", "risky"]},
+    "primary_reason": {"type": "string", "minLength": 1, "maxLength": 500},
+    "profile": {"$ref": "#/$defs/profile"},
+    "analysis": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/analysis"}]},
+    "resolution": {"$ref": "#/$defs/resolution"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"tier": {"const": "safe"}}, "required": ["tier"]},
+      "then": {"properties": {"profile": {"properties": {"name": {"const": "Fast"}}}, "resolution": {"properties": {"type": {"const": "automatic"}}}, "analysis": {"type": "null"}}}
+    },
+    {
+      "if": {"properties": {"tier": {"const": "guarded"}}, "required": ["tier"]},
+      "then": {"properties": {"profile": {"properties": {"name": {"enum": ["Guarded", "Strict"]}}}, "resolution": {"properties": {"type": {"const": "human"}}}, "analysis": {"allOf": [{"$ref": "#/$defs/analysis"}, {"properties": {"selection_source": {"const": "policy_fallback"}}}]}}}
+    },
+    {
+      "if": {"properties": {"tier": {"const": "risky"}}, "required": ["tier"]},
+      "then": {"properties": {"profile": {"properties": {"name": {"const": "Strict"}}}, "resolution": {"properties": {"type": {"const": "human"}}}, "analysis": {"$ref": "#/$defs/analysis"}}}
+    }
+  ],
+  "$defs": {
+    "git_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "sha256": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "stage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["set_weight", "exposure_pods", "analysis"],
+      "properties": {
+        "set_weight": {"enum": [20, 40, 60, 100]},
+        "exposure_pods": {"enum": [1, 2, 3, 5]},
+        "analysis": {"type": "boolean"}
+      }
+    },
+    "profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "source", "traffic_router", "replicas", "max_surge", "max_unavailable", "stages"],
+      "properties": {
+        "name": {"enum": ["Fast", "Guarded", "Strict"]},
+        "source": {"const": "built_in"},
+        "traffic_router": {"const": "none"},
+        "replicas": {"const": 5},
+        "max_surge": {"const": 1},
+        "max_unavailable": {"const": 0},
+        "stages": {"type": "array", "minItems": 1, "maxItems": 4, "items": {"$ref": "#/$defs/stage"}}
+      }
+    },
+    "analysis": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "probe_id", "catalog_entry_sha256", "selection_source", "attempts", "interval_seconds", "failure_allowance", "request_timeout_seconds", "active_deadline_seconds"],
+      "properties": {
+        "kind": {"const": "job_http_contract_probe"},
+        "probe_id": {"const": "demo-api-public-quote-v1"},
+        "catalog_entry_sha256": {"$ref": "#/$defs/sha256"},
+        "selection_source": {"enum": ["ai_safeguard", "policy_fallback"]},
+        "attempts": {"const": 3},
+        "interval_seconds": {"const": 10},
+        "failure_allowance": {"const": 1},
+        "request_timeout_seconds": {"const": 2},
+        "active_deadline_seconds": {"const": 45}
+      }
+    },
+    "resolution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "resolved_at"],
+      "properties": {
+        "type": {"enum": ["automatic", "human"]},
+        "resolved_at": {"type": "string", "format": "date-time", "pattern": "Z$"}
+      }
+    }
+  }
+}

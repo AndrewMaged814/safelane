@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object", "additionalProperties": false,
+  "required": ["schema_version", "probe_id", "observations", "failures", "failure_allowance", "result"],
+  "properties": {
+    "schema_version": {"const": "1"}, "probe_id": {"const": "demo-api-public-quote-v1"},
+    "observations": {"type": "array", "minItems": 3, "maxItems": 3, "items": {"$ref": "#/$defs/observation"}},
+    "failures": {"type": "integer", "minimum": 0, "maximum": 3}, "failure_allowance": {"const": 1},
+    "result": {"enum": ["passed", "failed"]}
+  },
+  "$defs": {
+    "observation": {
+      "type": "object", "additionalProperties": false, "required": ["attempt", "outcome", "http_status"],
+      "properties": {
+        "attempt": {"type": "integer", "minimum": 1, "maximum": 3},
+        "outcome": {"enum": ["http_response", "timeout", "connection_error"]},
+        "http_status": {"anyOf": [{"type": "null"}, {"type": "integer", "minimum": 100, "maximum": 599}]}
+      }
+    }
+  }
+}

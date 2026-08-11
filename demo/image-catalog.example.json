@@ -1,0 +1,12 @@
+{
+  "schema_version": "1",
+  "catalog_version": "2026.08.1",
+  "application_images": [
+    {"repository": "AndrewMaged814/safelane-demo", "service": "demo-api", "source_revision": "29a1997f463c7acb7d2e51aa4ee95fa8b3d4a602", "image_ref": "safelane-demo:29a1997f463c7acb7d2e51aa4ee95fa8b3d4a602", "image_id": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "runtime_image_id": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "oci_revision": "29a1997f463c7acb7d2e51aa4ee95fa8b3d4a602"},
+    {"repository": "AndrewMaged814/safelane-demo", "service": "demo-api", "source_revision": "f43738b1fe17f55ff127fd5555bd4211e58c5797", "image_ref": "safelane-demo:f43738b1fe17f55ff127fd5555bd4211e58c5797", "image_id": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "runtime_image_id": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "oci_revision": "f43738b1fe17f55ff127fd5555bd4211e58c5797"},
+    {"repository": "AndrewMaged814/safelane-demo", "service": "demo-api", "source_revision": "75bc4b013dae587dc301e6065a04c78a7e29a7ee", "image_ref": "safelane-demo:75bc4b013dae587dc301e6065a04c78a7e29a7ee", "image_id": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "runtime_image_id": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "oci_revision": "75bc4b013dae587dc301e6065a04c78a7e29a7ee"}
+  ],
+  "probe_images": [
+    {"key": "demo-api-public-quote-probe@2026.08.1", "probe_id": "demo-api-public-quote-v1", "image_ref": "safelane-http-probe:2026.08.1", "image_id": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "runtime_image_id": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"}
+  ]
+}

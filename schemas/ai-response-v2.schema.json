@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://safelane.dev/schemas/ai-response-v2.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["findings", "safeguard_proposal"],
+  "properties": {
+    "findings": {"type": "array", "maxItems": 1, "items": {"$ref": "#/$defs/finding"}},
+    "safeguard_proposal": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/proposal"}]}
+  },
+  "$defs": {
+    "span": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["file", "side", "line", "text"],
+      "properties": {
+        "file": {"type": "string", "minLength": 1, "maxLength": 300},
+        "side": {"enum": ["removed", "added"]},
+        "line": {"type": "integer", "minimum": 1},
+        "text": {"type": "string", "minLength": 1, "maxLength": 1000}
+      }
+    },
+    "finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "spans"],
+      "properties": {
+        "kind": {"const": "breaking_api"},
+        "spans": {"type": "array", "minItems": 2, "maxItems": 2, "prefixItems": [{"$ref": "#/$defs/span"}, {"$ref": "#/$defs/span"}], "items": false}
+      }
+    },
+    "proposal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["finding_index", "hypothesis_kind", "verification_intent_kind", "approval_question_kind", "remediation_kind"],
+      "properties": {
+        "finding_index": {"const": 0},
+        "hypothesis_kind": {"const": "removed_http_route_unavailable"},
+        "verification_intent_kind": {"const": "preserve_removed_http_route"},
+        "approval_question_kind": {"const": "confirm_callers_migrated"},
+        "remediation_kind": {"const": "retain_removed_route_as_alias"}
+      }
+    }
+  }
+}

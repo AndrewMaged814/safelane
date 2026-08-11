@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "catalog_version", "probes"],
+  "properties": {
+    "schema_version": {"const": "1"},
+    "catalog_version": {"const": "2026.08.1"},
+    "probes": {"type": "array", "minItems": 1, "maxItems": 1, "items": {"$ref": "#/$defs/probe"}}
+  },
+  "$defs": {
+    "probe": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "binding", "assertion", "execution"],
+      "properties": {
+        "id": {"const": "demo-api-public-quote-v1"},
+        "binding": {"$ref": "#/$defs/binding"},
+        "assertion": {"type": "object", "additionalProperties": false, "required": ["expected_status"], "properties": {"expected_status": {"const": 200}}},
+        "execution": {"type": "object", "additionalProperties": false, "required": ["target", "probe_image_key"], "properties": {"target": {"const": "http://demo-api-canary.safelane-demo.svc.cluster.local"}, "probe_image_key": {"const": "demo-api-public-quote-probe@2026.08.1"}}}
+      }
+    },
+    "binding": {
+      "type": "object", "additionalProperties": false,
+      "required": ["service", "finding_kind", "hypothesis_kind", "verification_intent_kind", "method", "path"],
+      "properties": {
+        "service": {"const": "demo-api"}, "finding_kind": {"const": "breaking_api"},
+        "hypothesis_kind": {"const": "removed_http_route_unavailable"},
+        "verification_intent_kind": {"const": "preserve_removed_http_route"},
+        "method": {"const": "GET"}, "path": {"const": "/v1/quote"}
+      }
+    }
+  }
+}

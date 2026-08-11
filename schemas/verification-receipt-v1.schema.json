@@ -1,0 +1,138 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "recorded_at", "assessment_result_sha256", "decision_sha256", "release_request_sha256", "image_catalog_sha256", "base_sha", "head_sha", "probe_id", "catalog_entry_sha256", "selection_source", "hypothesis_kind", "rollout", "analyses", "release_adapter_abort_requested", "verdict", "inconclusive_reason"],
+  "properties": {
+    "schema_version": {"const": "1"},
+    "recorded_at": {"$ref": "#/$defs/timestamp"},
+    "assessment_result_sha256": {"$ref": "#/$defs/sha256"},
+    "decision_sha256": {"$ref": "#/$defs/sha256"},
+    "release_request_sha256": {"$ref": "#/$defs/sha256"},
+    "image_catalog_sha256": {"$ref": "#/$defs/sha256"},
+    "base_sha": {"$ref": "#/$defs/git_sha"},
+    "head_sha": {"$ref": "#/$defs/git_sha"},
+    "probe_id": {"const": "demo-api-public-quote-v1"},
+    "catalog_entry_sha256": {"$ref": "#/$defs/sha256"},
+    "selection_source": {"enum": ["ai_safeguard", "policy_fallback"]},
+    "hypothesis_kind": {"anyOf": [{"type": "null"}, {"const": "removed_http_route_unavailable"}]},
+    "rollout": {"$ref": "#/$defs/rollout"},
+    "analyses": {"type": "array", "maxItems": 3, "items": {"$ref": "#/$defs/analysis"}},
+    "release_adapter_abort_requested": {"type": "boolean"},
+    "verdict": {"enum": ["prediction_observed_and_update_aborted", "prediction_not_observed", "inconclusive"]},
+    "inconclusive_reason": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/inconclusive_reason"}]}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"verdict": {"const": "prediction_observed_and_update_aborted"}}, "required": ["verdict"]},
+      "then": {
+        "properties": {
+          "selection_source": {"const": "ai_safeguard"},
+          "hypothesis_kind": {"const": "removed_http_route_unavailable"},
+          "inconclusive_reason": {"type": "null"},
+          "release_adapter_abort_requested": {"const": false},
+          "analyses": {"minItems": 1, "items": {"$ref": "#/$defs/failed_analysis"}},
+          "rollout": {"allOf": [{"$ref": "#/$defs/rollout"}, {"properties": {"phase": {"const": "Degraded"}, "abort": {"const": true}, "abort_origin": {"const": "analysis_failure"}, "aborted_at": {"$ref": "#/$defs/timestamp"}, "progressing_condition": {"$ref": "#/$defs/progressing_condition"}}}]}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"verdict": {"const": "prediction_not_observed"}}, "required": ["verdict"]},
+      "then": {
+        "properties": {
+          "selection_source": {"const": "ai_safeguard"},
+          "hypothesis_kind": {"const": "removed_http_route_unavailable"},
+          "inconclusive_reason": {"type": "null"},
+          "release_adapter_abort_requested": {"const": false},
+          "analyses": {"minItems": 3, "maxItems": 3, "items": {"$ref": "#/$defs/successful_analysis"}},
+          "rollout": {"allOf": [{"$ref": "#/$defs/rollout"}, {"properties": {"phase": {"const": "Healthy"}, "abort": {"const": false}, "abort_origin": {"type": "null"}, "aborted_at": {"type": "null"}, "progressing_condition": {"type": "null"}}}]}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"verdict": {"const": "inconclusive"}}, "required": ["verdict"]},
+      "then": {"properties": {"inconclusive_reason": {"$ref": "#/$defs/inconclusive_reason"}}}
+    },
+    {
+      "if": {"properties": {"selection_source": {"const": "policy_fallback"}}, "required": ["selection_source"]},
+      "then": {"properties": {"hypothesis_kind": {"type": "null"}, "verdict": {"const": "inconclusive"}, "inconclusive_reason": {"const": "no_ai_prediction"}}}
+    }
+  ],
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "git_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "uuid": {"type": "string", "format": "uuid"},
+    "timestamp": {"type": "string", "format": "date-time", "pattern": "Z$"},
+    "nullable_timestamp": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/timestamp"}]},
+    "inconclusive_reason": {"enum": ["artifact_binding_mismatch", "catalog_binding_mismatch", "rollout_annotation_mismatch", "generation_mismatch", "revision_mismatch", "runtime_image_mismatch", "canary_target_mismatch", "resource_ownership_mismatch", "timestamp_order_invalid", "probe_job_not_started", "probe_job_incomplete", "probe_result_invalid", "non_analysis_abort_observed", "observer_timeout", "no_ai_prediction", "prediction_evidence_mixed", "terminal_state_inconsistent"]},
+    "progressing_condition": {
+      "type": "object", "additionalProperties": false,
+      "required": ["type", "status", "reason", "message"],
+      "properties": {"type": {"const": "Progressing"}, "status": {"const": "False"}, "reason": {"const": "RolloutAborted"}, "message": {"type": "string", "pattern": "Step-based analysis phase error/failed"}}
+    },
+    "rollout": {
+      "type": "object", "additionalProperties": false,
+      "required": ["name", "uid", "decision_sha256_annotation", "release_request_sha256_annotation", "metadata_generation", "observed_generation", "phase", "abort", "abort_origin", "aborted_at", "progressing_condition", "stable_revision", "current_revision"],
+      "properties": {
+        "name": {"const": "demo-api"}, "uid": {"$ref": "#/$defs/uuid"},
+        "decision_sha256_annotation": {"$ref": "#/$defs/sha256"}, "release_request_sha256_annotation": {"$ref": "#/$defs/sha256"},
+        "metadata_generation": {"type": "integer", "minimum": 1}, "observed_generation": {"type": "integer", "minimum": 0},
+        "phase": {"anyOf": [{"type": "null"}, {"enum": ["Healthy", "Degraded", "Progressing"]}]},
+        "abort": {"anyOf": [{"type": "null"}, {"type": "boolean"}]},
+        "abort_origin": {"anyOf": [{"type": "null"}, {"enum": ["analysis_failure", "release_adapter", "external_or_unknown"]}]},
+        "aborted_at": {"$ref": "#/$defs/nullable_timestamp"},
+        "progressing_condition": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/progressing_condition"}]},
+        "stable_revision": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/git_sha"}]},
+        "current_revision": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/git_sha"}]}
+      }
+    },
+    "analysis_run": {
+      "type": "object", "additionalProperties": false,
+      "required": ["name", "uid", "owner_rollout_uid", "phase", "completed_at"],
+      "properties": {"name": {"type": "string", "minLength": 1}, "uid": {"$ref": "#/$defs/uuid"}, "owner_rollout_uid": {"$ref": "#/$defs/uuid"}, "phase": {"enum": ["Successful", "Failed"]}, "completed_at": {"$ref": "#/$defs/timestamp"}}
+    },
+    "canary_target": {
+      "type": "object", "additionalProperties": false,
+      "required": ["service_name", "service_uid", "service_selector_pod_template_hash", "replica_set_uid", "replica_set_pod_template_hash", "source_revision", "exposure_pods", "endpoint_pod_uids", "application_image_ref", "application_runtime_image_id"],
+      "properties": {"service_name": {"const": "demo-api-canary"}, "service_uid": {"$ref": "#/$defs/uuid"}, "service_selector_pod_template_hash": {"type": "string", "minLength": 1}, "replica_set_uid": {"$ref": "#/$defs/uuid"}, "replica_set_pod_template_hash": {"type": "string", "minLength": 1}, "source_revision": {"$ref": "#/$defs/git_sha"}, "exposure_pods": {"enum": [1, 2, 3]}, "endpoint_pod_uids": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/uuid"}}, "application_image_ref": {"type": "string", "minLength": 1}, "application_runtime_image_id": {"$ref": "#/$defs/sha256"}}
+    },
+    "job": {
+      "type": "object", "additionalProperties": false,
+      "required": ["name", "uid", "owner_analysis_run_uid", "phase", "container_started", "probe_container_exit_code", "probe_pod_uid", "probe_pod_owner_job_uid", "probe_image_ref", "probe_runtime_image_id"],
+      "properties": {"name": {"type": "string", "minLength": 1}, "uid": {"$ref": "#/$defs/uuid"}, "owner_analysis_run_uid": {"$ref": "#/$defs/uuid"}, "phase": {"enum": ["Complete", "Failed"]}, "container_started": {"type": "boolean"}, "probe_container_exit_code": {"anyOf": [{"type": "null"}, {"type": "integer", "minimum": 0}]}, "probe_pod_uid": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/uuid"}]}, "probe_pod_owner_job_uid": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/uuid"}]}, "probe_image_ref": {"anyOf": [{"type": "null"}, {"type": "string", "minLength": 1}]}, "probe_runtime_image_id": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/sha256"}]}}
+    },
+    "observation": {
+      "type": "object", "additionalProperties": false, "required": ["attempt", "outcome", "http_status"],
+      "properties": {"attempt": {"type": "integer", "minimum": 1, "maximum": 3}, "outcome": {"enum": ["http_response", "timeout", "connection_error"]}, "http_status": {"anyOf": [{"type": "null"}, {"type": "integer", "minimum": 100, "maximum": 599}]}}
+    },
+    "probe_result": {
+      "type": "object", "additionalProperties": false, "required": ["schema_version", "probe_id", "observations", "failures", "failure_allowance", "result"],
+      "properties": {"schema_version": {"const": "1"}, "probe_id": {"const": "demo-api-public-quote-v1"}, "observations": {"type": "array", "minItems": 3, "maxItems": 3, "items": {"$ref": "#/$defs/observation"}}, "failures": {"type": "integer", "minimum": 0, "maximum": 3}, "failure_allowance": {"const": 1}, "result": {"enum": ["passed", "failed"]}}
+    },
+    "analysis": {
+      "type": "object", "additionalProperties": false,
+      "required": ["stage_index", "analysis_run", "canary_target", "job", "probe_result"],
+      "properties": {"stage_index": {"type": "integer", "minimum": 0, "maximum": 2}, "analysis_run": {"$ref": "#/$defs/analysis_run"}, "canary_target": {"$ref": "#/$defs/canary_target"}, "job": {"$ref": "#/$defs/job"}, "probe_result": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/probe_result"}]}}
+    },
+    "failed_analysis": {
+      "allOf": [
+        {"$ref": "#/$defs/analysis"},
+        {"properties": {
+          "analysis_run": {"allOf": [{"$ref": "#/$defs/analysis_run"}, {"properties": {"phase": {"const": "Failed"}}}]},
+          "job": {"allOf": [{"$ref": "#/$defs/job"}, {"properties": {"phase": {"const": "Failed"}, "container_started": {"const": true}, "probe_container_exit_code": {"type": "integer", "minimum": 1}}}]},
+          "probe_result": {"allOf": [{"$ref": "#/$defs/probe_result"}, {"properties": {"failures": {"type": "integer", "minimum": 2}, "result": {"const": "failed"}, "observations": {"items": {"type": "object", "properties": {"outcome": {"const": "http_response"}, "http_status": {"type": "integer"}}, "required": ["outcome", "http_status"]}, "contains": {"type": "object", "properties": {"outcome": {"const": "http_response"}, "http_status": {"type": "integer", "not": {"const": 200}}}, "required": ["outcome", "http_status"]}, "minContains": 2}}}]}
+        }}
+      ]
+    },
+    "successful_analysis": {
+      "allOf": [
+        {"$ref": "#/$defs/analysis"},
+        {"properties": {
+          "analysis_run": {"allOf": [{"$ref": "#/$defs/analysis_run"}, {"properties": {"phase": {"const": "Successful"}}}]},
+          "job": {"allOf": [{"$ref": "#/$defs/job"}, {"properties": {"phase": {"const": "Complete"}, "container_started": {"const": true}, "probe_container_exit_code": {"const": 0}}}]},
+          "probe_result": {"allOf": [{"$ref": "#/$defs/probe_result"}, {"properties": {"failures": {"const": 0}, "result": {"const": "passed"}, "observations": {"items": {"type": "object", "properties": {"outcome": {"const": "http_response"}, "http_status": {"const": 200}}, "required": ["outcome", "http_status"]}}}}]}
+        }}
+      ]
+    }
+  }
+}

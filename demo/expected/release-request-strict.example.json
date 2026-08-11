@@ -1,0 +1,9 @@
+{
+  "schema_version": "1", "repository": "AndrewMaged814/safelane-demo", "service": "demo-api",
+  "base_sha": "f43738b1fe17f55ff127fd5555bd4211e58c5797", "head_sha": "75bc4b013dae587dc301e6065a04c78a7e29a7ee",
+  "policy_version": "2026.08.3", "image_catalog_version": "2026.08.1",
+  "image_catalog_sha256": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+  "image_ref": "safelane-demo:75bc4b013dae587dc301e6065a04c78a7e29a7ee",
+  "image_id": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "runtime_image_id": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+}

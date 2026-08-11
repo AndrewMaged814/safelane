@@ -1,0 +1,41 @@
+{
+  "schema_version": "1",
+  "recorded_at": "2026-08-09T12:08:00Z",
+  "assessment_result_sha256": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "decision_sha256": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+  "release_request_sha256": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+  "image_catalog_sha256": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+  "base_sha": "f43738b1fe17f55ff127fd5555bd4211e58c5797",
+  "head_sha": "75bc4b013dae587dc301e6065a04c78a7e29a7ee",
+  "probe_id": "demo-api-public-quote-v1",
+  "catalog_entry_sha256": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "selection_source": "ai_safeguard",
+  "hypothesis_kind": "removed_http_route_unavailable",
+  "rollout": {
+    "name": "demo-api",
+    "uid": "10000000-0000-0000-0000-000000000000",
+    "decision_sha256_annotation": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "release_request_sha256_annotation": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+    "metadata_generation": 3,
+    "observed_generation": 3,
+    "phase": "Degraded",
+    "abort": true,
+    "abort_origin": "analysis_failure",
+    "aborted_at": "2026-08-09T12:07:00Z",
+    "progressing_condition": {"type": "Progressing", "status": "False", "reason": "RolloutAborted", "message": "Rollout aborted update to revision 3: Step-based analysis phase error/failed"},
+    "stable_revision": "f43738b1fe17f55ff127fd5555bd4211e58c5797",
+    "current_revision": "75bc4b013dae587dc301e6065a04c78a7e29a7ee"
+  },
+  "analyses": [
+    {
+      "stage_index": 0,
+      "analysis_run": {"name": "demo-api-analysis-1", "uid": "20000000-0000-0000-0000-000000000000", "owner_rollout_uid": "10000000-0000-0000-0000-000000000000", "phase": "Failed", "completed_at": "2026-08-09T12:06:55Z"},
+      "canary_target": {"service_name": "demo-api-canary", "service_uid": "40000000-0000-0000-0000-000000000000", "service_selector_pod_template_hash": "abc123", "replica_set_uid": "50000000-0000-0000-0000-000000000000", "replica_set_pod_template_hash": "abc123", "source_revision": "75bc4b013dae587dc301e6065a04c78a7e29a7ee", "exposure_pods": 1, "endpoint_pod_uids": ["60000000-0000-0000-0000-000000000000"], "application_image_ref": "safelane-demo:75bc4b013dae587dc301e6065a04c78a7e29a7ee", "application_runtime_image_id": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"},
+      "job": {"name": "demo-api-probe-1", "uid": "30000000-0000-0000-0000-000000000000", "owner_analysis_run_uid": "20000000-0000-0000-0000-000000000000", "phase": "Failed", "container_started": true, "probe_container_exit_code": 1, "probe_pod_uid": "70000000-0000-0000-0000-000000000000", "probe_pod_owner_job_uid": "30000000-0000-0000-0000-000000000000", "probe_image_ref": "safelane-http-probe:2026.08.1", "probe_runtime_image_id": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"},
+      "probe_result": {"schema_version": "1", "probe_id": "demo-api-public-quote-v1", "observations": [{"attempt": 1, "outcome": "http_response", "http_status": 404}, {"attempt": 2, "outcome": "http_response", "http_status": 404}, {"attempt": 3, "outcome": "http_response", "http_status": 404}], "failures": 3, "failure_allowance": 1, "result": "failed"}
+    }
+  ],
+  "release_adapter_abort_requested": false,
+  "verdict": "prediction_observed_and_update_aborted",
+  "inconclusive_reason": null
+}

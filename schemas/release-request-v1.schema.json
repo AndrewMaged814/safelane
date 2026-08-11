@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "repository", "service", "base_sha", "head_sha", "policy_version", "image_catalog_version", "image_catalog_sha256", "image_ref", "image_id", "runtime_image_id"],
+  "properties": {
+    "schema_version": {"const": "1"},
+    "repository": {"const": "AndrewMaged814/safelane-demo"},
+    "service": {"const": "demo-api"},
+    "base_sha": {"$ref": "#/$defs/git_sha"},
+    "head_sha": {"$ref": "#/$defs/git_sha"},
+    "policy_version": {"const": "2026.08.3"},
+    "image_catalog_version": {"const": "2026.08.1"},
+    "image_catalog_sha256": {"$ref": "#/$defs/sha256"},
+    "image_ref": {"type": "string", "pattern": "^safelane-demo:[0-9a-f]{40}$"},
+    "image_id": {"$ref": "#/$defs/sha256"},
+    "runtime_image_id": {"$ref": "#/$defs/sha256"}
+  },
+  "$defs": {
+    "git_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "sha256": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+  }
+}

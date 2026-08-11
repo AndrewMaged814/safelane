@@ -1,0 +1,44 @@
+{
+  "schema_version": "2",
+  "assessment_id": "AndrewMaged814/safelane-demo#41@f43738b1fe17f55ff127fd5555bd4211e58c5797:2026.08.3",
+  "assessed_at": "2026-08-09T12:00:00Z",
+  "policy_version": "2026.08.3",
+  "assessment_input_sha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "assessment_result_sha256": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "change": {
+    "repository": "AndrewMaged814/safelane-demo", "pull_request": 41,
+    "base_sha": "29a1997f463c7acb7d2e51aa4ee95fa8b3d4a602", "head_sha": "f43738b1fe17f55ff127fd5555bd4211e58c5797",
+    "files_changed": 1, "lines_changed": 3, "services": ["demo-api"], "all_paths_recognized": true
+  },
+  "evidence": {
+    "git_diff_sha256": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "ai_status": "complete",
+    "ai_model_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+    "prompt_sha256": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+    "response_schema_sha256": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+    "incident_history": "disabled_by_policy"
+  },
+  "ai_findings": [],
+  "selected_safeguard": null,
+  "policy_trace": {
+    "baseline": {"rule_id": "scope.low", "tier": "safe", "reason": "The change affects at most 2 recognized files and 50 changed lines."},
+    "safety_floors": []
+  },
+  "policy_result": {
+    "final_tier": "safe", "minimum_profile": "Fast", "evidence_confidence": "high", "fast_eligible": true,
+    "primary_reason": "The change affects at most 2 recognized files and 50 changed lines."
+  },
+  "rollout_options": [
+    {"name": "Fast", "source": "built_in", "traffic_router": "none", "replicas": 5, "max_surge": 1, "max_unavailable": 0, "stages": [{"set_weight": 100, "exposure_pods": 5, "analysis": false}]}
+  ],
+  "review": {
+    "status": "resolved",
+    "resolution": {
+      "type": "automatic", "selected_profile": "Fast", "resolved_at": "2026-08-09T12:00:00Z",
+      "assessment_id": "AndrewMaged814/safelane-demo#41@f43738b1fe17f55ff127fd5555bd4211e58c5797:2026.08.3",
+      "head_sha": "f43738b1fe17f55ff127fd5555bd4211e58c5797",
+      "assessment_input_sha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "assessment_result_sha256": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    }
+  }
+}

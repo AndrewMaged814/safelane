@@ -1,0 +1,17 @@
+# Key order and comments must not affect canonical catalog hashing.
+catalog_version: "2026.08.1"
+probes:
+  - execution:
+      probe_image_key: demo-api-public-quote-probe@2026.08.1
+      target: http://demo-api-canary.safelane-demo.svc.cluster.local
+    assertion:
+      expected_status: 200
+    binding:
+      path: /v1/quote
+      method: GET
+      verification_intent_kind: preserve_removed_http_route
+      hypothesis_kind: removed_http_route_unavailable
+      finding_kind: breaking_api
+      service: demo-api
+    id: demo-api-public-quote-v1
+schema_version: "1"

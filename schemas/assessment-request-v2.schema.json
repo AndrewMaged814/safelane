@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://safelane.dev/schemas/assessment-request-v2.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "repository", "pull_request", "base_sha", "head_sha"],
+  "properties": {
+    "schema_version": {"const": "2"},
+    "repository": {"const": "AndrewMaged814/safelane-demo"},
+    "pull_request": {"type": "integer", "minimum": 1},
+    "base_sha": {"$ref": "#/$defs/git_sha"},
+    "head_sha": {"$ref": "#/$defs/git_sha"}
+  },
+  "$defs": {
+    "git_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"}
+  }
+}

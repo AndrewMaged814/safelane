@@ -1,0 +1,63 @@
+schema_version: "2"
+policy_version: "2026.08.3"
+release_service:
+  name: demo-api
+  replicas: 5
+  critical: false
+  downstream_dependents: []
+  path_prefixes: [src/demo_api/]
+scope:
+  small_max_files: 2
+  small_max_lines: 50
+  large_min_files: 10
+  large_min_lines: 500
+ai:
+  provider: ollama
+  model: qwen2.5-coder:7b
+  max_diff_bytes: 16384
+  timeout_seconds: 60
+  attempts: 1
+  temperature: 0
+  seed: 42
+  num_ctx: 8192
+  num_predict: 768
+  accepted_finding_kinds: [breaking_api]
+incident_history:
+  enabled: false
+profile_for_tier:
+  safe: Fast
+  guarded: Guarded
+  risky: Strict
+rollout:
+  traffic_router: none
+  max_surge: 1
+  max_unavailable: 0
+profiles:
+  Fast:
+    source: built_in
+    stages:
+      - {set_weight: 100, exposure_pods: 5, analysis: false}
+    analysis: null
+  Guarded:
+    source: built_in
+    stages:
+      - {set_weight: 40, exposure_pods: 2, analysis: true}
+      - {set_weight: 100, exposure_pods: 5, analysis: false}
+    analysis_probe_id: demo-api-public-quote-v1
+  Strict:
+    source: built_in
+    stages:
+      - {set_weight: 20, exposure_pods: 1, analysis: true}
+      - {set_weight: 40, exposure_pods: 2, analysis: true}
+      - {set_weight: 60, exposure_pods: 3, analysis: true}
+      - {set_weight: 100, exposure_pods: 5, analysis: false}
+    analysis_probe_id: demo-api-public-quote-v1
+trusted_probe_catalog:
+  path: demo/trusted-probes.yaml
+  non_fast_fallback_probe_id: demo-api-public-quote-v1
+job_analysis:
+  attempts: 3
+  interval_seconds: 10
+  failure_allowance: 1
+  request_timeout_seconds: 2
+  active_deadline_seconds: 45

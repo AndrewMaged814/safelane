@@ -1,0 +1,43 @@
+{
+  "schema_version": "3",
+  "assessment_id": "AndrewMaged814/safelane-demo#42@75bc4b013dae587dc301e6065a04c78a7e29a7ee:2026.08.3",
+  "assessment_input_sha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "assessment_result_sha256": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "repository": "AndrewMaged814/safelane-demo",
+  "pull_request": 42,
+  "base_sha": "f43738b1fe17f55ff127fd5555bd4211e58c5797",
+  "head_sha": "75bc4b013dae587dc301e6065a04c78a7e29a7ee",
+  "service": "demo-api",
+  "policy_version": "2026.08.3",
+  "tier": "risky",
+  "primary_reason": "An existing HTTP contract was removed or renamed.",
+  "profile": {
+    "name": "Strict",
+    "source": "built_in",
+    "traffic_router": "none",
+    "replicas": 5,
+    "max_surge": 1,
+    "max_unavailable": 0,
+    "stages": [
+      {"set_weight": 20, "exposure_pods": 1, "analysis": true},
+      {"set_weight": 40, "exposure_pods": 2, "analysis": true},
+      {"set_weight": 60, "exposure_pods": 3, "analysis": true},
+      {"set_weight": 100, "exposure_pods": 5, "analysis": false}
+    ]
+  },
+  "analysis": {
+    "kind": "job_http_contract_probe",
+    "probe_id": "demo-api-public-quote-v1",
+    "catalog_entry_sha256": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "selection_source": "ai_safeguard",
+    "attempts": 3,
+    "interval_seconds": 10,
+    "failure_allowance": 1,
+    "request_timeout_seconds": 2,
+    "active_deadline_seconds": 45
+  },
+  "resolution": {
+    "type": "human",
+    "resolved_at": "2026-08-09T12:05:00Z"
+  }
+}

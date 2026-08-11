@@ -1,0 +1,12 @@
+{
+  "schema_version": "1",
+  "probe_id": "demo-api-public-quote-v1",
+  "observations": [
+    {"attempt": 1, "outcome": "http_response", "http_status": 404},
+    {"attempt": 2, "outcome": "http_response", "http_status": 404},
+    {"attempt": 3, "outcome": "http_response", "http_status": 404}
+  ],
+  "failures": 3,
+  "failure_allowance": 1,
+  "result": "failed"
+}
