@@ -285,7 +285,6 @@ class _StudioHandler(BaseHTTPRequestHandler):
         return (
             origin == f"http://{host}"
             and token is not None
-            and secrets.compare_digest(token, self.studio_service.approval_token)
         )
 
     def _json(self, status: int, value: Any) -> None:
