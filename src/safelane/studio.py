@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import secrets
 import tempfile
 import threading
@@ -10,6 +11,7 @@ from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from .artifacts import (
     ArtifactError,
@@ -18,6 +20,7 @@ from .artifacts import (
     validate_artifact,
 )
 from .engine import ResolutionError, SafeLaneEngine
+from .pr_studio import PullRequestStudioError, PullRequestStudioService
 
 
 _STATIC = Path(__file__).with_name("studio_static")
@@ -184,7 +187,7 @@ class StudioService:
 
 
 def create_studio_server(
-    service: StudioService,
+    service: StudioService | PullRequestStudioService,
     *,
     port: int = 4173,
 ) -> ThreadingHTTPServer:
@@ -194,11 +197,17 @@ def create_studio_server(
     return ThreadingHTTPServer(("127.0.0.1", port), Handler)
 
 
-def serve_studio(service: StudioService, *, port: int = 4173) -> None:
+def serve_studio(
+    service: StudioService | PullRequestStudioService, *, port: int = 4173
+) -> None:
     server = create_studio_server(service, port=port)
     try:
         print(f"SafeLane Studio: http://127.0.0.1:{server.server_port}")
-        print(f"Workspace: {service.workspace.path}")
+        if isinstance(service, PullRequestStudioService):
+            print(f"Repository: {service.provider.repository}")
+            print(f"Workspace: {service.workspace}")
+        else:
+            print(f"Workspace: {service.workspace.path}")
         server.serve_forever()
     except KeyboardInterrupt:
         pass
@@ -207,36 +216,85 @@ def serve_studio(service: StudioService, *, port: int = 4173) -> None:
 
 
 class _StudioHandler(BaseHTTPRequestHandler):
-    studio_service: StudioService
+    studio_service: StudioService | PullRequestStudioService
 
     def do_GET(self) -> None:
         if not self._trusted_host():
             self._json(403, {"error": "untrusted_request"})
             return
-        if self.path == "/api/assessment":
+        path = urlsplit(self.path).path
+        if isinstance(self.studio_service, PullRequestStudioService):
+            if path == "/api/dashboard":
+                try:
+                    result = self.studio_service.dashboard()
+                    result["approval_token"] = self.studio_service.approval_token
+                    self._json(200, result)
+                except PullRequestStudioError:
+                    self._json(502, {"error": "repository_unavailable"})
+                return
+            if path == "/api/profiles":
+                result = self.studio_service.profiles()
+                result["repository"] = self.studio_service.provider.repository
+                result["approval_token"] = self.studio_service.approval_token
+                self._json(200, result)
+                return
+            assessment_match = re.fullmatch(r"/api/assessments/(\d+)", path)
+            if assessment_match:
+                try:
+                    assessment = self.studio_service.assessment(
+                        int(assessment_match.group(1))
+                    )
+                    self._json(200, {
+                        "assessment": assessment,
+                        "approval_token": self.studio_service.approval_token,
+                    })
+                except PullRequestStudioError:
+                    self._json(404, {"error": "pull_request_not_found"})
+                return
+        elif path == "/api/assessment":
             try:
                 self._json(200, self.studio_service.current())
             except StudioWorkspaceError:
                 self._json(500, {"error": "workspace_invalid"})
             return
         static = {
-            "/": ("index.html", "text/html; charset=utf-8"),
-            "/styles.css": ("styles.css", "text/css; charset=utf-8"),
-            "/app.js": ("app.js", "text/javascript; charset=utf-8"),
-        }.get(self.path)
+            "/": (_STATIC / "index.html", "text/html; charset=utf-8"),
+            "/styles.css": (_STATIC / "styles.css", "text/css; charset=utf-8"),
+            "/app.js": (_STATIC / "app.js", "text/javascript; charset=utf-8"),
+            "/safelane-logo.svg": (
+                Path(__file__).resolve().parents[2] / "assets/brand/safelane-logo.svg",
+                "image/svg+xml",
+            ),
+            "/safelane-mark.svg": (
+                Path(__file__).resolve().parents[2] / "assets/brand/safelane-mark.svg",
+                "image/svg+xml",
+            ),
+        }.get(path)
+        if static is None and (
+            path in {"/changes", "/profiles"}
+            or re.fullmatch(r"/changes/\d+", path)
+        ):
+            static = (_STATIC / "index.html", "text/html; charset=utf-8")
         if static is None:
             self._json(404, {"error": "not_found"})
             return
-        name, content_type = static
+        asset_path, content_type = static
         try:
-            raw = (_STATIC / name).read_bytes()
+            raw = asset_path.read_bytes()
         except OSError:
             self._json(500, {"error": "static_asset_unavailable"})
             return
         self._send(200, raw, content_type)
 
     def do_POST(self) -> None:
-        if self.path != "/api/approve":
+        path = urlsplit(self.path).path
+        pr_approval = re.fullmatch(r"/api/assessments/(\d+)/approve", path)
+        repository_connection = path == "/api/connect"
+        if isinstance(self.studio_service, PullRequestStudioService):
+            if pr_approval is None and not repository_connection:
+                self._json(404, {"error": "not_found"})
+                return
+        elif path != "/api/approve":
             self._json(404, {"error": "not_found"})
             return
         if not self._trusted_browser_request():
@@ -255,10 +313,33 @@ class _StudioHandler(BaseHTTPRequestHandler):
             return
         try:
             payload = load_json_bytes(self.rfile.read(length))
-            result = self.studio_service.approve(
-                payload,
-                approval_token=self.headers.get("X-SafeLane-CSRF"),
-            )
+            if isinstance(self.studio_service, PullRequestStudioService):
+                if repository_connection:
+                    result = self.studio_service.connect(
+                        payload,
+                        approval_token=self.headers.get("X-SafeLane-CSRF"),
+                    )
+                    result["approval_token"] = self.studio_service.approval_token
+                else:
+                    assert pr_approval is not None
+                    result = self.studio_service.approve(
+                        int(pr_approval.group(1)),
+                        payload,
+                        approval_token=self.headers.get("X-SafeLane-CSRF"),
+                    )
+            else:
+                result = self.studio_service.approve(
+                    payload,
+                    approval_token=self.headers.get("X-SafeLane-CSRF"),
+                )
+        except PullRequestStudioError as exc:
+            if repository_connection:
+                self._json(400, {
+                    "error": "repository_connection_failed",
+                    "message": str(exc),
+                })
+            else:
+                self._json(400, {"error": "invalid_request"})
         except (ArtifactError, StudioRequestError):
             self._json(400, {"error": "invalid_request"})
         except StudioConflict as exc:

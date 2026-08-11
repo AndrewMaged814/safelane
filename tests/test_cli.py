@@ -30,7 +30,7 @@ def test_evaluate_ollama_command_documents_output_and_base_url_flags() -> None:
     assert "--base-url" in result.stdout
 
 
-def test_studio_command_requires_a_workspace_and_offers_only_a_local_port() -> None:
+def test_studio_command_accepts_only_a_pull_request_repository_source() -> None:
     result = subprocess.run(
         [sys.executable, "-m", "safelane.cli", "studio", "--help"],
         capture_output=True,
@@ -38,6 +38,8 @@ def test_studio_command_requires_a_workspace_and_offers_only_a_local_port() -> N
     )
 
     assert result.returncode == 0, result.stderr
-    assert "--workspace" in result.stdout
+    assert "--repository" in result.stdout
+    assert "--state-dir" in result.stdout
+    assert "--workspace" not in result.stdout
     assert "--port" in result.stdout
     assert "--host" not in result.stdout

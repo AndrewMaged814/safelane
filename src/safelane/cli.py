@@ -9,10 +9,15 @@ from jsonschema import Draft202012Validator
 
 from .artifacts import load_json_bytes, load_yaml_bytes, validate_artifact
 from .demo_repository import create_demo_repository
-from .engine import SafeLaneEngine
 from .evaluation import run_ollama_evaluation
-from .risk_finder import FakeRiskFinder
-from .studio import StudioService, StudioWorkspace, serve_studio
+from .pr_studio import (
+    GitHubPullRequestProvider,
+    OllamaPullRequestAnalyzer,
+    PullRequestAssessmentEngine,
+    PullRequestStudioError,
+    PullRequestStudioService,
+)
+from .studio import serve_studio
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -94,9 +99,18 @@ def main(argv: list[str] | None = None) -> int:
     )
     evaluation.add_argument("--base-url", default="http://127.0.0.1:11434")
     studio = subparsers.add_parser(
-        "studio", help="serve the local assessment review and approval surface"
+        "studio", help="review the open pull requests of a local or remote GitHub repository"
     )
-    studio.add_argument("--workspace", type=Path, required=True)
+    studio.add_argument(
+        "--repository",
+        help="local Git checkout, GitHub URL, or owner/repository (defaults to .)",
+    )
+    studio.add_argument(
+        "--state-dir",
+        type=Path,
+        help="where PR assessments and decisions are stored",
+    )
+    studio.add_argument("--base-url", default="http://127.0.0.1:11434")
     studio.add_argument("--port", type=int, default=4173)
     args = parser.parse_args(argv)
     if args.command == "validate-fixtures":
@@ -109,15 +123,39 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "studio":
         if not 1 <= args.port <= 65_535:
             parser.error("--port must be between 1 and 65535")
-        engine = SafeLaneEngine(
-            policy_path=ROOT / "policy.yaml",
-            trusted_probes_path=ROOT / "demo/trusted-probes.yaml",
-            risk_finder=FakeRiskFinder(b"{}", status="unavailable"),
-        )
-        serve_studio(
-            StudioService(StudioWorkspace(args.workspace), engine),
-            port=args.port,
-        )
+        try:
+            provider = GitHubPullRequestProvider(args.repository or ".")
+            provider.list_open_pull_requests()
+            policy = load_yaml_bytes((ROOT / "policy.yaml").read_bytes())
+            ai = policy["ai"]
+            analyzer = OllamaPullRequestAnalyzer(
+                model=ai["model"],
+                base_url=args.base_url,
+                timeout_seconds=ai["timeout_seconds"],
+                temperature=ai["temperature"],
+                seed=ai["seed"],
+                num_ctx=ai["num_ctx"],
+                num_predict=ai["num_predict"],
+            )
+            assessor = PullRequestAssessmentEngine(
+                policy_path=ROOT / "policy.yaml", analyzer=analyzer
+            )
+            if args.state_dir is not None:
+                state_root = args.state_dir
+            elif provider.local_path is not None:
+                state_root = provider.local_path / ".safelane" / "studio"
+            else:
+                state_root = Path.cwd() / ".safelane" / "studio"
+            workspace = state_root / provider.repository.replace("/", "--")
+            service = PullRequestStudioService(
+                provider,
+                workspace,
+                assessor,
+                state_root=state_root,
+            )
+        except (PullRequestStudioError, OSError) as exc:
+            parser.error(str(exc))
+        serve_studio(service, port=args.port)
     return 0
 
 

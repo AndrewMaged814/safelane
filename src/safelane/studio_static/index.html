@@ -4,34 +4,35 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="light">
-    <title>SafeLane Studio — Release dossier</title>
+    <title>SafeLane Studio</title>
+    <link rel="icon" href="/safelane-mark.svg" type="image/svg+xml">
     <link rel="stylesheet" href="/styles.css">
     <script src="/app.js" defer></script>
   </head>
   <body>
-    <div class="top-rule" aria-hidden="true"></div>
-    <header class="masthead">
-      <a class="wordmark" href="/" aria-label="SafeLane Studio home">
-        <span class="lane-mark" aria-hidden="true"><i></i><i></i><i></i></span>
-        <span>SafeLane</span>
-      </a>
-      <div class="masthead-copy">
-        <p class="eyebrow">Local release review / current assessment</p>
-        <h1>Decision dossier</h1>
-      </div>
-      <div class="local-stamp"><span></span> Local workspace</div>
-    </header>
-
-    <main id="studio" class="studio" aria-live="polite">
-      <section class="loading-card">
-        <p class="eyebrow">Reading signed evidence</p>
-        <p class="loading-line">Opening the current assessment…</p>
-      </section>
-    </main>
-
-    <footer>
-      <span>SafeLane Studio</span>
-      <span>Approval records a rollout plan. It does not release software.</span>
-    </footer>
+    <div id="app" aria-live="polite">
+      <main class="boot"><span class="spinner" aria-hidden="true"></span> Opening SafeLane Studio…</main>
+    </div>
+    <dialog id="repository-dialog" class="repository-dialog" aria-labelledby="repository-dialog-title">
+      <form id="repository-form">
+        <div class="dialog-kicker">Repository connection</div>
+        <div class="dialog-head">
+          <div>
+            <h2 id="repository-dialog-title">Choose a GitHub repository</h2>
+            <p>Connect a local checkout or a remote repository. SafeLane will show only its open pull requests.</p>
+          </div>
+          <button class="dialog-close" type="button" data-close-dialog aria-label="Close">×</button>
+        </div>
+        <label for="repository-source">Local path, GitHub URL, or owner/repository</label>
+        <input id="repository-source" name="repository" autocomplete="off" spellcheck="false" placeholder="C:\code\payments-api or acme/payments-api" required>
+        <div class="connection-examples"><span>Local</span><code>C:\code\payments-api</code><span>Remote</span><code>acme/payments-api</code></div>
+        <p id="repository-error" class="dialog-error" role="alert"></p>
+        <div class="dialog-actions">
+          <button class="button" type="button" data-close-dialog>Cancel</button>
+          <button class="button primary" id="connect-repository" type="submit">Connect repository</button>
+        </div>
+      </form>
+    </dialog>
+    <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
   </body>
 </html>

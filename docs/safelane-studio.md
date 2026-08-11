@@ -1,104 +1,86 @@
-# Pre-final SafeLane Studio
+# SafeLane Studio
 
-**Version:** 2 · **decision date:** 2026-08-09
+**Version:** 3 · **decision date:** 2026-08-12
 
-SafeLane Studio is one local review surface for the current assessment. It explains why a specific
-change needs a specific safeguard and records explicit approval when required. It does not deploy or
-monitor releases.
+SafeLane Studio is a local review surface for the open pull requests of one connected GitHub
+repository. It explains why a specific PR revision needs a specific rollout profile and records
+explicit approval when required. It does not merge, deploy, or monitor releases.
 
-## Navigation and lifecycle
+## Repository and PR lifecycle
 
-The runtime has one current-assessment route; an inbox may be added only if time remains. It loads a
-fixed local workspace. A new head SHA creates a new assessment identity and invalidates the prior
-page and approval. All workspace commands share one exclusive local lock; after validating the new
-request/Git/policy inputs, `assess` removes the prior decision before publishing the replacement
-assessment, so the old head cannot remain releasable beside a newer unresolved page.
+Studio connects through the authenticated GitHub CLI to either a local checkout's `origin` or an
+explicit GitHub URL or `owner/repository` slug. The Changes route lists only open pull requests. It
+never assesses or displays an uncommitted working-tree diff without a pull request.
 
-Fast resolves automatically. Guarded/Risky remains unresolved until the user approves a built-in
-profile at least as careful as the policy minimum. The page always says that approval records the
-rollout plan but does not deploy it.
+The repository chip in the top bar opens the connection dialog. A valid local path, GitHub URL, or
+repository slug switches the active repository and loads its isolated state directory. Validation
+failure leaves the current repository active and shows the provider error inside the dialog.
+
+For every listed PR, Studio fetches the immutable GitHub comparison identified by the discovered
+full base and head SHAs. Assessments and decisions are stored by PR number in the local Studio state
+directory. A new head SHA creates a new assessment identity and invalidates the earlier review and
+decision. Closed PRs disappear from the active inbox without deleting their local audit files.
+
+These `studio-pr-assessment-v2` and `studio-pr-review-v1` records are explicitly scoped to local
+Studio review. They are not canonical `assessment-v2` / `decision-v3` release authorization and
+must never be consumed by deployment tooling.
+
+Fast path recognition is deliberately conservative across repositories: every changed file must be
+either inside the configured release-service prefixes or a Markdown documentation file at
+`README.md` or under `docs/`. Other source paths remain at least Guarded until that repository has
+an explicit service mapping.
+
+Fast resolves automatically. Guarded and Risky remain unresolved until the user approves a built-in
+profile at least as careful as the policy minimum. The inbox separates Needs review from Resolved.
+Every approval surface says that approval records a rollout plan but does not deploy it.
+
+## Navigation
+
+- **Changes** — live open-PR inbox, lane, reason, and review state.
+- **PR dossier** — exact revision identity, source-verified findings, policy reason, rollout preview,
+  and approval.
+- **Profiles** — read-only Fast, Guarded, and Strict built-in rollout definitions.
 
 ## Fast view
 
-Show:
+Show the repository, pull request, head SHA, positive bounded-scope evidence, Safe tier, Fast profile,
+and `Resolved automatically`. Do not invent a failure hypothesis, safeguard, approval question, or
+remediation when the assessment has no verified finding.
 
-- repository, pull request, full head SHA, and policy version;
-- every positive Fast eligibility check;
-- Safe tier and Fast profile preview; and
-- `Resolved automatically`.
+## Guarded and Risky views
 
-Do not invent a failure hypothesis, safeguard, approval question, or remediation for Fast.
+Show the deterministic policy reason first. When the bounded model returns a valid finding, show its
+category, severity, normal-code-rendered explanation, and exact removed or added source spans.
+Label these spans as source references verified: normal code confirms only that the cited text exists
+at the claimed changed-line identity. It does not claim that the model's interpretation is true, and
+model-authored prose is never displayed as trusted explanation.
 
-## Risky safety-case view
-
-Use one linear reading order:
-
-```text
-Breaking contract
-    -> removed and added source spans
-    -> AI-proposed failure hypothesis
-    -> 2/2 source references verified
-    -> trusted compatibility probe selected by SafeLane
-    -> first exposure: 1 of 5 pods
-    -> approval question and bounded remediation
-    -> Approve Strict rollout
-```
-
-The page shows the deterministic policy trace and exact rendered strings owned by `contract.md`.
-Every selectable stage preview comes from the assessment's normal-code `rollout_options`; Studio does
-not load or reinterpret policy.
-Labels must distinguish:
-
-- **AI proposed** — the semantic hypothesis/intent came from the bounded model response;
-- **source references verified** — normal code found the exact cited diff spans; and
-- **trusted probe selected by SafeLane** — normal code resolved the verified intent to the catalog.
-
-The probe preview reads only the normal-code `selected_safeguard.probe_preview` projection inside the
-assessment: `GET /v1/quote`, expected 200, three attempts, and canary-only targeting. Studio does not
-load the raw model response, policy, or either catalog, and it never displays raw model content as
-executable configuration.
-
-The approval question is informational; Studio does not collect an answer. The remediation is
-advisory; Studio does not generate or apply a patch and never promises that it will earn Fast.
-
-## Non-Fast views without an AI-linked safeguard
-
-Whenever `selected_safeguard` is null on a Guarded/Risky assessment, Studio shows `Policy fallback
-analysis will run after approval`; it does not invent a hypothesis or selected safeguard. This covers
-both kinds of state:
-
-- a medium Guarded or high Risky scope baseline may have complete empty AI evidence, high confidence,
-  and no uncertainty floor; show the baseline reason and its minimum profile; and
-- a low-confidence assessment shows every uncertainty floor. If a verified Risky finding survived a
-  rejected proposal, show that finding and floor, label the AI-linked safeguard unavailable, and never
-  render rejected proposal values.
-
-In every case the page offers only built-in profiles at least as careful as the minimum and remains
-unresolved until approval.
+When no model finding survives validation, show the policy fallback reason and evidence status. Do
+not invent a finding or display rejected model values. Every rollout preview comes from the
+assessment's server-owned `rollout_options`; the browser does not load or reinterpret policy.
 
 ## Approval contract
 
-The only state-changing production UI action is **Approve selected rollout** (shown as **Approve
-Strict rollout** in the demo Risky case). The browser submits the
-expected assessment ID, head SHA, assessment-input hash, and assessment-result hash. The server loads
-the current assessment, compare-and-swaps all four values, and calls `SafeLaneEngine.approve`; it does
-not accept a client-supplied assessment object.
+The only state-changing production UI action is **Approve selected rollout**. The browser submits the
+expected assessment ID, head SHA, policy version, assessment-input hash, assessment-result hash, and
+selected built-in profile. The server refreshes open PR state, loads the current assessment, and
+compare-and-swaps those identities. It does not accept a client-supplied assessment object.
 
-The server atomically replaces the resolved assessment first and creates/replaces `decision.json`
-last. A stale page, wrong hash, wrong SHA, invalid profile, or already changed workspace is rejected.
-After success, Studio shows `Resolved` and the decision path.
+The server atomically replaces the resolved PR assessment first and creates or replaces its local
+decision last. A stale page, wrong hash, wrong SHA, invalid profile, closed PR, or changed PR is
+rejected. A local approval does not write to GitHub and does not deploy software.
 
 ## Visual requirements
 
-- Present source evidence, safeguard or fallback notice, and rollout preview in one column that works at laptop width.
-- Pair color with text/icon; Fast is green and Strict is red, but color is never the only signal.
-- Render code spans in a readable monospace block with removed/added labels.
-- Keep the causal chain visible without animation; polish must not introduce a frontend framework.
+- Preserve the prototype's Changes, dossier, and Profiles information architecture.
+- Pair color with text; Safe is green, Guarded is amber, and Risky is red.
+- Render verified source spans in readable monospace blocks with removed/added labels.
+- Work at laptop and narrow viewport widths without a frontend framework.
 
 ## Out of scope
 
-- policy/profile creation, editing, overrides, or Generate with AI;
-- chat, multiple AI alternatives, self-critique, or free-form narrative;
-- deploy buttons, kubectl, rollout polling, verification-receipt ingestion, history, accounts, RBAC,
-  database, notifications, and analytics; and
+- policy or profile creation, editing, overrides, or Generate with AI;
+- chat, model self-critique, or free-form executable configuration;
+- GitHub writes, merging, deploy buttons, kubectl, rollout polling, and receipt ingestion;
+- accounts, RBAC, database, notifications, analytics, and history UI; and
 - generated tests, commands, patches, or arbitrary probe configuration.
