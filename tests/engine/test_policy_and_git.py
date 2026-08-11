@@ -388,6 +388,48 @@ def test_unavailable_and_malformed_ai_apply_incomplete_floor(tmp_path: Path) -> 
         assert assessment["policy_result"]["final_tier"] == "guarded"
 
 
+@pytest.mark.parametrize(
+    ("raw_response", "status"),
+    [
+        pytest.param(b"{}", "unavailable", id="timeout-or-transport"),
+        pytest.param(b'{"findings":[]}', "complete", id="schema-failure"),
+        pytest.param(
+            b'{"findings":[{"kind":"model_guess","spans":[]}],"safeguard_proposal":null}',
+            "complete",
+            id="unknown-kind",
+        ),
+        pytest.param(
+            b'{"findings":[{"kind":"breaking_api","spans":['
+            b'{"file":"src/demo_api/fabricated.py","side":"removed","line":999,"text":"@app.get(\\"/v1/quote\\")"},'
+            b'{"file":"src/demo_api/fabricated.py","side":"added","line":1000,"text":"@app.get(\\"/v2/quote\\")"}'
+            b'] }],"safeguard_proposal":null}',
+            "complete",
+            id="bad-span-and-fabricated-reference",
+        ),
+    ],
+)
+def test_each_ai_failure_fails_safer_without_hiding_scope_floor(
+    tmp_path: Path, raw_response: bytes, status: str
+) -> None:
+    repo, base = init_repo(tmp_path / "repo")
+    head = commit_files(
+        repo,
+        {f"src/demo_api/{index}.py": "change\n" for index in range(10)},
+    )
+    request = request_file(tmp_path / "request.json", base, head)
+    assessment = engine(FakeRiskFinder(raw_response, status=status)).assess(  # type: ignore[arg-type]
+        repo, request, "2026-08-09T12:00:00Z"
+    ).assessment
+
+    assert assessment["evidence"]["ai_status"] in {"unavailable", "partial"}
+    assert assessment["ai_findings"] == []
+    assert assessment["policy_trace"]["baseline"]["rule_id"] == "scope.high"
+    assert assessment["policy_result"]["final_tier"] == "risky"
+    assert [floor["rule_id"] for floor in assessment["policy_trace"]["safety_floors"]] == [
+        "evidence.ai_incomplete"
+    ]
+
+
 def test_absent_proposal_keeps_finding_and_fixed_floor_order(demo_repo: Path) -> None:
     response = json.loads((ROOT / "demo/expected/ai-strict.json").read_text(encoding="utf-8"))
     response["safeguard_proposal"] = None

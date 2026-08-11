@@ -1,0 +1,29 @@
+{
+  "schema_version": "1",
+  "id": "quote-contract-break",
+  "diff_path": "demo/evaluation/quote-contract-break.diff",
+  "git_diff_sha256": "sha256:4b404c65211c8feb13303fc8f39187daaf33948f6e8dbec5d7bc7b41832b1eb3",
+  "expected_normalized_result": {
+    "findings": [
+      {
+        "kind": "breaking_api",
+        "spans": [
+          {"file": "src/demo_api/app.py", "side": "removed", "line": 17, "text": "@app.get(\"/v1/quote\")"},
+          {"file": "src/demo_api/app.py", "side": "added", "line": 18, "text": "@app.get(\"/v2/quote\")"}
+        ]
+      }
+    ],
+    "safeguard_proposal": {
+      "finding_index": 0,
+      "hypothesis_kind": "removed_http_route_unavailable",
+      "verification_intent_kind": "preserve_removed_http_route",
+      "approval_question_kind": "confirm_callers_migrated",
+      "remediation_kind": "retain_removed_route_as_alias"
+    }
+  },
+  "accepted_spans": [
+    {"file": "src/demo_api/app.py", "side": "removed", "line": 17, "text": "@app.get(\"/v1/quote\")"},
+    {"file": "src/demo_api/app.py", "side": "added", "line": 18, "text": "@app.get(\"/v2/quote\")"}
+  ],
+  "forbidden_result": "fabricated_reference"
+}

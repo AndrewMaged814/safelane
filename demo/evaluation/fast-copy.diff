@@ -1,0 +1,11 @@
+diff --git a/src/demo_api/app.py b/src/demo_api/app.py
+index f2cdb35..7504fbf 100644
+--- a/src/demo_api/app.py
++++ b/src/demo_api/app.py
+@@ -16,4 +16,5 @@ def ready() -> dict[str, bool]:
+ 
+ @app.get("/v1/quote")
+ def quote() -> dict[str, str]:
+-    return {"quote": "EGP 50.00"}
++    payload = {"quote": "EGP 50.00"}
++    return dict(payload)

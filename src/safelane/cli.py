@@ -9,6 +9,7 @@ from jsonschema import Draft202012Validator
 
 from .artifacts import load_json_bytes, load_yaml_bytes, validate_artifact
 from .demo_repository import create_demo_repository
+from .evaluation import run_ollama_evaluation
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -48,18 +49,24 @@ def validate_fixtures() -> None:
         validate_artifact(schema_name, value)
     print(f"{len(EXAMPLES)} checked-in examples valid")
 
-    manifest = load_json_bytes((ROOT / "demo/evaluation/additive-route.manifest.json").read_bytes())
+    manifest_names = ["fast-copy", "additive-route", "quote-contract-break"]
     expected_manifest_keys = ["schema_version", "id", "diff_path", "git_diff_sha256", "expected_normalized_result", "accepted_spans", "forbidden_result"]
-    if list(manifest) != expected_manifest_keys or manifest["id"] != "additive-route":
-        raise RuntimeError("invalid additive-route manifest shape")
-    diff = (ROOT / manifest["diff_path"]).read_bytes()
     from .artifacts import sha256
-    if sha256(diff) != manifest["git_diff_sha256"]:
-        raise RuntimeError("additive-route diff hash mismatch")
-    validate_artifact("ai-response-v2", manifest["expected_normalized_result"])
-    if manifest["accepted_spans"] != [] or manifest["forbidden_result"] != "breaking_api":
-        raise RuntimeError("invalid additive-route expected result")
-    print("additive-route manifest and hash valid")
+    for manifest_name in manifest_names:
+        manifest = load_json_bytes(
+            (ROOT / f"demo/evaluation/{manifest_name}.manifest.json").read_bytes()
+        )
+        if list(manifest) != expected_manifest_keys or manifest["id"] != manifest_name:
+            raise RuntimeError(f"invalid {manifest_name} manifest shape")
+        diff = (ROOT / manifest["diff_path"]).read_bytes()
+        if sha256(diff) != manifest["git_diff_sha256"]:
+            raise RuntimeError(f"{manifest_name} diff hash mismatch")
+        validate_artifact("ai-response-v2", manifest["expected_normalized_result"])
+        findings = manifest["expected_normalized_result"]["findings"]
+        expected_spans = [] if not findings else findings[0]["spans"]
+        if manifest["accepted_spans"] != expected_spans:
+            raise RuntimeError(f"invalid {manifest_name} accepted spans")
+    print(f"{len(manifest_names)} evaluation manifests and hashes valid")
 
     expected = json.loads((ROOT / "demo" / "revisions.json").read_text(encoding="utf-8"))
     with tempfile.TemporaryDirectory(prefix="safelane-demo-") as directory:
@@ -73,9 +80,23 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="safelane")
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser("validate-fixtures", help="validate schemas and frozen demo fixtures")
+    evaluation = subparsers.add_parser(
+        "evaluate-ollama", help="run the six-observation one-shot local-model gate"
+    )
+    evaluation.add_argument(
+        "--output",
+        type=Path,
+        default=ROOT / "demo/evaluation/ollama-observations.json",
+    )
+    evaluation.add_argument("--base-url", default="http://127.0.0.1:11434")
     args = parser.parse_args(argv)
     if args.command == "validate-fixtures":
         validate_fixtures()
+    elif args.command == "evaluate-ollama":
+        passed = run_ollama_evaluation(args.output, base_url=args.base_url)
+        result = load_json_bytes(args.output.read_bytes())
+        print(result["summary"]["result"])
+        return 0 if passed else 1
     return 0
 
 

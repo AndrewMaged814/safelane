@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import copy
 import os
-import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -18,6 +17,7 @@ from .artifacts import (
     sha256,
     validate_artifact,
 )
+from .diff_evidence import DiffSpan, parse_diff, parse_diff_metadata
 from .risk_finder import AiAttempt, RiskFinder
 
 
@@ -42,17 +42,9 @@ class ResolvedArtifacts:
 
 
 @dataclass(frozen=True)
-class _DiffSpan:
-    file: str
-    side: str
-    line: int
-    text: str
-
-
-@dataclass(frozen=True)
 class _GitEvidence:
     raw: bytes
-    spans: frozenset[_DiffSpan]
+    spans: frozenset[DiffSpan]
     files: tuple[str, ...]
     lines_changed: int
     valid_utf8: bool
@@ -296,11 +288,12 @@ class SafeLaneEngine:
         except subprocess.CalledProcessError as exc:
             raise AssessmentError("invalid Git worktree or revision range") from exc
         raw = result.stdout
-        files, binary_patch = _parse_diff_metadata(raw)
+        files, binary_patch = parse_diff_metadata(raw)
         try:
             text_diff = raw.decode("utf-8")
             valid_utf8 = True
-            spans, _, lines_changed = _parse_diff(text_diff)
+            parsed_spans, _, lines_changed = parse_diff(text_diff)
+            spans = frozenset(parsed_spans)
         except UnicodeDecodeError:
             valid_utf8 = False
             spans, lines_changed = frozenset(), 0
@@ -339,7 +332,7 @@ class SafeLaneEngine:
         if list(Draft202012Validator(finding_schema).iter_errors(finding)):
             return attempt, "partial", [], None
         candidates = [
-            _DiffSpan(span["file"], span["side"], span["line"], span["text"])
+            DiffSpan(span["file"], span["side"], span["line"], span["text"])
             for span in finding["spans"]
         ]
         expected_roles = (
@@ -468,75 +461,6 @@ class SafeLaneEngine:
             "analysis": analysis,
             "resolution": {"type": event["type"], "resolved_at": event["resolved_at"]},
         }
-
-
-_HUNK = re.compile(r"^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@")
-
-
-def _parse_diff(diff: str) -> tuple[frozenset[_DiffSpan], tuple[str, ...], int]:
-    current_file: str | None = None
-    old_line = new_line = 0
-    spans: set[_DiffSpan] = set()
-    files: list[str] = []
-    lines_changed = 0
-    in_hunk = False
-    for line in diff.splitlines():
-        if line.startswith("diff --git a/"):
-            match = re.match(r"^diff --git a/(.+) b/(.+)$", line)
-            in_hunk = False
-            current_file = None
-            if match and match.group(1) == match.group(2):
-                current_file = match.group(2)
-                if current_file not in files:
-                    files.append(current_file)
-            continue
-        if line.startswith("+++ b/"):
-            current_file = line[6:]
-            if current_file not in files:
-                files.append(current_file)
-            continue
-        match = _HUNK.match(line)
-        if match:
-            old_line, new_line = map(int, match.groups())
-            in_hunk = True
-            continue
-        if not in_hunk or current_file is None or line.startswith("\\ No newline"):
-            continue
-        prefix, text = line[:1], line[1:]
-        if prefix == " ":
-            old_line += 1
-            new_line += 1
-        elif prefix == "-":
-            spans.add(_DiffSpan(current_file, "removed", old_line, text))
-            old_line += 1
-            lines_changed += 1
-        elif prefix == "+":
-            spans.add(_DiffSpan(current_file, "added", new_line, text))
-            new_line += 1
-            lines_changed += 1
-    return frozenset(spans), tuple(files), lines_changed
-
-
-def _parse_diff_metadata(raw: bytes) -> tuple[tuple[str, ...], bool]:
-    files: list[str] = []
-    binary_patch = False
-    for line in raw.splitlines():
-        if line == b"GIT binary patch" or (
-            line.startswith(b"Binary files ") and line.endswith(b" differ")
-        ):
-            binary_patch = True
-        if not line.startswith(b"diff --git "):
-            continue
-        match = re.match(rb"^diff --git a/(.+) b/(.+)$", line)
-        if match and match.group(1) == match.group(2):
-            try:
-                path = match.group(2).decode("utf-8")
-            except UnicodeDecodeError:
-                path = f"<unrecognized-path-{len(files)}>"
-        else:
-            path = f"<unrecognized-path-{len(files)}>"
-        files.append(path)
-    return tuple(files), binary_patch
 
 
 def _assessment_result_hash(assessment: dict[str, Any]) -> str:

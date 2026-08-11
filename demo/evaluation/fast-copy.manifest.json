@@ -1,0 +1,12 @@
+{
+  "schema_version": "1",
+  "id": "fast-copy",
+  "diff_path": "demo/evaluation/fast-copy.diff",
+  "git_diff_sha256": "sha256:358b06a4268486aaa30cc9e888f8272898244521f5ec5c787a6dfdbd71e57118",
+  "expected_normalized_result": {
+    "findings": [],
+    "safeguard_proposal": null
+  },
+  "accepted_spans": [],
+  "forbidden_result": "breaking_api"
+}

@@ -26,7 +26,7 @@
       "required": ["kind", "spans"],
       "properties": {
         "kind": {"const": "breaking_api"},
-        "spans": {"type": "array", "minItems": 2, "maxItems": 2, "prefixItems": [{"$ref": "#/$defs/span"}, {"$ref": "#/$defs/span"}], "items": false}
+        "spans": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"$ref": "#/$defs/span"}}
       }
     },
     "proposal": {
