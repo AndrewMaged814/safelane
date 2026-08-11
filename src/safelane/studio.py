@@ -21,7 +21,7 @@ from .engine import ResolutionError, SafeLaneEngine
 
 
 _STATIC = Path(__file__).with_name("studio_static")
-_MAX_REQUEST_BYTES = 16_384
+_MAX_REQUEST_BYTES = 1_048_576
 _APPROVAL_KEYS = {
     "selected_profile",
     "assessment_id",
