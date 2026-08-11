@@ -60,7 +60,7 @@ flowchart LR
 ```
 
 1. **Collect change evidence** — diff size, mapped services, downstream impact, shipping support, and bounded incident candidates.
-2. **Find specific dangers** — local `qwen2.5-coder:7b` returns only structured findings with exact code and incident evidence.
+2. **Find specific dangers** — local `qwen2.5-coder:7b` returns one bounded category, severity, and exact changed-line citations; normal code renders the explanation.
 3. **Apply deterministic policy** — coarse failure propensity and one-way safety floors produce the final risk tier.
 4. **Review the assessment** — SafeLane Studio shows the Main risk, verified evidence, and minimum rollout profile. Guarded and Risky decisions require approval.
 5. **Resolve the rollout** — the approved decision contains complete pod stages and health checkpoints for Argo Rollouts.
@@ -105,24 +105,29 @@ See [`docs/risk-signals.md`](docs/risk-signals.md) for the complete Phase 1 poli
 
 ## SafeLane Studio
 
-Studio is a small local assessment-review tool, not a deployment dashboard or policy editor. It
-explains one fixed workspace assessment and records approval for a valid built-in rollout. Argo's own
-dashboard remains responsible for live rollout controls.
+Studio connects to a local checkout or remote GitHub repository, discovers its open pull requests,
+and assesses each exact base/head diff. The Changes inbox shows the selected lane and review state;
+the PR dossier explains the evidence and records approval for a built-in rollout profile. It never
+shows uncommitted working-tree changes, modifies GitHub, or deploys software.
 
-Run the checked-in Risky demo from a disposable workspace:
+Run it against the current checkout's GitHub origin:
 
 ```powershell
-$studioWorkspace = Join-Path $env:TEMP ("safelane-studio-" + [guid]::NewGuid().ToString("N"))
-New-Item -ItemType Directory -Path $studioWorkspace | Out-Null
-Copy-Item demo/studio-risky/assessment.json (Join-Path $studioWorkspace "assessment.json")
-uv run safelane studio --workspace $studioWorkspace
+uv run safelane studio --repository .
 ```
 
-Open <http://127.0.0.1:4173>. Approval atomically writes the resolved assessment first and the exact
-`decision.json` authorization last. It does not deploy anything.
+Or connect a remote repository without cloning it:
 
-The demo steps are also recorded in [`demo/studio-risky/README.md`](demo/studio-risky/README.md), and
-the interaction contract lives in [`docs/safelane-studio.md`](docs/safelane-studio.md).
+```powershell
+uv run safelane studio --repository owner/repository
+```
+
+Open <http://127.0.0.1:4173>. Studio uses the authenticated GitHub CLI, stores SHA-bound assessments
+under `.safelane/studio`, and invalidates an earlier assessment when a PR receives a new push.
+Approval records a local decision; it does not merge, deploy, or otherwise mutate the pull request.
+Use the repository chip in Studio's top bar to connect another local path, GitHub URL, or
+`owner/repository` without restarting the server.
+The interaction contract lives in [`docs/safelane-studio.md`](docs/safelane-studio.md).
 
 ## Evaluation boundary
 
@@ -144,7 +149,8 @@ These gates test conformance and demo readiness. They do not establish productio
 | Golden evaluation specification | complete |
 | Andrew-owned decision spine and Studio | complete |
 | Argo Rollouts integration | not integrated |
-| End-to-end demo | not started |
+| GitHub open-PR Studio flow | complete |
+| End-to-end release deployment | not started |
 
 The project is being built for the **DevOpsDays Cairo 2026 DevOps Hackathon**, Track 1: Automate Deployment & Operations.
 

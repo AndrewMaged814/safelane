@@ -1,279 +1,369 @@
 "use strict";
 
-const studio = document.querySelector("#studio");
-let currentSnapshot = null;
+const app = document.querySelector("#app");
+const toastElement = document.querySelector("#toast");
+const repositoryDialog = document.querySelector("#repository-dialog");
+const repositoryForm = document.querySelector("#repository-form");
+const repositoryInput = document.querySelector("#repository-source");
+const repositoryError = document.querySelector("#repository-error");
+const state = { dashboard: null, filter: "needs_review" };
 
-function node(tag, className, text) {
-  const element = document.createElement(tag);
-  if (className) element.className = className;
-  if (text !== undefined) element.textContent = text;
-  return element;
-}
+const escapeHtml = (value) => String(value ?? "")
+  .replaceAll("&", "&amp;")
+  .replaceAll("<", "&lt;")
+  .replaceAll(">", "&gt;")
+  .replaceAll('"', "&quot;")
+  .replaceAll("'", "&#039;");
 
-function append(parent, ...children) {
-  children.filter(Boolean).forEach((child) => parent.append(child));
-  return parent;
-}
-
-function metaIdentity(assessment) {
-  const identity = node("div", "identity");
-  const values = [
-    ["Repository", assessment.change.repository],
-    ["PR", `#${assessment.change.pull_request}`],
-    ["Head", assessment.change.head_sha],
-    ["Policy", assessment.policy_version],
-  ];
-  values.forEach(([label, value]) => {
-    const item = node("span");
-    append(item, node("strong", "", `${label}: `), document.createTextNode(value));
-    identity.append(item);
-  });
-  return identity;
-}
-
-function statusText(assessment) {
-  if (assessment.review.status === "resolved") {
-    return assessment.review.resolution.type === "automatic" ? "Resolved automatically" : "Resolved";
+async function api(path, options = {}) {
+  const response = await fetch(path, { cache: "no-store", ...options });
+  let body = {};
+  try { body = await response.json(); } catch { /* server returned no JSON */ }
+  if (!response.ok) {
+    const error = new Error(body.message || body.error || `Request failed (${response.status})`);
+    error.status = response.status;
+    throw error;
   }
-  return "Awaiting approval";
+  return body;
 }
 
-function stageList(profile) {
-  const list = node("div", "stage-list");
-  profile.stages.forEach((stage, index) => {
-    const row = node("div", "stage");
-    const copy = node("div", "stage-copy");
-    append(
-      copy,
-      node("strong", "", `${stage.exposure_pods} of ${profile.replicas} pods`),
-      node("small", "", stage.analysis ? `Weight ${stage.set_weight} · trusted check` : `Weight ${stage.set_weight} · readiness`),
-    );
-    append(row, node("span", "stage-number", String(index + 1).padStart(2, "0")), copy);
-    list.append(row);
-  });
-  return list;
+function navigate(path) {
+  history.pushState({}, "", path);
+  renderRoute();
+  window.scrollTo(0, 0);
 }
 
-function policyTrace(assessment) {
-  const trace = node("div", "trace");
-  const rows = [
-    ["Baseline", assessment.policy_trace.baseline.rule_id],
-    ["Confidence", assessment.policy_result.evidence_confidence],
-    ["Minimum", assessment.policy_result.minimum_profile],
-  ];
-  assessment.policy_trace.safety_floors.forEach((floor) => rows.push(["Safety floor", floor.rule_id]));
-  rows.forEach(([label, value]) => {
-    append(trace, append(node("div", "trace-row"), node("span", "", label), node("strong", "", value)));
-  });
-  return trace;
+function toast(message, type = "") {
+  toastElement.textContent = message;
+  toastElement.className = `toast ${type}`.trim();
+  clearTimeout(toast.timer);
+  toast.timer = setTimeout(() => toastElement.classList.add("hidden"), 3600);
 }
 
-function renderFast(assessment, decisionPath) {
-  const section = node("section");
-  append(section, node("p", "eyebrow", "Fast eligibility / positive proof"), node("h2", "section-title", "Every Fast condition is present"));
-  const checks = node("ul", "checks");
-  [
-    assessment.change.all_paths_recognized && "Every changed path is recognized",
-    assessment.policy_trace.baseline.rule_id === "scope.low" && "Change is inside the bounded Fast scope",
-    assessment.evidence.ai_status === "complete" && "Bounded AI evidence completed",
-    assessment.ai_findings.length === 0 && "No verified breaking contract was found",
-    assessment.policy_result.fast_eligible && "Policy explicitly marks this change Fast-eligible",
-  ].filter(Boolean).forEach((text) => checks.append(node("li", "check", text)));
-  append(section, checks);
-  if (decisionPath) {
-    append(section, node("p", "eyebrow", "Authorization artifact"), node("p", "decision-path", decisionPath));
-  }
-  return section;
+function shell(content, active = "changes", narrow = false) {
+  const dashboard = state.dashboard;
+  const repository = dashboard?.repository || "Connecting…";
+  const pending = dashboard?.counts?.needs_review ?? "–";
+  return `<div class="shell">
+    <aside class="sidebar">
+      <a class="brand" href="/changes" data-nav aria-label="SafeLane Studio">
+        <img class="brand-logo" src="/safelane-logo.svg" alt="SafeLane">
+        <span class="brand-product">Studio</span>
+      </a>
+      <div class="nav-label">Workspace</div>
+      <nav class="main-nav">
+        <a class="nav-link ${active === "changes" ? "active" : ""}" href="/changes" data-nav>
+          <span class="nav-icon">◇</span>Changes<span class="count">${pending}</span>
+        </a>
+        <a class="nav-link ${active === "profiles" ? "active" : ""}" href="/profiles" data-nav>
+          <span class="nav-icon">▤</span>Profiles
+        </a>
+      </nav>
+      <div class="repo-card"><span>Connected repository</span><strong>${escapeHtml(repository)}</strong><small>GitHub · open pull requests</small></div>
+    </aside>
+    <div class="workspace">
+      <header class="topbar">
+        <button class="project repository-switch" id="repository-switch" type="button" aria-haspopup="dialog">${escapeHtml(repository)} <span class="env">GitHub</span><span class="project-caret" aria-hidden="true">⌄</span></button>
+        <div class="ai-status"><span class="online"></span>Source-bound local analysis</div>
+      </header>
+      <main class="content ${narrow ? "narrow" : ""}">${content}</main>
+    </div>
+  </div>`;
 }
 
-function spanCards(finding) {
-  const spans = node("div", "spans");
-  finding.spans.forEach((span) => {
-    const card = node("div", `span-card ${span.side}`);
-    const label = node("div", "span-label");
-    append(label, node("span", "", span.side), node("span", "", `${span.file}:${span.line}`));
-    append(card, label, node("code", "", span.text));
-    spans.append(card);
-  });
-  return spans;
+function loading(label = "Reading open pull requests…") {
+  app.innerHTML = shell(`<section class="card loading-card"><span class="spinner" aria-hidden="true"></span>${escapeHtml(label)}</section>`);
 }
 
-function probeGrid(preview) {
-  const grid = node("div", "probe-grid");
-  const values = [
-    ["Request", `${preview.method} ${preview.path}`],
-    ["Expected", `HTTP ${preview.expected_status}`],
-    ["Attempts", String(preview.attempts)],
-    ["Target", preview.canary_only ? "Canary only" : "Invalid target"],
-  ];
-  values.forEach(([label, value]) => append(grid, append(node("div"), node("small", "", label), node("strong", "", value))));
-  return grid;
+function showError(message) {
+  app.innerHTML = shell(`<section class="card empty"><strong>SafeLane could not load this view</strong><p>${escapeHtml(message)}</p><button class="button primary" id="retry">Try again</button></section>`);
+  document.querySelector("#retry")?.addEventListener("click", renderRoute);
 }
 
-function chainStep(index, trustLabel, title, content) {
-  const step = node("section", "chain-step");
-  append(step, node("span", "step-index", String(index).padStart(2, "0")));
-  if (trustLabel) step.append(node("span", "trust-label", trustLabel));
-  step.append(node("h3", "", title), content);
-  return step;
+function formatUpdated(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  const minutes = Math.max(0, Math.round((Date.now() - date.getTime()) / 60000));
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes} min ago`;
+  if (minutes < 1440) return `${Math.floor(minutes / 60)} hr ago`;
+  return date.toLocaleDateString();
 }
 
-function renderRiskCase(assessment) {
-  const chain = node("div", "chain");
-  const finding = assessment.ai_findings[0];
-  const safeguard = assessment.selected_safeguard;
-  const selectedProfile = assessment.rollout_options[0];
-  let index = 1;
-  if (finding) {
-    chain.append(chainStep(index++, "Verified finding", "Removed and added source spans", spanCards(finding)));
-  }
-  if (safeguard) {
-    chain.append(chainStep(index++, "AI proposed", "Failure impact", node("p", "", safeguard.hypothesis)));
-  }
-  if (finding) {
-    chain.append(chainStep(index++, "Normal code", "2/2 source references verified", node("p", "", "Both cited route decorators exist at the exact changed-line identities.")));
-  }
-  if (safeguard) {
-    chain.append(chainStep(index++, "Trusted probe selected by SafeLane", safeguard.probe_id, probeGrid(safeguard.probe_preview)));
-  } else {
-    const fallback = node("div", "fallback");
-    append(fallback, node("strong", "", "Policy fallback analysis will run after approval"), node("p", "", "No AI-linked safeguard was accepted. Rejected model values are not displayed or executed."));
-    chain.append(chainStep(index++, "Normal code", "Fallback safeguard", fallback));
-  }
-  if (selectedProfile?.stages.length) {
-    const firstStage = selectedProfile.stages[0];
-    chain.append(
-      chainStep(
-        index++,
-        "Built-in rollout preview",
-        `First exposure: ${firstStage.exposure_pods} of ${selectedProfile.replicas} pods`,
-        node("p", "", `${selectedProfile.name} begins at weight ${firstStage.set_weight}; the server owns this stage definition.`),
-      ),
-    );
-  }
-  return chain;
+function row(change) {
+  const tier = escapeHtml(change.tier);
+  const profile = escapeHtml(change.profile);
+  return `<a class="change-row" href="/changes/${change.number}" data-nav>
+    <div class="change-copy">
+      <div class="title-line"><span class="change-title">${escapeHtml(change.title)}</span><span class="row-risk ${tier}">${tier}</span></div>
+      <span class="change-meta">PR #${change.number} · ${escapeHtml(change.head_ref)} · ${escapeHtml(change.author)} · ${escapeHtml(formatUpdated(change.updated_at))}</span>
+      <div class="risk-line"><span class="category">${tier === "safe" ? "Bounded scope" : "Release risk"}</span><strong>${escapeHtml(change.reason)}</strong></div>
+    </div>
+    <div class="suggestion ${profile.toLowerCase()}"><span>Suggested lane</span><strong>${profile}</strong></div>
+    <span class="arrow" aria-hidden="true">›</span>
+  </a>`;
 }
 
-function approvalPanel(assessment, decisionPath) {
-  const panel = node("section", "approval");
-  if (assessment.review.status === "resolved") {
-    append(panel, node("p", "eyebrow", "Authorization commit point"), node("h3", "", "Resolved"));
-    if (decisionPath) panel.append(node("p", "decision-path", decisionPath));
-    return panel;
-  }
-
-  const safeguard = assessment.selected_safeguard;
-  append(panel, node("p", "eyebrow", "Human resolution required"));
-  if (safeguard) {
-    append(
-      panel,
-      node("p", "approval-question", safeguard.approval_question),
-      node("p", "remediation", safeguard.remediation),
-    );
-  }
-  const select = node("select");
-  select.setAttribute("aria-label", "Selected rollout profile");
-  assessment.rollout_options.forEach((profile) => {
-    const option = node("option", "", profile.name);
-    option.value = profile.name;
-    select.append(option);
-  });
-  const onlyProfile = assessment.rollout_options.length === 1 ? assessment.rollout_options[0].name : null;
-  const button = node("button", "approve-button", onlyProfile === "Strict" ? "Approve Strict rollout" : "Approve selected rollout");
-  button.type = "button";
-  const message = node("p", "action-message");
-  button.addEventListener("click", () => submitApproval(select.value, button, message));
-  append(
-    panel,
-    select,
-    button,
-    node("p", "approval-note", "This records the rollout plan for the exact current assessment. It does not release software."),
-    message,
-  );
-  return panel;
-}
-
-function render(snapshot) {
-  currentSnapshot = snapshot;
-  const assessment = snapshot.assessment;
-  const tier = assessment.policy_result.final_tier;
-  const dossier = node("article", `dossier ${tier}`);
-  const head = node("header", "dossier-head");
-  const intro = node("div");
-  append(
-    intro,
-    metaIdentity(assessment),
-    node("h2", "dossier-title", tier === "safe" ? "Clear for the Fast lane" : tier === "risky" ? "Breaking contract" : "Guarded release required"),
-    node("p", "reason", assessment.policy_result.primary_reason),
-  );
-  append(head, intro, node("div", "status-badge", statusText(assessment)));
-
-  const body = node("div", "dossier-body");
-  const caseColumn = node("div", "case-column");
-  if (tier === "safe") {
-    caseColumn.append(renderFast(assessment, snapshot.decision_path));
-  } else {
-    append(caseColumn, node("p", "eyebrow", "Causal safety case"), renderRiskCase(assessment));
-  }
-
-  const rail = node("aside", "rail-column");
-  const profile = assessment.rollout_options[0];
-  append(
-    rail,
-    node("p", "eyebrow", "Server-owned rollout preview"),
-    node("h2", "section-title", `${profile.name} stages`),
-    stageList(profile),
-    policyTrace(assessment),
-    approvalPanel(assessment, snapshot.decision_path),
-  );
-  append(body, caseColumn, rail);
-  append(dossier, head, body);
-  studio.replaceChildren(dossier);
-}
-
-async function submitApproval(selectedProfile, button, message) {
-  const assessment = currentSnapshot.assessment;
-  button.disabled = true;
-  message.className = "action-message";
-  message.textContent = "Recording approval…";
-  const payload = {
-    selected_profile: selectedProfile,
-    assessment_id: assessment.assessment_id,
-    head_sha: assessment.change.head_sha,
-    assessment_input_sha256: assessment.assessment_input_sha256,
-    assessment_result_sha256: assessment.assessment_result_sha256,
-  };
+async function renderChanges() {
+  loading();
   try {
-    const response = await fetch("/api/approve", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-SafeLane-CSRF": currentSnapshot.approval_token,
+    state.dashboard = await api("/api/dashboard");
+  } catch (error) {
+    showError(error.message === "repository_unavailable" ? "GitHub is unavailable or this repository cannot be read." : error.message);
+    return;
+  }
+  const status = state.filter === "needs_review" ? "unresolved" : "resolved";
+  const changes = state.dashboard.changes.filter((change) => change.review_status === status);
+  const needs = state.dashboard.counts.needs_review;
+  const resolved = state.dashboard.counts.resolved;
+  const title = status === "unresolved" ? "Changes needing review" : "Resolved changes";
+  const copy = status === "unresolved"
+    ? "Guarded and risky pull requests wait here until their rollout is approved."
+    : "Safe pull requests resolve automatically. Approved guarded and risky changes appear here too.";
+  const empty = status === "unresolved"
+    ? "No open pull requests need review."
+    : "No open pull requests are resolved yet.";
+  app.innerHTML = shell(`<header class="page-head"><div><div class="eyebrow">Change review</div><h1>${title}</h1><p>${copy}</p></div><span class="version">LIVE GITHUB DATA</span></header>
+    <div class="tabs">
+      <button class="tab ${status === "unresolved" ? "active" : ""}" data-filter="needs_review">Needs review · ${needs}</button>
+      <button class="tab ${status === "resolved" ? "active" : ""}" data-filter="resolved">Resolved · ${resolved}</button>
+    </div>
+    <div class="list-head"><span>${changes.length} open PR${changes.length === 1 ? "" : "s"}</span><span>${status === "unresolved" ? "Risky first" : "Latest first"}</span></div>
+    ${changes.length ? `<div class="change-list">${changes.map(row).join("")}</div>` : `<section class="card empty"><strong>${empty}</strong><p>SafeLane only shows changes after GitHub has an open pull request.</p></section>`}`);
+  document.querySelectorAll("[data-filter]").forEach((button) => {
+    button.addEventListener("click", () => { state.filter = button.dataset.filter; renderChanges(); });
+  });
+}
+
+function tierBadge(tier) {
+  return `<span class="tag ${escapeHtml(tier)}">${escapeHtml(tier)} tier</span>`;
+}
+
+function rolloutRail(profile) {
+  return `<div class="stage-list">${profile.stages.map((stage, index) => `<div class="stage">
+    <span class="stage-number">${String(index + 1).padStart(2, "0")}</span>
+    <div class="stage-copy"><strong>${stage.exposure_pods} of ${profile.replicas} pods</strong><small>Weight ${stage.set_weight} · ${stage.analysis ? "trusted check" : "readiness"}</small></div>
+  </div>`).join("")}</div>`;
+}
+
+function findingCards(assessment) {
+  const findings = assessment.findings;
+  if (!findings.length) {
+    const status = assessment.evidence.ai_status;
+    const evidenceState = {
+      complete: {
+        category: "AI assessment",
+        title: "AI analysis completed — no source-verified finding",
+        detail: "The local model returned no finding that survived exact changed-line verification.",
       },
-      body: JSON.stringify(payload),
+      skipped_over_budget: {
+        category: "Evidence limit",
+        title: "AI analysis skipped — diff exceeded the evidence budget",
+        detail: "SafeLane did not send this PR to the local model. The rollout lane comes from deterministic change-scope rules.",
+      },
+      skipped_invalid_diff: {
+        category: "Unsupported evidence",
+        title: "AI analysis skipped — diff is not valid UTF-8",
+        detail: "The local model was not called because SafeLane could not safely decode the complete PR diff.",
+      },
+      skipped_binary_diff: {
+        category: "Unsupported evidence",
+        title: "AI analysis skipped — binary changes are unsupported",
+        detail: "The local model was not called because the PR contains binary change evidence.",
+      },
+      unavailable: {
+        category: "Evidence unavailable",
+        title: "AI analysis unavailable",
+        detail: "The local model could not be reached. SafeLane kept the deterministic policy floor.",
+      },
+      invalid: {
+        category: "Evidence rejected",
+        title: "AI response rejected",
+        detail: "The local model responded, but its output did not satisfy SafeLane's bounded evidence contract.",
+      },
+      partial: {
+        category: "Evidence rejected",
+        title: "AI response rejected",
+        detail: "At least one model claim failed exact source-reference validation, so it cannot affect the rollout lane.",
+      },
+    }[status] || {
+      category: "Policy assessment",
+      title: "No usable AI evidence",
+      detail: "The rollout lane comes from deterministic change-scope and evidence rules.",
+    };
+    return `<section class="card main-risk neutral"><div class="risk-top"><span class="category">${evidenceState.category}</span><span class="evidence-code">${escapeHtml(status)}</span></div><h2>${evidenceState.title}</h2><p>${evidenceState.detail}</p></section>`;
+  }
+  return findings.map((finding) => `<section class="card main-risk">
+    <div class="risk-top"><span class="category">${escapeHtml(finding.category)}</span><span class="verified">✓ AI finding · source references verified</span></div>
+    <h2>${escapeHtml(finding.title)}</h2><p>${escapeHtml(finding.rationale)}</p>
+    <div class="spans">${finding.spans.map((span) => `<div class="span-card ${escapeHtml(span.side)}"><div class="span-label"><span>${escapeHtml(span.side)}</span><span>${escapeHtml(span.file)}:${span.line}</span></div><code>${escapeHtml(span.text)}</code></div>`).join("")}</div>
+  </section>`).join("");
+}
+
+function approvalPanel(assessment, token) {
+  if (assessment.review.status === "resolved") {
+    const automatic = assessment.review.resolution.type === "automatic";
+    return `<section class="card approval"><div class="approved">✓ ${automatic ? "Resolved automatically" : "Resolved"}</div><div class="buttons"><a class="button" href="/changes" data-nav>Return to Changes</a></div></section>`;
+  }
+  const options = assessment.rollout_options.map((profile) => `<option value="${escapeHtml(profile.name)}">${escapeHtml(profile.name)}</option>`).join("");
+  const only = assessment.rollout_options.length === 1 ? assessment.rollout_options[0].name : null;
+  return `<section class="card approval"><div><h2>Approve this rollout plan?</h2><p>This records the decision and resolves the PR. It does not release software.</p></div><div class="buttons"><select id="selected-profile" aria-label="Selected rollout profile">${options}</select><button class="button primary" id="approve">${only === "Strict" ? "Approve Strict rollout" : "Approve selected rollout"}</button></div><p id="approval-message" class="action-message"></p></section>`;
+}
+
+function rolloutPreview(profile, evidence, confidence) {
+  return `<section class="card rollout" id="rollout-preview"><div class="card-head"><div><h2>${escapeHtml(profile.name)} rollout</h2><p class="copy">The built-in profile is selected by SafeLane's policy floor.</p></div><span class="version">${profile.replicas} replicas</span></div>${rolloutRail(profile)}<div class="health"><div><span>Files</span><strong>${evidence.files_changed}</strong></div><div><span>Changed lines</span><strong>${evidence.lines_changed}</strong></div><div><span>AI evidence</span><strong>${escapeHtml(evidence.ai_status)}</strong></div><div><span>Confidence</span><strong>${escapeHtml(confidence)}</strong></div></div></section>`;
+}
+
+async function renderAssessment(number) {
+  loading(`Opening PR #${number}…`);
+  let snapshot;
+  try { snapshot = await api(`/api/assessments/${number}`); }
+  catch (error) { showError(error.message); return; }
+  const assessment = snapshot.assessment;
+  const change = assessment.change;
+  const risk = assessment.risk;
+  const profile = assessment.rollout_options[0];
+  if (!state.dashboard) {
+    state.dashboard = {
+      repository: change.repository,
+      approval_token: snapshot.approval_token,
+      counts: { needs_review: "–", resolved: "–" },
+      changes: [],
+    };
+  }
+  const fresh = state.dashboard?.changes.find((item) => item.number === number)?.head_sha === change.head_sha;
+  app.innerHTML = shell(`<nav class="breadcrumb"><a href="/changes" data-nav>Changes</a><span>›</span><span>${escapeHtml(state.dashboard?.repository || change.repository)} · PR #${number}</span></nav>
+    <header class="assessment-head"><div><div class="eyebrow">Exact open PR revision</div><h1>${escapeHtml(change.title)}</h1><p>${escapeHtml(change.repository)} · ${escapeHtml(change.head_ref)} · ${escapeHtml(change.head_sha)}</p></div><div class="assessment-tags">${tierBadge(risk.tier)}</div></header>
+    <div class="update">✓ This assessment covers ${fresh === false ? "the selected" : "the latest detected"} PR head. A new push requires a fresh assessment.</div>
+    <section class="card decision"><div class="decision-value"><span>Suggested rollout</span><strong>${escapeHtml(risk.profile)}</strong></div><div><h2>${assessment.review.status === "resolved" ? "This PR assessment is resolved" : "Review required before this PR can be resolved"}</h2><p>${escapeHtml(risk.reason)}</p></div></section>
+    ${findingCards(assessment)}
+    ${rolloutPreview(profile, assessment.evidence, risk.confidence)}
+    ${approvalPanel(assessment, snapshot.approval_token)}`, "changes", true);
+  const selector = document.querySelector("#selected-profile");
+  if (selector) {
+    selector.addEventListener("change", () => {
+      const selected = assessment.rollout_options.find((option) => option.name === selector.value);
+      const preview = document.querySelector("#rollout-preview");
+      if (selected && preview) preview.outerHTML = rolloutPreview(selected, assessment.evidence, risk.confidence);
     });
-    const result = await response.json();
-    if (!response.ok) {
-      throw new Error(response.status === 409 ? "This page is stale. Reload the current assessment." : "Approval could not be recorded safely.");
-    }
-    render(result);
+  }
+  document.querySelector("#approve")?.addEventListener("click", () => submitApproval(assessment, snapshot.approval_token));
+}
+
+async function submitApproval(assessment, token) {
+  const button = document.querySelector("#approve");
+  const message = document.querySelector("#approval-message");
+  button.disabled = true;
+  message.textContent = "Recording approval…";
+  try {
+    await api(`/api/assessments/${assessment.change.number}/approve`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-SafeLane-CSRF": token },
+      body: JSON.stringify({
+        selected_profile: document.querySelector("#selected-profile").value,
+        assessment_id: assessment.assessment_id,
+        head_sha: assessment.change.head_sha,
+        policy_version: assessment.policy_version,
+        assessment_input_sha256: assessment.assessment_input_sha256,
+        assessment_result_sha256: assessment.assessment_result_sha256,
+      }),
+    });
+    toast("Rollout approved. No release was started.");
+    await renderAssessment(assessment.change.number);
   } catch (error) {
     message.className = "action-message error";
-    message.textContent = error.message;
+    message.textContent = error.status === 409 ? "This PR changed. Reload its latest assessment." : "Approval could not be recorded safely.";
     button.disabled = false;
   }
 }
 
-async function loadCurrent() {
-  try {
-    const response = await fetch("/api/assessment", {cache: "no-store"});
-    if (!response.ok) throw new Error("The current workspace is unavailable.");
-    render(await response.json());
-  } catch (error) {
-    const card = node("section", "error-card");
-    append(card, node("p", "eyebrow", "Workspace error"), node("h2", "section-title", error.message));
-    studio.replaceChildren(card);
-  }
+async function renderProfiles() {
+  loading("Reading built-in rollout profiles…");
+  let result;
+  try { result = await api("/api/profiles"); }
+  catch (error) { showError(error.message); return; }
+  state.dashboard = {
+    ...state.dashboard,
+    repository: result.repository,
+    approval_token: result.approval_token,
+    counts: state.dashboard?.counts || { needs_review: "–", resolved: "–" },
+    changes: state.dashboard?.changes || [],
+  };
+  const descriptions = {
+    Fast: "For safe changes. Kubernetes readiness is the only gate.",
+    Guarded: "For changes that need one checkpoint before full rollout.",
+    Strict: "For risky changes. Exposure grows after each health checkpoint.",
+  };
+  const colors = { Fast: ["#08784a", "#e9f8f0", "F"], Guarded: ["#a15c07", "#fff4e2", "G"], Strict: ["#b42318", "#feeeec", "S"] };
+  const cards = result.profiles.map((profile) => {
+    const [color, soft, initial] = colors[profile.name];
+    const stages = profile.stages.map((stage) => stage.exposure_pods === profile.replicas ? "all" : stage.exposure_pods).join(" → ");
+    return `<article class="profile-card" style="--profile:${color};--soft:${soft}"><div class="profile-icon">${initial}</div><h2>${profile.name}</h2><p>${descriptions[profile.name]}</p><code>${stages} · ${profile.stages.some((stage) => stage.analysis) ? "trusted analysis" : "readiness"}</code></article>`;
+  }).join("");
+  app.innerHTML = shell(`<header class="page-head"><div><div class="eyebrow">Rollout policy</div><h1>Profiles</h1><p>Built-in profiles set the minimum rollout behavior. SafeLane selects them from each open PR assessment.</p></div><span class="version">POLICY ${escapeHtml(result.policy_version)}</span></header><section class="profiles">${cards}</section><section class="card policy-note"><strong>Profiles are read-only in this version.</strong><p>Approval records one of these server-owned rollout plans. It does not start a release.</p></section>`, "profiles");
 }
 
-loadCurrent();
+function openRepositoryDialog() {
+  repositoryInput.value = state.dashboard?.repository || "";
+  repositoryError.textContent = "";
+  repositoryDialog.showModal();
+  repositoryInput.focus();
+  repositoryInput.select();
+}
+
+repositoryForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const button = document.querySelector("#connect-repository");
+  const repository = repositoryInput.value.trim();
+  repositoryError.textContent = "";
+  button.disabled = true;
+  button.textContent = "Checking GitHub…";
+  try {
+    const result = await api("/api/connect", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-SafeLane-CSRF": state.dashboard?.approval_token || "",
+      },
+      body: JSON.stringify({ repository }),
+    });
+    state.dashboard = result;
+    state.filter = "needs_review";
+    repositoryDialog.close();
+    toast(`Connected to ${result.repository}.`);
+    navigate("/changes");
+  } catch (error) {
+    repositoryError.textContent = error.message;
+  } finally {
+    button.disabled = false;
+    button.textContent = "Connect repository";
+  }
+});
+
+repositoryDialog.addEventListener("click", (event) => {
+  if (event.target === repositoryDialog) repositoryDialog.close();
+});
+
+async function renderRoute() {
+  const detail = location.pathname.match(/^\/changes\/(\d+)$/);
+  if (detail) return renderAssessment(Number(detail[1]));
+  if (location.pathname === "/profiles") return renderProfiles();
+  return renderChanges();
+}
+
+document.addEventListener("click", (event) => {
+  if (event.target.closest("#repository-switch")) {
+    openRepositoryDialog();
+    return;
+  }
+  if (event.target.closest("[data-close-dialog]")) {
+    repositoryDialog.close();
+    return;
+  }
+  const link = event.target.closest("a[data-nav]");
+  if (!link) return;
+  event.preventDefault();
+  navigate(link.getAttribute("href"));
+});
+addEventListener("popstate", renderRoute);
+renderRoute();

@@ -16,6 +16,7 @@ from safelane.artifacts import canonical_json_bytes, load_json_bytes, validate_a
 from safelane.demo_repository import create_demo_repository
 from safelane.engine import SafeLaneEngine
 from safelane.risk_finder import FakeRiskFinder
+from safelane.pr_studio import PullRequestStudioService
 from safelane.studio import StudioService, StudioWorkspace, create_studio_server
 
 
@@ -160,11 +161,18 @@ def test_fast_read_is_resolved_automatically_and_static_shell_has_no_mutation_ui
     assert "SafeLane Studio" in html
     assert "Resolved automatically" in script
     assert "Approve Strict rollout" in script
-    assert "First exposure:" in script
-    assert (
-        'if (finding) {\n    chain.append(chainStep(index++, "Normal code", '
-        '"2/2 source references verified"' in script
-    )
+    assert "rolloutPreview" in script
+    assert "AI analysis completed — no source-verified finding" in script
+    assert "AI analysis skipped — diff exceeded the evidence budget" in script
+    assert "AI analysis unavailable" in script
+    assert "AI response rejected" in script
+    assert "change.head_sha.slice" not in script
+    assert "${escapeHtml(change.head_sha)}" in script
+    assert 'id="rollout-preview"' in script
+    assert 'selector.addEventListener("change"' in script
+    assert "renderLegacy" not in script
+    assert "Legacy workspace" not in script
+    assert "✓ AI finding · source references verified" in script
     assert "/api/policy" not in script
     assert "deploy" not in script.lower()
 
@@ -477,3 +485,43 @@ def test_cross_origin_or_non_json_approval_cannot_mutate_workspace(
     assert (token_status, token_result) == (403, {"error": "untrusted_request"})
     assert (host_status, host_result) == (403, {"error": "untrusted_request"})
     assert not (workspace.path / "decision.json").exists()
+
+
+def test_repository_can_be_selected_through_the_studio_http_seam(
+    tmp_path: Path,
+) -> None:
+    class EmptyProvider:
+        def __init__(self, repository: str) -> None:
+            self.repository = repository
+
+        def list_open_pull_requests(self) -> list[dict[str, object]]:
+            return []
+
+        def pull_request_diff(
+            self, number: int, base_sha: str, head_sha: str
+        ) -> bytes:
+            raise AssertionError((number, base_sha, head_sha))
+
+    class UnusedAssessor:
+        def assess(self, repository, pull_request, diff):
+            raise AssertionError((repository, pull_request, diff))
+
+    service = PullRequestStudioService(
+        EmptyProvider("acme/one"),
+        tmp_path / "state" / "acme--one",
+        UnusedAssessor(),
+        state_root=tmp_path / "state",
+        provider_factory=EmptyProvider,
+    )
+
+    with running(service) as base_url:  # type: ignore[arg-type]
+        status, result = request_json(
+            f"{base_url}/api/connect",
+            method="POST",
+            value={"repository": "acme/two"},
+            approval_token=service.approval_token,
+        )
+
+    assert status == 200
+    assert result["repository"] == "acme/two"
+    assert result["counts"] == {"needs_review": 0, "resolved": 0}
