@@ -150,7 +150,7 @@ def test_fast_read_is_resolved_automatically_and_static_shell_has_no_mutation_ui
         with urlopen(f"{base_url}/") as response:
             html = response.read().decode()
         with urlopen(f"{base_url}/app.js") as response:
-            script = response.read().decode()
+            script = response.read().decode().replace("\r\n", "\n")
 
     assessment = result["assessment"]
     assert status == 200
