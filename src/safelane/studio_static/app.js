@@ -201,13 +201,14 @@ function findingCards(assessment) {
 }
 
 function approvalPanel(assessment, token) {
-  if (assessment.review.status === "resolved") {
+  if (assessment.review.status !== "unresolved") {
     const automatic = assessment.review.resolution.type === "automatic";
-    return `<section class="card approval"><div class="approved">✓ ${automatic ? "Resolved automatically" : "Resolved"}</div><div class="buttons"><a class="button" href="/changes" data-nav>Return to Changes</a></div></section>`;
+    const rejected = assessment.review.status === "rejected";
+    return `<section class="card approval"><div class="${rejected ? "rejected" : "approved"}">${rejected ? "✕ Rejected by reviewer" : `✓ ${automatic ? "Resolved automatically" : "Approved by reviewer"}`}</div><div class="buttons"><a class="button" href="/changes" data-nav>Return to Changes</a></div></section>`;
   }
   const options = assessment.rollout_options.map((profile) => `<option value="${escapeHtml(profile.name)}">${escapeHtml(profile.name)}</option>`).join("");
   const only = assessment.rollout_options.length === 1 ? assessment.rollout_options[0].name : null;
-  return `<section class="card approval"><div><h2>Approve this rollout plan?</h2><p>This records the decision and resolves the PR. It does not release software.</p></div><div class="buttons"><select id="selected-profile" aria-label="Selected rollout profile">${options}</select><button class="button primary" id="approve">${only === "Strict" ? "Approve Strict rollout" : "Approve selected rollout"}</button></div><p id="approval-message" class="action-message"></p></section>`;
+  return `<section class="card approval"><div><h2>Review the backend proposal</h2><p>Approval authorizes compilation for this exact PR head. Rejection emits no rollout decision.</p></div><div class="buttons"><select id="selected-profile" aria-label="Selected rollout profile">${options}</select><button class="button primary" id="approve">${only === "Strict" ? "Approve Strict rollout" : "Approve selected rollout"}</button><button class="button danger" id="reject">Reject</button><a class="button" href="/changes" data-nav>Decide later</a></div><p id="approval-message" class="action-message"></p></section>`;
 }
 
 function rolloutPreview(profile, evidence, confidence) {
@@ -235,8 +236,9 @@ async function renderAssessment(number) {
   app.innerHTML = shell(`<nav class="breadcrumb"><a href="/changes" data-nav>Changes</a><span>›</span><span>${escapeHtml(state.dashboard?.repository || change.repository)} · PR #${number}</span></nav>
     <header class="assessment-head"><div><div class="eyebrow">Exact open PR revision</div><h1>${escapeHtml(change.title)}</h1><p>${escapeHtml(change.repository)} · ${escapeHtml(change.head_ref)} · ${escapeHtml(change.head_sha)}</p></div><div class="assessment-tags">${tierBadge(risk.tier)}</div></header>
     <div class="update">✓ This assessment covers ${fresh === false ? "the selected" : "the latest detected"} PR head. A new push requires a fresh assessment.</div>
-    <section class="card decision"><div class="decision-value"><span>Suggested rollout</span><strong>${escapeHtml(risk.profile)}</strong></div><div><h2>${assessment.review.status === "resolved" ? "This PR assessment is resolved" : "Review required before this PR can be resolved"}</h2><p>${escapeHtml(risk.reason)}</p></div></section>
+    <section class="card decision"><div class="decision-value"><span>Backend proposal</span><strong>${escapeHtml(risk.minimum_profile)}</strong></div><div><h2>${assessment.review.status !== "unresolved" ? "This PR review is complete" : "Review required before this PR can be authorized"}</h2><p>${escapeHtml(risk.reason)}</p></div></section>
     ${findingCards(assessment)}
+    <section class="card policy-note"><strong>Why the backend proposed this lane</strong><p>${escapeHtml(risk.reason)}</p><code>Policy ${escapeHtml(assessment.policy.version)} from base ${escapeHtml(assessment.policy.source_revision)}</code><code> · diff ${escapeHtml(assessment.evidence.git_diff_sha256)}</code></section>
     ${rolloutPreview(profile, assessment.evidence, risk.confidence)}
     ${approvalPanel(assessment, snapshot.approval_token)}`, "changes", true);
   const selector = document.querySelector("#selected-profile");
@@ -248,27 +250,31 @@ async function renderAssessment(number) {
     });
   }
   document.querySelector("#approve")?.addEventListener("click", () => submitApproval(assessment, snapshot.approval_token));
+  document.querySelector("#reject")?.addEventListener("click", () => submitResolution(assessment, snapshot.approval_token, "reject"));
 }
 
 async function submitApproval(assessment, token) {
+  return submitResolution(assessment, token, "approve");
+}
+
+async function submitResolution(assessment, token, action) {
   const button = document.querySelector("#approve");
   const message = document.querySelector("#approval-message");
   button.disabled = true;
-  message.textContent = "Recording approval…";
+  message.textContent = action === "approve" ? "Recording approval…" : "Recording rejection…";
   try {
-    await api(`/api/assessments/${assessment.change.number}/approve`, {
+    await api(`/api/assessments/${assessment.change.number}/resolve`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-SafeLane-CSRF": token },
       body: JSON.stringify({
-        selected_profile: document.querySelector("#selected-profile").value,
+        action,
+        actor: state.dashboard?.reviewer || "local-reviewer",
+        selected_profile: action === "approve" ? document.querySelector("#selected-profile").value : null,
         assessment_id: assessment.assessment_id,
-        head_sha: assessment.change.head_sha,
-        policy_version: assessment.policy_version,
-        assessment_input_sha256: assessment.assessment_input_sha256,
         assessment_result_sha256: assessment.assessment_result_sha256,
       }),
     });
-    toast("Rollout approved. No release was started.");
+    toast(action === "approve" ? "Rollout approved for compilation." : "Change rejected. No rollout decision was emitted.");
     await renderAssessment(assessment.change.number);
   } catch (error) {
     message.className = "action-message error";

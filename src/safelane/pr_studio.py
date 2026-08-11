@@ -75,24 +75,46 @@ class GitHubPullRequestProvider:
             raise PullRequestStudioError("GitHub returned invalid pull-request data")
         pull_requests: list[dict[str, Any]] = []
         for value in values:
-            try:
-                author = value["author"]["login"]
-                item = {
-                    "number": value["number"],
-                    "title": value["title"],
-                    "url": value["url"],
-                    "author": author,
-                    "head_ref": value["headRefName"],
-                    "base_ref": value["baseRefName"],
-                    "head_sha": value["headRefOid"],
-                    "base_sha": value["baseRefOid"],
-                    "updated_at": value["updatedAt"],
-                    "is_draft": value["isDraft"],
-                }
-            except (KeyError, TypeError) as exc:
-                raise PullRequestStudioError("GitHub returned an incomplete pull request") from exc
-            pull_requests.append(item)
+            pull_requests.append(_pull_request_dict(value))
         return pull_requests
+
+    def get_pull_request(self, change: Any) -> Any:
+        from .change_safety import PullRequestSnapshot
+
+        if change.repository != self.repository:
+            raise PullRequestStudioError("pull request belongs to another repository")
+        raw = self._runner(
+            (
+                "pr", "view", str(change.number), "--repo", self.repository,
+                "--json", self._FIELDS,
+            ),
+            None,
+        )
+        try:
+            value = json.loads(raw)
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise PullRequestStudioError("GitHub returned invalid pull-request data") from exc
+        item = _pull_request_dict(value)
+        return PullRequestSnapshot(repository=self.repository, **item)
+
+    def read_file(self, repository: str, revision: str, path: str) -> bytes:
+        if repository != self.repository:
+            raise PullRequestStudioError("repository does not match this GitHub adapter")
+        normalized = path.lstrip("/")
+        return self._runner(
+            (
+                "api", f"repos/{repository}/contents/{normalized}?ref={revision}",
+                "--header", "Accept: application/vnd.github.raw+json",
+            ),
+            None,
+        )
+
+    def diff(self, snapshot: Any) -> bytes:
+        if snapshot.repository != self.repository:
+            raise PullRequestStudioError("pull request belongs to another repository")
+        return self.pull_request_diff(
+            snapshot.number, snapshot.base_sha, snapshot.head_sha
+        )
 
     def pull_request_diff(self, number: int, base_sha: str, head_sha: str) -> bytes:
         del number
@@ -112,6 +134,27 @@ class PullRequestProvider(Protocol):
     def list_open_pull_requests(self) -> list[dict[str, Any]]: ...
 
     def pull_request_diff(self, number: int, base_sha: str, head_sha: str) -> bytes: ...
+
+
+def _pull_request_dict(value: Any) -> dict[str, Any]:
+    try:
+        author = value["author"]["login"]
+        return {
+            "number": value["number"],
+            "title": value["title"],
+            "url": value["url"],
+            "author": author,
+            "head_ref": value["headRefName"],
+            "base_ref": value["baseRefName"],
+            "head_sha": value["headRefOid"],
+            "base_sha": value["baseRefOid"],
+            "updated_at": value["updatedAt"],
+            "is_draft": value["isDraft"],
+        }
+    except (KeyError, TypeError) as exc:
+        raise PullRequestStudioError(
+            "GitHub returned an incomplete pull request"
+        ) from exc
 
 
 class PullRequestAssessor(Protocol):
@@ -291,8 +334,20 @@ class PullRequestAssessmentEngine:
 
     _TIER_RANK = {"safe": 0, "guarded": 1, "risky": 2}
 
-    def __init__(self, *, policy_path: Path, analyzer: PullRequestAnalyzer) -> None:
-        self.policy = load_yaml_bytes(policy_path.read_bytes())
+    def __init__(
+        self,
+        *,
+        analyzer: PullRequestAnalyzer,
+        policy_path: Path | None = None,
+        policy: dict[str, Any] | None = None,
+    ) -> None:
+        if (policy_path is None) == (policy is None):
+            raise ValueError("provide exactly one of policy_path or policy")
+        self.policy = (
+            load_yaml_bytes(policy_path.read_bytes())
+            if policy_path is not None
+            else copy.deepcopy(policy)
+        )
         self.analyzer = analyzer
 
     def assess(
@@ -390,7 +445,7 @@ class PullRequestAssessmentEngine:
             "reason": reason,
             "confidence": "high" if ai_status == "complete" else "low",
             "findings": findings,
-            "rollout_options": [_profile(name) for name in option_names],
+            "rollout_options": [self._profile(name) for name in option_names],
             "evidence": {
                 "ai_status": ai_status,
                 "files_changed": len(files),
@@ -399,6 +454,22 @@ class PullRequestAssessmentEngine:
                 "binary_patch": binary_patch,
                 "all_paths_recognized": all_paths_recognized,
             },
+        }
+
+    def _profile(self, name: str) -> dict[str, Any]:
+        configured = self.policy["profiles"][name]
+        rollout = self.policy.get(
+            "rollout",
+            {"traffic_router": "none", "max_surge": 1, "max_unavailable": 0},
+        )
+        return {
+            "name": name,
+            "source": "repository_policy",
+            "traffic_router": rollout["traffic_router"],
+            "replicas": self.policy["release_service"]["replicas"],
+            "max_surge": rollout["max_surge"],
+            "max_unavailable": rollout["max_unavailable"],
+            "stages": copy.deepcopy(configured["stages"]),
         }
 
     @staticmethod

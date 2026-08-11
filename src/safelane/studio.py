@@ -21,6 +21,7 @@ from .artifacts import (
 )
 from .engine import ResolutionError, SafeLaneEngine
 from .pr_studio import PullRequestStudioError, PullRequestStudioService
+from .repository_studio import RepositoryStudioService
 
 
 _STATIC = Path(__file__).with_name("studio_static")
@@ -187,7 +188,7 @@ class StudioService:
 
 
 def create_studio_server(
-    service: StudioService | PullRequestStudioService,
+    service: StudioService | PullRequestStudioService | RepositoryStudioService,
     *,
     port: int = 4173,
 ) -> ThreadingHTTPServer:
@@ -198,12 +199,12 @@ def create_studio_server(
 
 
 def serve_studio(
-    service: StudioService | PullRequestStudioService, *, port: int = 4173
+    service: StudioService | PullRequestStudioService | RepositoryStudioService, *, port: int = 4173
 ) -> None:
     server = create_studio_server(service, port=port)
     try:
         print(f"SafeLane Studio: http://127.0.0.1:{server.server_port}")
-        if isinstance(service, PullRequestStudioService):
+        if isinstance(service, (PullRequestStudioService, RepositoryStudioService)):
             print(f"Repository: {service.provider.repository}")
             print(f"Workspace: {service.workspace}")
         else:
@@ -216,14 +217,14 @@ def serve_studio(
 
 
 class _StudioHandler(BaseHTTPRequestHandler):
-    studio_service: StudioService | PullRequestStudioService
+    studio_service: StudioService | PullRequestStudioService | RepositoryStudioService
 
     def do_GET(self) -> None:
         if not self._trusted_host():
             self._json(403, {"error": "untrusted_request"})
             return
         path = urlsplit(self.path).path
-        if isinstance(self.studio_service, PullRequestStudioService):
+        if isinstance(self.studio_service, (PullRequestStudioService, RepositoryStudioService)):
             if path == "/api/dashboard":
                 try:
                     result = self.studio_service.dashboard()
@@ -289,9 +290,10 @@ class _StudioHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         path = urlsplit(self.path).path
         pr_approval = re.fullmatch(r"/api/assessments/(\d+)/approve", path)
+        pr_resolution = re.fullmatch(r"/api/assessments/(\d+)/resolve", path)
         repository_connection = path == "/api/connect"
-        if isinstance(self.studio_service, PullRequestStudioService):
-            if pr_approval is None and not repository_connection:
+        if isinstance(self.studio_service, (PullRequestStudioService, RepositoryStudioService)):
+            if pr_approval is None and pr_resolution is None and not repository_connection:
                 self._json(404, {"error": "not_found"})
                 return
         elif path != "/api/approve":
@@ -313,7 +315,7 @@ class _StudioHandler(BaseHTTPRequestHandler):
             return
         try:
             payload = load_json_bytes(self.rfile.read(length))
-            if isinstance(self.studio_service, PullRequestStudioService):
+            if isinstance(self.studio_service, (PullRequestStudioService, RepositoryStudioService)):
                 if repository_connection:
                     result = self.studio_service.connect(
                         payload,
@@ -321,12 +323,20 @@ class _StudioHandler(BaseHTTPRequestHandler):
                     )
                     result["approval_token"] = self.studio_service.approval_token
                 else:
-                    assert pr_approval is not None
-                    result = self.studio_service.approve(
-                        int(pr_approval.group(1)),
-                        payload,
-                        approval_token=self.headers.get("X-SafeLane-CSRF"),
-                    )
+                    if pr_resolution is not None and isinstance(
+                        self.studio_service, RepositoryStudioService
+                    ):
+                        result = self.studio_service.resolve(
+                            int(pr_resolution.group(1)), payload,
+                            approval_token=self.headers.get("X-SafeLane-CSRF"),
+                        )
+                    else:
+                        assert pr_approval is not None
+                        result = self.studio_service.approve(
+                            int(pr_approval.group(1)),
+                            payload,
+                            approval_token=self.headers.get("X-SafeLane-CSRF"),
+                        )
             else:
                 result = self.studio_service.approve(
                     payload,

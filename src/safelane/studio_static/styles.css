@@ -355,9 +355,11 @@ button:focus-visible, a:focus-visible, select:focus-visible { outline: 2px solid
 .buttons { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
 .button { display: inline-flex; padding: 10px 13px; border: 1px solid #d5dae2; border-radius: 9px; color: #404858; background: #fff; font-size: 11px; font-weight: 800; text-decoration: none; }
 .button.primary { border-color: var(--brand); color: #fff; background: var(--brand); }
+.button.danger { border-color: #efc3bf; color: var(--red); background: #fff8f7; }
 .button:disabled { opacity: .55; cursor: wait; }
 .approval select { width: auto; min-width: 120px; margin: 0; padding: 9px 10px; border: 1px solid #d5dae2; border-radius: 9px; }
 .approved { color: var(--green); font-size: 12px; font-weight: 800; }
+.rejected { color: var(--red); font-size: 12px; font-weight: 800; }
 .action-message { flex-basis: 100%; }
 .spans { margin-top: 14px; }
 

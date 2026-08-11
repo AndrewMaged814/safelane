@@ -29,7 +29,8 @@ outcomes.jsonl
 decision.json
 demo-backup.mp4
 rendered/
-.safelane/
+.safelane/*
+!.safelane/policy.yaml
 demo/repository/
 
 # Editors and OS
