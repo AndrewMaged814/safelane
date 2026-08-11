@@ -10,6 +10,7 @@
     "scope",
     "ai",
     "safety_case",
+    "trusted_probe_catalog",
     "rollout",
     "profiles"
   ],
@@ -20,6 +21,7 @@
     "scope": {"$ref": "#/$defs/scope"},
     "ai": {"$ref": "#/$defs/ai"},
     "safety_case": {"$ref": "#/$defs/safety_case"},
+    "trusted_probe_catalog": {"$ref": "#/$defs/trusted_probe_catalog"},
     "rollout": {"$ref": "#/$defs/rollout"},
     "profiles": {
       "type": "object",
@@ -58,13 +60,12 @@
     "deployment": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["namespace", "rollout_name", "container_name", "workload_label", "analysis_template"],
+      "required": ["namespace", "rollout_name", "container_name", "workload_label"],
       "properties": {
         "namespace": {"$ref": "#/$defs/dns_label"},
         "rollout_name": {"$ref": "#/$defs/dns_label"},
         "container_name": {"$ref": "#/$defs/dns_label"},
-        "workload_label": {"$ref": "#/$defs/dns_label"},
-        "analysis_template": {"$ref": "#/$defs/dns_label"}
+        "workload_label": {"$ref": "#/$defs/dns_label"}
       }
     },
     "dns_label": {
@@ -119,6 +120,27 @@
             "data": {"enum": ["guarded", "risky"]},
             "security": {"enum": ["guarded", "risky"]},
             "operability": {"enum": ["guarded", "risky"]}
+          }
+        }
+      }
+    },
+    "trusted_probe_catalog": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "non_fast_fallback_probe_id", "category_bindings"],
+      "properties": {
+        "path": {"type": "string", "pattern": "^\\.safelane/[A-Za-z0-9._/-]+\\.ya?ml$"},
+        "non_fast_fallback_probe_id": {"$ref": "#/$defs/dns_label"},
+        "category_bindings": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["availability", "compatibility", "data", "security", "operability"],
+          "properties": {
+            "availability": {"$ref": "#/$defs/dns_label"},
+            "compatibility": {"$ref": "#/$defs/dns_label"},
+            "data": {"$ref": "#/$defs/dns_label"},
+            "security": {"$ref": "#/$defs/dns_label"},
+            "operability": {"$ref": "#/$defs/dns_label"}
           }
         }
       }

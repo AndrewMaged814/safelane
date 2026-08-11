@@ -12,8 +12,8 @@ def test_validate_fixtures_command_checks_every_frozen_wire_contract() -> None:
     )
 
     assert result.returncode == 0, result.stderr
-    assert "13 schemas valid" in result.stdout
-    assert "17 checked-in examples valid" in result.stdout
+    assert "16 schemas valid" in result.stdout
+    assert "18 checked-in examples valid" in result.stdout
     assert "3 evaluation manifests and hashes valid" in result.stdout
     assert "demo revisions reproduce exactly" in result.stdout
 

@@ -8,7 +8,7 @@ from pathlib import Path
 from jsonschema import Draft202012Validator
 
 from .artifacts import canonical_json_bytes, load_json_bytes, load_yaml_bytes, validate_artifact
-from .change_safety import ChangeSafety, PullRequestRef
+from .change_safety import ChangeSafety, ChangeSafetyError, PullRequestRef
 from .demo_repository import create_demo_repository
 from .evaluation import run_ollama_evaluation
 from .github_checks import GitHubCheckPublisher
@@ -23,13 +23,14 @@ from .studio import serve_studio
 
 ROOT = Path(__file__).resolve().parents[2]
 SCHEMAS = [
-    "repository-policy-v1", "argo-rollout-v1", "rollout-outcome-v1",
+    "repository-policy-v1", "repository-trusted-probes-v1", "change-assessment-v1", "rollout-decision-v1", "argo-rollout-v1", "rollout-outcome-v1",
     "assessment-request-v2", "policy-v2", "ai-response-v2", "assessment-v2", "decision-v3",
     "release-request-v1", "image-catalog-v1", "trusted-probes-v1", "probe-result-v1",
     "verification-receipt-v1",
 ]
 EXAMPLES = [
     ("repository-policy-v1", ".safelane/policy.yaml", "yaml"),
+    ("repository-trusted-probes-v1", ".safelane/trusted-probes.yaml", "yaml"),
     ("assessment-request-v2", "demo/requests/fast.json", "json"),
     ("assessment-request-v2", "demo/requests/strict.json", "json"),
     ("ai-response-v2", "demo/expected/ai-fast.json", "json"),
@@ -166,7 +167,7 @@ def main(argv: list[str] | None = None) -> int:
             outcome = workflow.assess(
                 PullRequestRef(provider.repository, args.number)
             )
-        except (PullRequestStudioError, OSError, ValueError) as exc:
+        except (ChangeSafetyError, PullRequestStudioError, OSError, ValueError) as exc:
             parser.error(str(exc))
         print(canonical_json_bytes(outcome.assessment).decode(), end="")
     return 0

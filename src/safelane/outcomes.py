@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -15,6 +14,7 @@ from .artifacts import (
     sha256,
     validate_artifact,
 )
+from .state_io import atomic_write as _atomic_write
 
 
 class OutcomeError(RuntimeError):
@@ -99,6 +99,16 @@ class OutcomeLedger:
             "policy_sha256": assessment["policy"]["sha256"],
             "tier": assessment["risk"]["tier"],
             "profile": decision["profile"]["name"],
+            "trusted_probe_id": (
+                decision["trusted_probe"]["id"]
+                if decision["trusted_probe"] is not None else None
+            ),
+            "trusted_probe_entry_sha256": (
+                decision["trusted_probe"]["catalog_entry_sha256"]
+                if decision["trusted_probe"] is not None else None
+            ),
+            "policy_rule_ids": assessment["policy_rule_ids"],
+            "finding_ids": [finding["id"] for finding in assessment["findings"]],
             "image": image,
             "rollout_uid": observation.rollout_uid,
             "result": observation.result,
@@ -146,17 +156,33 @@ class OutcomeLedger:
                 bucket["failed_or_aborted"] += 1
             if receipt["incident_within_24h"] is True:
                 bucket["incidents_within_24h"] += 1
-        return {"total": len(receipts), "by_tier": by_tier}
+        by_rule = _calibration_buckets(receipts, "policy_rule_ids")
+        by_finding = _calibration_buckets(receipts, "finding_ids")
+        return {
+            "total": len(receipts),
+            "by_tier": by_tier,
+            "by_rule": by_rule,
+            "by_finding": by_finding,
+        }
 
 
-def _atomic_write(path: Path, data: bytes) -> None:
-    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    try:
-        temporary.write_bytes(data)
-        os.replace(temporary, path)
-    finally:
-        if temporary.exists():
-            temporary.unlink()
+def _calibration_buckets(
+    receipts: list[dict[str, Any]], field: str
+) -> dict[str, dict[str, int]]:
+    buckets: dict[str, dict[str, int]] = {}
+    for receipt in receipts:
+        for identifier in receipt[field]:
+            bucket = buckets.setdefault(identifier, {
+                "total": 0,
+                "failed_or_aborted": 0,
+                "incidents_within_24h": 0,
+            })
+            bucket["total"] += 1
+            if receipt["result"] in {"failed", "aborted"}:
+                bucket["failed_or_aborted"] += 1
+            if receipt["incident_within_24h"] is True:
+                bucket["incidents_within_24h"] += 1
+    return buckets
 
 
 def _utc_now() -> str:

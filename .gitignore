@@ -31,6 +31,7 @@ demo-backup.mp4
 rendered/
 .safelane/*
 !.safelane/policy.yaml
+!.safelane/trusted-probes.yaml
 demo/repository/
 
 # Editors and OS

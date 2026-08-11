@@ -11,7 +11,6 @@ release_service:
     rollout_name: safelane
     container_name: safelane
     workload_label: safelane
-    analysis_template: safelane-contract
 scope:
   small_max_files: 2
   small_max_lines: 50
@@ -35,6 +34,15 @@ safety_case:
     data: risky
     security: risky
     operability: guarded
+trusted_probe_catalog:
+  path: .safelane/trusted-probes.yaml
+  non_fast_fallback_probe_id: safelane-health
+  category_bindings:
+    availability: safelane-health
+    compatibility: safelane-contract
+    data: safelane-contract
+    security: safelane-contract
+    operability: safelane-health
 rollout:
   traffic_router: none
   max_surge: 1

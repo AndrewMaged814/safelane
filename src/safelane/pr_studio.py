@@ -39,7 +39,7 @@ class GitHubPullRequestProvider:
 
     _FIELDS = (
         "number,title,url,author,headRefName,baseRefName,headRefOid,baseRefOid,"
-        "updatedAt,isDraft"
+        "updatedAt,isDraft,state"
     )
 
     def __init__(
@@ -94,6 +94,8 @@ class GitHubPullRequestProvider:
             value = json.loads(raw)
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise PullRequestStudioError("GitHub returned invalid pull-request data") from exc
+        if value.get("state") != "OPEN":
+            raise PullRequestStudioError("pull request is not open")
         item = _pull_request_dict(value)
         return PullRequestSnapshot(repository=self.repository, **item)
 
@@ -421,6 +423,7 @@ class PullRequestAssessmentEngine:
         else:
             tier = "guarded"
             reason = "This PR is outside the bounded Fast scope."
+        scope_tier = tier
 
         if "safety_case" in self.policy:
             for finding in findings:
@@ -448,12 +451,23 @@ class PullRequestAssessmentEngine:
             "guarded": ["Guarded", "Strict"],
             "risky": ["Strict"],
         }[tier]
+        policy_rules = [f"scope.{scope_tier}"]
+        policy_rules.extend(
+            f"safety_case.{finding['category']}" for finding in findings
+        )
+        if ai_status != "complete":
+            policy_rules.append("evidence.ai_incomplete")
+        if not all_paths_recognized:
+            policy_rules.append("evidence.path_unrecognized")
+        if binary_patch:
+            policy_rules.append("evidence.binary_patch")
         return {
             "tier": tier,
             "profile": profile,
             "reason": reason,
             "confidence": "high" if ai_status == "complete" else "low",
             "findings": findings,
+            "policy_rules": policy_rules,
             "rollout_options": [self._profile(name) for name in option_names],
             "evidence": {
                 "ai_status": ai_status,
@@ -480,6 +494,9 @@ class PullRequestAssessmentEngine:
             "max_unavailable": rollout["max_unavailable"],
             "stages": copy.deepcopy(configured["stages"]),
         }
+
+    def profile_catalog(self) -> list[dict[str, Any]]:
+        return [self._profile(name) for name in ("Fast", "Guarded", "Strict")]
 
     def _verified_finding(
         self, candidate: Any, allowed: set[DiffSpan], index: int

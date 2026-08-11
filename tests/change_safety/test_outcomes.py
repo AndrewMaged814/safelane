@@ -67,5 +67,12 @@ def test_rollout_outcome_receipt_binds_release_and_feeds_calibration(tmp_path: P
                 "incidents_within_24h": 0,
             }
         },
+        "by_rule": {
+            "scope.guarded": {
+                "total": 1,
+                "failed_or_aborted": 0,
+                "incidents_within_24h": 0,
+            }
+        },
+        "by_finding": {},
     }
-

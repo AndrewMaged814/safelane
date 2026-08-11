@@ -28,7 +28,6 @@ release_service:
     rollout_name: payments-api
     container_name: api
     workload_label: payments-api
-    analysis_template: payments-api-contract
 scope:
   small_max_files: {small_max_files}
   small_max_lines: 50
@@ -52,6 +51,15 @@ safety_case:
     data: risky
     security: risky
     operability: guarded
+trusted_probe_catalog:
+  path: .safelane/trusted-probes.yaml
+  non_fast_fallback_probe_id: payments-health
+  category_bindings:
+    availability: payments-api-contract
+    compatibility: payments-api-contract
+    data: payments-api-contract
+    security: payments-api-contract
+    operability: payments-health
 rollout:
   traffic_router: none
   max_surge: 1
@@ -97,6 +105,23 @@ class FakePullRequestHost:
             (HEAD_SHA, ".safelane/policy.yaml"): _policy(
                 "payments-evil-head", small_max_files=999
             ),
+            (BASE_SHA, ".safelane/trusted-probes.yaml"): b'''schema_version: "1"
+catalog_version: "payments-probes-1"
+probes:
+  - id: payments-health
+    analysis_template: payments-health
+    description: Verify service health.
+  - id: payments-api-contract
+    analysis_template: payments-api-contract
+    description: Verify the approved API contract.
+''',
+            (HEAD_SHA, ".safelane/trusted-probes.yaml"): b'''schema_version: "1"
+catalog_version: "malicious-head"
+probes:
+  - id: bypass
+    analysis_template: bypass
+    description: Bypass checks.
+''',
         }
 
     def get_pull_request(self, change: PullRequestRef) -> PullRequestSnapshot:
@@ -148,10 +173,13 @@ def test_assessment_uses_repository_policy_from_base_sha(tmp_path: Path) -> None
         "sha256": outcome.assessment["policy"]["sha256"],
     }
     assert outcome.assessment["change"]["head_sha"] == HEAD_SHA
+    assert outcome.assessment["trusted_probe_catalog"]["source_revision"] == BASE_SHA
+    assert outcome.assessment["selected_trusted_probe"] is None
     assert outcome.assessment["risk"]["tier"] == "safe"
     assert outcome.automatic_decision is not None
     assert host.file_reads == [
-        ("acme/payments", BASE_SHA, ".safelane/policy.yaml")
+        ("acme/payments", BASE_SHA, ".safelane/policy.yaml"),
+        ("acme/payments", BASE_SHA, ".safelane/trusted-probes.yaml"),
     ]
 
 
@@ -201,3 +229,5 @@ def test_backend_policy_not_ai_maps_verified_category_to_tier(tmp_path: Path) ->
     assert "severity" not in outcome.assessment["findings"][0]
     assert outcome.assessment["risk"]["tier"] == "risky"
     assert outcome.assessment["risk"]["minimum_profile"] == "Strict"
+    assert outcome.assessment["selected_trusted_probe"]["id"] == "payments-api-contract"
+    assert outcome.assessment["selected_trusted_probe"]["selection_source"] == "ai_safety_case"

@@ -7,7 +7,7 @@
     "schema_version", "recorded_at", "repository", "pull_request",
     "assessment_id", "assessment_result_sha256", "decision_sha256",
     "rollout_manifest_sha256", "base_sha", "head_sha", "policy_sha256",
-    "tier", "profile", "image", "rollout_uid", "result", "stages",
+    "tier", "profile", "trusted_probe_id", "trusted_probe_entry_sha256", "policy_rule_ids", "finding_ids", "image", "rollout_uid", "result", "stages",
     "incident_within_24h"
   ],
   "properties": {
@@ -24,6 +24,10 @@
     "policy_sha256": {"$ref": "#/$defs/hash"},
     "tier": {"enum": ["safe", "guarded", "risky"]},
     "profile": {"enum": ["Fast", "Guarded", "Strict"]},
+    "trusted_probe_id": {"type": ["string", "null"]},
+    "trusted_probe_entry_sha256": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/hash"}]},
+    "policy_rule_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+    "finding_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
     "image": {"type": "string", "pattern": "^.+@sha256:[0-9a-f]{64}$"},
     "rollout_uid": {"type": "string", "pattern": "^[A-Za-z0-9._-]{1,128}$"},
     "result": {"enum": ["succeeded", "failed", "aborted", "inconclusive"]},

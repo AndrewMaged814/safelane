@@ -215,8 +215,8 @@ function approvalPanel(assessment, token) {
   return `<section class="card approval"><div><h2>Review the backend proposal</h2><p>Approval authorizes compilation for this exact PR head. Rejection emits no rollout decision.</p></div><div class="buttons"><select id="selected-profile" aria-label="Selected rollout profile">${options}</select><button class="button primary" id="approve">${only === "Strict" ? "Approve Strict rollout" : "Approve selected rollout"}</button><button class="button danger" id="reject">Reject</button><a class="button" href="/changes" data-nav>Decide later</a></div><p id="approval-message" class="action-message"></p></section>`;
 }
 
-function rolloutPreview(profile, evidence, confidence) {
-  return `<section class="card rollout" id="rollout-preview"><div class="card-head"><div><h2>${escapeHtml(profile.name)} rollout</h2><p class="copy">The repository-owned policy defines this profile; backend safety floors select it.</p></div><span class="version">${profile.replicas} replicas</span></div>${rolloutRail(profile)}<div class="health"><div><span>Files</span><strong>${evidence.files_changed}</strong></div><div><span>Changed lines</span><strong>${evidence.lines_changed}</strong></div><div><span>AI evidence</span><strong>${escapeHtml(evidence.ai_status)}</strong></div><div><span>Confidence</span><strong>${escapeHtml(confidence)}</strong></div></div></section>`;
+function rolloutPreview(profile, evidence, evidenceConfidence) {
+  return `<section class="card rollout" id="rollout-preview"><div class="card-head"><div><h2>${escapeHtml(profile.name)} rollout</h2><p class="copy">The repository-owned policy defines this profile; backend safety floors select it.</p></div><span class="version">${profile.replicas} replicas</span></div>${rolloutRail(profile)}<div class="health"><div><span>Files</span><strong>${evidence.files_changed}</strong></div><div><span>Changed lines</span><strong>${evidence.lines_changed}</strong></div><div><span>AI evidence</span><strong>${escapeHtml(evidence.ai_status)}</strong></div><div><span>Evidence confidence</span><strong>${escapeHtml(evidenceConfidence)}</strong></div></div></section>`;
 }
 
 async function renderAssessment(number) {
@@ -243,14 +243,14 @@ async function renderAssessment(number) {
     <section class="card decision"><div class="decision-value"><span>Backend proposal</span><strong>${escapeHtml(risk.minimum_profile)}</strong></div><div><h2>${assessment.review.status !== "unresolved" ? "This PR review is complete" : "Review required before this PR can be authorized"}</h2><p>${escapeHtml(risk.reason)}</p></div></section>
     ${findingCards(assessment)}
     <section class="card policy-note"><strong>Why the backend proposed this lane</strong><p>${escapeHtml(risk.reason)}</p><code>Policy ${escapeHtml(assessment.policy.version)} from base ${escapeHtml(assessment.policy.source_revision)}</code><code> · diff ${escapeHtml(assessment.evidence.git_diff_sha256)}</code></section>
-    ${rolloutPreview(profile, assessment.evidence, risk.confidence)}
+    ${rolloutPreview(profile, assessment.evidence, risk.evidence_confidence)}
     ${approvalPanel(assessment, snapshot.approval_token)}`, "changes", true);
   const selector = document.querySelector("#selected-profile");
   if (selector) {
     selector.addEventListener("change", () => {
       const selected = assessment.rollout_options.find((option) => option.name === selector.value);
       const preview = document.querySelector("#rollout-preview");
-      if (selected && preview) preview.outerHTML = rolloutPreview(selected, assessment.evidence, risk.confidence);
+      if (selected && preview) preview.outerHTML = rolloutPreview(selected, assessment.evidence, risk.evidence_confidence);
     });
   }
   document.querySelector("#approve")?.addEventListener("click", () => submitApproval(assessment, snapshot.approval_token));
@@ -346,7 +346,9 @@ async function renderOutcomes() {
     const bucket = result.by_tier[tier] || { total: 0, succeeded: 0, failed_or_aborted: 0, incidents_within_24h: 0 };
     return `<article class="profile-card"><div class="profile-icon">${tier[0].toUpperCase()}</div><h2>${tier}</h2><p>${bucket.total} bound rollout${bucket.total === 1 ? "" : "s"}</p><code>${bucket.succeeded} succeeded · ${bucket.failed_or_aborted} failed/aborted · ${bucket.incidents_within_24h} incidents</code></article>`;
   }).join("");
-  app.innerHTML = shell(`<header class="page-head"><div><div class="eyebrow">Observed releases</div><h1>Rollout outcomes</h1><p>Exact-decision receipts only. These counts describe outcomes; they are not a model accuracy score.</p></div><span class="version">${result.total} RECEIPTS</span></header><section class="profiles">${cards}</section><section class="card policy-note"><strong>Calibration without fake certainty</strong><p>Use these receipts to inspect where cautious lanes fail or remain clean. A successful Strict rollout is not automatically a false positive.</p></section>`, "outcomes");
+  const calibrationRows = (label, buckets) => Object.entries(buckets).map(([id, bucket]) => `<tr><td>${escapeHtml(label)}</td><td><code>${escapeHtml(id)}</code></td><td>${bucket.total}</td><td>${bucket.failed_or_aborted}</td><td>${bucket.incidents_within_24h}</td></tr>`).join("");
+  const calibration = calibrationRows("Rule", result.by_rule) + calibrationRows("Finding", result.by_finding);
+  app.innerHTML = shell(`<header class="page-head"><div><div class="eyebrow">Observed releases</div><h1>Rollout outcomes</h1><p>Exact-decision receipts only. These counts describe outcomes; they are not a model accuracy score.</p></div><span class="version">${result.total} RECEIPTS</span></header><section class="profiles">${cards}</section><section class="card policy-note"><strong>Calibration without fake certainty</strong><p>Use these receipts to inspect where cautious lanes fail or remain clean. A successful Strict rollout is not automatically a false positive.</p></section><section class="card calibration"><h2>Rule and finding outcomes</h2>${calibration ? `<table><thead><tr><th>Kind</th><th>Identity</th><th>Runs</th><th>Failed / aborted</th><th>Incidents</th></tr></thead><tbody>${calibration}</tbody></table>` : `<p>No rule or finding receipts yet.</p>`}</section>`, "outcomes");
 }
 
 function openRepositoryDialog() {

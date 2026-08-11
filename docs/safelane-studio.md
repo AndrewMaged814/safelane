@@ -1,86 +1,79 @@
 # SafeLane Studio
 
-**Version:** 3 · **decision date:** 2026-08-12
+**Version:** 4 · **decision date:** 2026-08-12
 
-SafeLane Studio is a local review surface for the open pull requests of one connected GitHub
-repository. It explains why a specific PR revision needs a specific rollout profile and records
-explicit approval when required. It does not merge, deploy, or monitor releases.
+SafeLane Studio is the local review and compilation surface for open pull requests in one connected
+GitHub repository. It explains why the backend proposed a rollout, records approve/reject/later
+review intent, compiles an approved exact-head decision into Argo Rollout YAML, and summarizes bound
+outcome receipts. It does not merge a pull request or apply a manifest to a cluster.
 
 ## Repository and PR lifecycle
 
-Studio connects through the authenticated GitHub CLI to either a local checkout's `origin` or an
-explicit GitHub URL or `owner/repository` slug. The Changes route lists only open pull requests. It
-never assesses or displays an uncommitted working-tree diff without a pull request.
+Studio connects through the authenticated GitHub CLI to a local checkout's `origin`, a GitHub URL,
+or an `owner/repository` slug. Changes lists only open pull requests and never shows an uncommitted
+working-tree diff.
 
-The repository chip in the top bar opens the connection dialog. A valid local path, GitHub URL, or
-repository slug switches the active repository and loads its isolated state directory. Validation
-failure leaves the current repository active and shows the provider error inside the dialog.
+Every connected repository must own `.safelane/policy.yaml` and its referenced trusted-probe
+catalog. `ChangeSafety` reads both files from the exact PR base SHA, fetches the exact base/head diff,
+and rechecks the head before publishing. A PR may change its contract for future assessments but
+cannot weaken the contract assessing itself.
 
-For every listed PR, Studio fetches the immutable GitHub comparison identified by the discovered
-full base and head SHAs. Assessments and decisions are stored by PR number in the local Studio state
-directory. A new head SHA creates a new assessment identity and invalidates the earlier review and
-decision. Closed PRs disappear from the active inbox without deleting their local audit files.
-
-These `studio-pr-assessment-v2` and `studio-pr-review-v1` records are explicitly scoped to local
-Studio review. They are not canonical `assessment-v2` / `decision-v3` release authorization and
-must never be consumed by deployment tooling.
-
-Fast path recognition is deliberately conservative across repositories: every changed file must be
-either inside the configured release-service prefixes or a Markdown documentation file at
-`README.md` or under `docs/`. Other source paths remain at least Guarded until that repository has
-an explicit service mapping.
-
-Fast resolves automatically. Guarded and Risky remain unresolved until the user approves a built-in
-profile at least as careful as the policy minimum. The inbox separates Needs review from Resolved.
-Every approval surface says that approval records a rollout plan but does not deploy it.
+Studio and `safelane assess-pr` consume the same `change-assessment-v1` bytes and
+`rollout-decision-v1` authorization. A new head removes the earlier decision before the replacement
+assessment is published. Closed PRs disappear from the inbox without deleting their audit records.
 
 ## Navigation
 
-- **Changes** — live open-PR inbox, lane, reason, and review state.
-- **PR dossier** — exact revision identity, source-verified findings, policy reason, rollout preview,
-  and approval.
-- **Profiles** — read-only Fast, Guarded, and Strict built-in rollout definitions.
+- **Changes** — live open-PR inbox, backend proposal, policy reason, and review state.
+- **PR dossier** — exact revision, policy/probe provenance, source-verified AI safety case, rule
+  result, rollout preview, review controls, and approved-release compiler.
+- **Profiles** — read-only repository-owned Fast, Guarded, and Strict definitions.
+- **Outcomes** — receipt counts by tier. The API also exposes rule/finding calibration buckets.
 
-## Fast view
+## Evidence and policy presentation
 
-Show the repository, pull request, head SHA, positive bounded-scope evidence, Safe tier, Fast profile,
-and `Resolved automatically`. Do not invent a failure hypothesis, safeguard, approval question, or
-remediation when the assessment has no verified finding.
+The backend—not AI—chooses the risk tier and minimum profile. The local model may return one bounded
+safety-case category plus exact changed-line references. Normal code verifies those references,
+maps the category through base-owned policy, selects a versioned trusted probe, and renders the
+explanation. The model cannot emit severity, a tier, a profile, a probe, a command, or a manifest.
 
-## Guarded and Risky views
+When no model finding survives validation, show the deterministic fallback and AI evidence status.
+Use **Evidence confidence** only for evidence completeness; never imply model probability. Every
+preview comes from the assessment's repository-owned `rollout_options`.
 
-Show the deterministic policy reason first. When the bounded model returns a valid finding, show its
-category, severity, normal-code-rendered explanation, and exact removed or added source spans.
-Label these spans as source references verified: normal code confirms only that the cited text exists
-at the claimed changed-line identity. It does not claim that the model's interpretation is true, and
-model-authored prose is never displayed as trusted explanation.
+## Review and release contract
 
-When no model finding survives validation, show the policy fallback reason and evidence status. Do
-not invent a finding or display rejected model values. Every rollout preview comes from the
-assessment's server-owned `rollout_options`; the browser does not load or reinterpret policy.
+Fast resolves automatically. Guarded and Risky support:
 
-## Approval contract
+- **Approve** — binds actor, allowed profile, assessment ID, result hash, and exact head; emits a
+  rollout decision.
+- **Reject** — records rejection and emits no rollout decision.
+- **Decide later** — performs no mutation and returns to the inbox.
 
-The only state-changing production UI action is **Approve selected rollout**. The browser submits the
-expected assessment ID, head SHA, policy version, assessment-input hash, assessment-result hash, and
-selected built-in profile. The server refreshes open PR state, loads the current assessment, and
-compare-and-swaps those identities. It does not accept a client-supplied assessment object.
+An approved reviewer can submit an immutable image digest. The server revalidates the assessment,
+decision, current PR head, base policy, trusted-probe catalog, and image identity before writing a
+schema-valid Argo Rollout. Missing, stale, rejected, or mismatched authorization emits no manifest.
 
-The server atomically replaces the resolved PR assessment first and creates or replaces its local
-decision last. A stale page, wrong hash, wrong SHA, invalid profile, closed PR, or changed PR is
-rejected. A local approval does not write to GitHub and does not deploy software.
+When GitHub App credentials have Checks write permission, SafeLane creates an exact-head Check Run.
+Unresolved reviews are `action_required`, approvals are `success`, rejections are `failure`, and a
+new head cancels the earlier run before creating the replacement. Check delivery is a projection;
+it never becomes release authority.
+
+Outcome ingestion accepts only observations whose stages match the compiled profile. The resulting
+receipt binds assessment, decision, manifest, image, probe, rule IDs, finding IDs, and exact Git
+revision. Summary counts describe observed outcomes; they are not a model accuracy score.
 
 ## Visual requirements
 
 - Preserve the prototype's Changes, dossier, and Profiles information architecture.
 - Pair color with text; Safe is green, Guarded is amber, and Risky is red.
-- Render verified source spans in readable monospace blocks with removed/added labels.
+- Show full head SHA and base-owned policy/probe provenance.
+- Render source spans in monospace blocks with removed/added labels.
 - Work at laptop and narrow viewport widths without a frontend framework.
 
 ## Out of scope
 
-- policy or profile creation, editing, overrides, or Generate with AI;
-- chat, model self-critique, or free-form executable configuration;
-- GitHub writes, merging, deploy buttons, kubectl, rollout polling, and receipt ingestion;
-- accounts, RBAC, database, notifications, analytics, and history UI; and
-- generated tests, commands, patches, or arbitrary probe configuration.
+- policy/profile editing or model selectors;
+- chat, AI-generated fixes, commands, or executable probes;
+- merging, production cluster application, automatic Argo polling, or rollback ownership;
+- accounts, RBAC, notifications, DORA analytics, or multi-repository dashboards.

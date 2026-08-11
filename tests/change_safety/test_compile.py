@@ -48,9 +48,8 @@ def test_approved_decision_compiles_sha_bound_argo_rollout(tmp_path: Path) -> No
     }]
     assert manifest["spec"]["strategy"]["canary"]["steps"] == [
         {"setWeight": 40},
-        {"analysis": {"templates": [{"templateName": "payments-api-contract"}]}},
+        {"analysis": {"templates": [{"templateName": "payments-health"}]}},
         {"setWeight": 100},
     ]
     validate_artifact("argo-rollout-v1", manifest)
     assert bundle.path.read_bytes()
-

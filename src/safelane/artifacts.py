@@ -181,6 +181,10 @@ def _validate_semantics(schema_name: str, value: Any) -> None:
         _validate_image_catalog(value)
     elif schema_name == "probe-result-v1":
         _validate_probe_result(value)
+    elif schema_name == "change-assessment-v1":
+        _validate_change_assessment(value)
+    elif schema_name == "rollout-decision-v1":
+        _validate_rollout_decision(value)
 
 
 def _validate_decision(decision: dict[str, Any]) -> None:
@@ -253,3 +257,46 @@ def _validate_probe_result(result: dict[str, Any]) -> None:
     expected_result = "failed" if failures > result["failure_allowance"] else "passed"
     if result["failures"] != failures or result["result"] != expected_result:
         raise ArtifactError("probe result is internally inconsistent")
+
+
+def _validate_change_assessment(assessment: dict[str, Any]) -> None:
+    base_sha = assessment["change"]["base_sha"]
+    if (
+        assessment["policy"]["source_revision"] != base_sha
+        or assessment["trusted_probe_catalog"]["source_revision"] != base_sha
+    ):
+        raise ArtifactError("change assessment provenance must come from the base SHA")
+    tier = assessment["risk"]["tier"]
+    minimum = assessment["risk"]["minimum_profile"]
+    if minimum != {"safe": "Fast", "guarded": "Guarded", "risky": "Strict"}[tier]:
+        raise ArtifactError("change assessment tier and minimum profile disagree")
+    catalog_names = [profile["name"] for profile in assessment["rollout_catalog"]]
+    if catalog_names != ["Fast", "Guarded", "Strict"]:
+        raise ArtifactError("change assessment rollout catalog is not canonical")
+    allowed = {
+        "safe": ["Fast"],
+        "guarded": ["Guarded", "Strict"],
+        "risky": ["Strict"],
+    }[tier]
+    if [profile["name"] for profile in assessment["rollout_options"]] != allowed:
+        raise ArtifactError("change assessment rollout options violate the tier floor")
+    if (tier == "safe") != (assessment["selected_trusted_probe"] is None):
+        raise ArtifactError("trusted probe selection disagrees with the risk tier")
+
+
+def _validate_rollout_decision(decision: dict[str, Any]) -> None:
+    if (
+        decision["policy"]["source_revision"] != decision["base_sha"]
+        or decision["trusted_probe_catalog"]["source_revision"] != decision["base_sha"]
+    ):
+        raise ArtifactError("rollout decision provenance must come from the base SHA")
+    tier = decision["tier"]
+    profile = decision["profile"]["name"]
+    if profile not in {
+        "safe": {"Fast"},
+        "guarded": {"Guarded", "Strict"},
+        "risky": {"Strict"},
+    }[tier]:
+        raise ArtifactError("rollout decision profile violates the tier floor")
+    if (profile == "Fast") != (decision["trusted_probe"] is None):
+        raise ArtifactError("rollout decision trusted probe disagrees with its profile")

@@ -29,7 +29,9 @@ def test_github_check_is_bound_to_assessed_head_and_review_state() -> None:
         "review": {"status": "unresolved", "resolution": None},
     }
 
-    result = GitHubCheckPublisher(command_runner=run).publish(assessment)
+    publisher = GitHubCheckPublisher(command_runner=run)
+    result = publisher.publish(assessment)
+    publisher.invalidate("acme/payments", 913, superseded_by_head="d" * 40)
 
     assert result.id == 913
     assert result.url.endswith("/913")
@@ -40,4 +42,7 @@ def test_github_check_is_bound_to_assessed_head_and_review_state() -> None:
     assert ("-f", "head_sha=" + "b" * 40) == arguments[6:8]
     assert "conclusion=action_required" in arguments
     assert "output[title]=Guarded rollout review required" in arguments
-
+    assert calls[1][:4] == (
+        "api", "--method", "PATCH", "repos/acme/payments/check-runs/913"
+    )
+    assert "conclusion=cancelled" in calls[1]

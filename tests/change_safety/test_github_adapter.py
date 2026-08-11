@@ -13,7 +13,7 @@ def test_github_adapter_reads_exact_pr_and_base_owned_policy() -> None:
         assert cwd is None
         calls.append(arguments)
         if arguments[:2] == ("pr", "view"):
-            return b'''{"number":42,"title":"Bound retries","url":"https://github.com/acme/payments/pull/42","author":{"login":"andrew"},"headRefName":"fix/retries","baseRefName":"main","headRefOid":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","baseRefOid":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","updatedAt":"2026-08-12T09:00:00Z","isDraft":false}'''
+            return b'''{"number":42,"title":"Bound retries","url":"https://github.com/acme/payments/pull/42","author":{"login":"andrew"},"headRefName":"fix/retries","baseRefName":"main","headRefOid":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","baseRefOid":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","updatedAt":"2026-08-12T09:00:00Z","isDraft":false,"state":"OPEN"}'''
         if "contents/.safelane/policy.yaml" in arguments[1]:
             return b'policy_version: payments-1\n'
         if "/compare/" in arguments[1]:
@@ -38,4 +38,3 @@ def test_github_adapter_reads_exact_pr_and_base_owned_policy() -> None:
         "--header",
         "Accept: application/vnd.github.raw+json",
     )
-

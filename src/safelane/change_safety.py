@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import copy
-import os
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -19,6 +18,7 @@ from .artifacts import (
     validate_artifact,
 )
 from .pr_studio import PullRequestAnalyzer, PullRequestAssessmentEngine
+from .state_io import atomic_write as _atomic_write
 
 
 class ChangeSafetyError(RuntimeError):
@@ -127,6 +127,10 @@ class CheckPublisher(Protocol):
         self, assessment: dict[str, Any], *, check_run_id: int | None = None
     ) -> Any: ...
 
+    def invalidate(
+        self, repository: str, check_run_id: int, *, superseded_by_head: str
+    ) -> None: ...
+
 
 AnalyzerFactory = Callable[[dict[str, Any]], PullRequestAnalyzer]
 Clock = Callable[[], str]
@@ -157,9 +161,17 @@ class ChangeSafety:
         self._validate_snapshot(change, snapshot)
         policy_bytes = self._read_base_policy(snapshot)
         policy = self._load_policy(policy_bytes, snapshot.base_sha)
+        catalog_bytes = self._read_base_catalog(snapshot, policy)
+        catalog = self._load_catalog(catalog_bytes, snapshot.base_sha)
+        _validate_catalog_bindings(policy, catalog)
         diff = self._host.diff(snapshot)
-        cached = self._cached(snapshot, policy_bytes, diff)
+        cached = self._cached(snapshot, policy_bytes, catalog_bytes, diff)
         if cached is not None:
+            current = self._host.get_pull_request(change)
+            if current.head_sha != snapshot.head_sha:
+                raise ChangeMoved(
+                    f"pull request moved from {snapshot.head_sha} to {current.head_sha}"
+                )
             self._publish_check(cached.assessment)
             return cached
         analyzer = self._analyzer_factory(copy.deepcopy(policy))
@@ -168,9 +180,8 @@ class ChangeSafety:
             analyzer=analyzer,
         )
         result = evaluator.assess(snapshot.repository, _snapshot_dict(snapshot), diff)
-        rollout_catalog = [
-            evaluator._profile(name) for name in ("Fast", "Guarded", "Strict")
-        ]
+        selected_probe = _select_trusted_probe(policy, catalog, result)
+        rollout_catalog = evaluator.profile_catalog()
 
         current = self._host.get_pull_request(change)
         if current.head_sha != snapshot.head_sha:
@@ -179,7 +190,8 @@ class ChangeSafety:
             )
 
         assessment = self._assessment(
-            snapshot, policy, policy_bytes, diff, result, rollout_catalog
+            snapshot, policy, policy_bytes, catalog, catalog_bytes, diff, result,
+            rollout_catalog, selected_probe,
         )
         decision = None
         if result["tier"] == "safe":
@@ -190,6 +202,9 @@ class ChangeSafety:
             }
             assessment["review"] = {"status": "approved", "resolution": resolution}
             decision = self._decision(assessment, "Fast", resolution)
+        validate_artifact("change-assessment-v1", assessment)
+        if decision is not None:
+            validate_artifact("rollout-decision-v1", decision)
         self._write(snapshot, assessment, decision)
         self._publish_check(assessment)
         return AssessmentOutcome(
@@ -204,11 +219,13 @@ class ChangeSafety:
         self,
         snapshot: PullRequestSnapshot,
         policy_bytes: bytes,
+        catalog_bytes: bytes,
         diff: bytes,
     ) -> AssessmentOutcome | None:
         directory = self._directory(snapshot.repository, snapshot.number)
         try:
             assessment = load_json_bytes((directory / "assessment.json").read_bytes())
+            validate_artifact("change-assessment-v1", assessment)
         except (OSError, ArtifactError):
             return None
         expected = {
@@ -223,6 +240,11 @@ class ChangeSafety:
             return None
         if assessment.get("policy", {}).get("sha256") != sha256(policy_bytes):
             return None
+        if (
+            assessment.get("trusted_probe_catalog", {}).get("sha256")
+            != sha256(catalog_bytes)
+        ):
+            return None
         if assessment.get("evidence", {}).get("git_diff_sha256") != sha256(diff):
             return None
         result_hash = assessment.get("assessment_result_sha256")
@@ -233,6 +255,7 @@ class ChangeSafety:
         if isinstance(resolution, dict) and resolution.get("type") == "automatic":
             try:
                 candidate = load_json_bytes((directory / "decision.json").read_bytes())
+                validate_artifact("rollout-decision-v1", candidate)
             except (OSError, ArtifactError):
                 return None
             if (
@@ -251,6 +274,7 @@ class ChangeSafety:
         assessment_path = self._assessment_path(command.handle)
         try:
             assessment = load_json_bytes(assessment_path.read_bytes())
+            validate_artifact("change-assessment-v1", assessment)
         except (OSError, ArtifactError) as exc:
             raise AssessmentNotFound(command.handle.assessment_id) from exc
         if assessment.get("assessment_id") != command.handle.assessment_id:
@@ -278,6 +302,19 @@ class ChangeSafety:
         policy_bytes = self._read_base_policy(current)
         if sha256(policy_bytes) != assessment["policy"]["sha256"]:
             raise AssessmentStale("base policy no longer matches the assessment")
+        policy = self._load_policy(policy_bytes, current.base_sha)
+        catalog_bytes = self._read_base_catalog(current, policy)
+        if sha256(catalog_bytes) != assessment["trusted_probe_catalog"]["sha256"]:
+            raise AssessmentStale("trusted probe catalog no longer matches the assessment")
+        catalog = self._load_catalog(catalog_bytes, current.base_sha)
+        _validate_catalog_bindings(policy, catalog)
+        expected_probe = _select_trusted_probe(
+            policy,
+            catalog,
+            {"tier": assessment["risk"]["tier"], "findings": assessment["findings"]},
+        )
+        if assessment["selected_trusted_probe"] != expected_probe:
+            raise AssessmentStale("trusted probe selection does not match base policy")
 
         selected_profile = command.selected_profile
         if command.action == "reject":
@@ -306,10 +343,16 @@ class ChangeSafety:
             if selected_profile is not None
             else None
         )
+        validate_artifact("change-assessment-v1", resolved)
+        if decision is not None:
+            validate_artifact("rollout-decision-v1", decision)
+        decision_path = assessment_path.with_name("decision.json")
+        if decision is None:
+            _remove_if_exists(decision_path)
         _atomic_write(assessment_path, canonical_json_bytes(resolved))
         if decision is not None:
             _atomic_write(
-                assessment_path.with_name("decision.json"),
+                decision_path,
                 canonical_json_bytes(decision),
             )
         self._publish_check(resolved)
@@ -319,9 +362,11 @@ class ChangeSafety:
         assessment_path = self._assessment_path(binding.handle)
         try:
             assessment = load_json_bytes(assessment_path.read_bytes())
+            validate_artifact("change-assessment-v1", assessment)
             decision = load_json_bytes(
                 assessment_path.with_name("decision.json").read_bytes()
             )
+            validate_artifact("rollout-decision-v1", decision)
         except (OSError, ArtifactError) as exc:
             raise AssessmentNotFound(binding.handle.assessment_id) from exc
         if (
@@ -355,6 +400,19 @@ class ChangeSafety:
         if sha256(policy_bytes) != assessment["policy"]["sha256"]:
             raise AssessmentStale("base policy no longer matches the assessment")
         policy = self._load_policy(policy_bytes, current.base_sha)
+        catalog_bytes = self._read_base_catalog(current, policy)
+        if sha256(catalog_bytes) != assessment["trusted_probe_catalog"]["sha256"]:
+            raise AssessmentStale("trusted probe catalog no longer matches the assessment")
+        catalog = self._load_catalog(catalog_bytes, current.base_sha)
+        _validate_catalog_bindings(policy, catalog)
+        selected_probe = assessment["selected_trusted_probe"]
+        expected_probe = _select_trusted_probe(
+            policy,
+            catalog,
+            {"tier": assessment["risk"]["tier"], "findings": assessment["findings"]},
+        )
+        if selected_probe != expected_probe:
+            raise AssessmentStale("trusted probe selection does not match base policy")
 
         decision_hash = sha256(decision)
         deployment = policy["release_service"]["deployment"]
@@ -363,10 +421,14 @@ class ChangeSafety:
         for stage in decision["profile"]["stages"]:
             steps.append({"setWeight": stage["set_weight"]})
             if stage["analysis"]:
+                if selected_probe is None:
+                    raise AssessmentStale(
+                        "analysis stage has no assessment-bound trusted probe"
+                    )
                 steps.append({
                     "analysis": {
                         "templates": [{
-                            "templateName": deployment["analysis_template"]
+                            "templateName": selected_probe["analysis_template"]
                         }]
                     }
                 })
@@ -427,6 +489,17 @@ class ChangeSafety:
                 f"{snapshot.repository}@{snapshot.base_sha} has no {self.POLICY_PATH}"
             ) from exc
 
+    def _read_base_catalog(
+        self, snapshot: PullRequestSnapshot, policy: dict[str, Any]
+    ) -> bytes:
+        path = policy["trusted_probe_catalog"]["path"]
+        try:
+            return self._host.read_file(snapshot.repository, snapshot.base_sha, path)
+        except (KeyError, OSError, RuntimeError) as exc:
+            raise RepositoryNotConfigured(
+                f"{snapshot.repository}@{snapshot.base_sha} has no {path}"
+            ) from exc
+
     @staticmethod
     def _load_policy(raw: bytes, base_sha: str) -> dict[str, Any]:
         try:
@@ -437,14 +510,28 @@ class ChangeSafety:
             raise PolicyInvalid(f"policy at {base_sha} is invalid: {exc}") from exc
         return policy
 
+    @staticmethod
+    def _load_catalog(raw: bytes, base_sha: str) -> dict[str, Any]:
+        try:
+            catalog = load_yaml_bytes(raw)
+            validate_artifact("repository-trusted-probes-v1", catalog)
+        except (ArtifactError, TypeError, ValueError) as exc:
+            raise PolicyInvalid(
+                f"trusted probe catalog at {base_sha} is invalid: {exc}"
+            ) from exc
+        return catalog
+
     def _assessment(
         self,
         snapshot: PullRequestSnapshot,
         policy: dict[str, Any],
         policy_bytes: bytes,
+        catalog: dict[str, Any],
+        catalog_bytes: bytes,
         diff: bytes,
         result: dict[str, Any],
         rollout_catalog: list[dict[str, Any]],
+        selected_probe: dict[str, Any] | None,
     ) -> dict[str, Any]:
         assessed_at = self._clock()
         policy_hash = sha256(policy_bytes)
@@ -454,6 +541,7 @@ class ChangeSafety:
             "base_sha": snapshot.base_sha,
             "head_sha": snapshot.head_sha,
             "policy_sha256": policy_hash,
+            "trusted_probe_catalog_sha256": sha256(catalog_bytes),
             "git_diff_sha256": sha256(diff),
         })
         assessment: dict[str, Any] = {
@@ -470,19 +558,26 @@ class ChangeSafety:
                 "source_revision": snapshot.base_sha,
                 "sha256": policy_hash,
             },
+            "trusted_probe_catalog": {
+                "version": catalog["catalog_version"],
+                "source_revision": snapshot.base_sha,
+                "sha256": sha256(catalog_bytes),
+            },
             "change": _snapshot_dict(snapshot),
             "service": copy.deepcopy(policy["release_service"]),
             "risk": {
                 "tier": result["tier"],
                 "minimum_profile": result["profile"],
                 "reason": result["reason"],
-                "confidence": result["confidence"],
+                "evidence_confidence": result["confidence"],
             },
             "evidence": {
                 "git_diff_sha256": sha256(diff),
                 **copy.deepcopy(result["evidence"]),
             },
             "findings": copy.deepcopy(result["findings"]),
+            "policy_rule_ids": copy.deepcopy(result["policy_rules"]),
+            "selected_trusted_probe": copy.deepcopy(selected_probe),
             "rollout_options": copy.deepcopy(result["rollout_options"]),
             "rollout_catalog": copy.deepcopy(rollout_catalog),
             "review": {"status": "unresolved", "resolution": None},
@@ -508,9 +603,15 @@ class ChangeSafety:
             "base_sha": assessment["change"]["base_sha"],
             "head_sha": assessment["change"]["head_sha"],
             "policy": copy.deepcopy(assessment["policy"]),
+            "trusted_probe_catalog": copy.deepcopy(
+                assessment["trusted_probe_catalog"]
+            ),
             "service": assessment["service"]["name"],
             "tier": assessment["risk"]["tier"],
             "profile": copy.deepcopy(profile),
+            "trusted_probe": copy.deepcopy(
+                assessment["selected_trusted_probe"]
+            ),
             "resolution": copy.deepcopy(resolution),
         }
 
@@ -522,9 +623,12 @@ class ChangeSafety:
     ) -> None:
         directory = self._directory(snapshot.repository, snapshot.number)
         directory.mkdir(parents=True, exist_ok=True)
+        _remove_if_exists(directory / "decision.json")
         _atomic_write(directory / "assessment.json", canonical_json_bytes(assessment))
         if decision is not None:
             _atomic_write(directory / "decision.json", canonical_json_bytes(decision))
+        else:
+            _remove_if_exists(directory / "decision.json")
 
     def _assessment_path(self, handle: AssessmentHandle) -> Path:
         try:
@@ -561,8 +665,26 @@ class ChangeSafety:
                 existing = candidate
         except (OSError, ArtifactError):
             pass
-        if existing is not None and existing.get("key") == key:
+        if (
+            existing is not None
+            and existing.get("key") == key
+            and existing.get("status") == "published"
+        ):
             return
+        if (
+            existing is not None
+            and existing.get("status") == "published"
+            and existing.get("key", {}).get("head_sha") != key["head_sha"]
+            and isinstance(existing.get("id"), int)
+        ):
+            try:
+                self._check_publisher.invalidate(
+                    assessment["change"]["repository"],
+                    existing["id"],
+                    superseded_by_head=key["head_sha"],
+                )
+            except (OSError, RuntimeError, ValueError):
+                pass
         check_run_id = None
         if (
             existing is not None
@@ -636,14 +758,54 @@ def _validate_policy_semantics(policy: dict[str, Any]) -> None:
             raise ValueError(f"{name} exposure exceeds configured replicas")
 
 
-def _atomic_write(path: Path, data: bytes) -> None:
-    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+def _validate_catalog_bindings(
+    policy: dict[str, Any], catalog: dict[str, Any]
+) -> None:
+    probes = catalog["probes"]
+    identifiers = [probe["id"] for probe in probes]
+    if len(set(identifiers)) != len(identifiers):
+        raise PolicyInvalid("trusted probe IDs must be unique")
+    configured = policy["trusted_probe_catalog"]
+    referenced = {
+        configured["non_fast_fallback_probe_id"],
+        *configured["category_bindings"].values(),
+    }
+    missing = referenced - set(identifiers)
+    if missing:
+        raise PolicyInvalid(
+            f"trusted probe bindings reference unknown IDs: {sorted(missing)}"
+        )
+
+
+def _select_trusted_probe(
+    policy: dict[str, Any],
+    catalog: dict[str, Any],
+    result: dict[str, Any],
+) -> dict[str, Any] | None:
+    if result["tier"] == "safe":
+        return None
+    configured = policy["trusted_probe_catalog"]
+    findings = result["findings"]
+    if findings:
+        probe_id = configured["category_bindings"][findings[0]["category"]]
+        source = "ai_safety_case"
+    else:
+        probe_id = configured["non_fast_fallback_probe_id"]
+        source = "policy_fallback"
+    probe = next(item for item in catalog["probes"] if item["id"] == probe_id)
+    return {
+        "id": probe_id,
+        "catalog_entry_sha256": sha256(probe),
+        "analysis_template": probe["analysis_template"],
+        "selection_source": source,
+    }
+
+
+def _remove_if_exists(path: Path) -> None:
     try:
-        temporary.write_bytes(data)
-        os.replace(temporary, path)
-    finally:
-        if temporary.exists():
-            temporary.unlink()
+        path.unlink()
+    except FileNotFoundError:
+        pass
 
 
 def _utc_now() -> str:

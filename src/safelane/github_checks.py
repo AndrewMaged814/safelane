@@ -72,6 +72,23 @@ class GitHubCheckPublisher:
             raise GitHubCheckError("GitHub returned an invalid Check Run")
         return CheckPublication(id=identifier, url=url)
 
+    def invalidate(
+        self, repository: str, check_run_id: int, *, superseded_by_head: str
+    ) -> None:
+        arguments = (
+            "api", "--method", "PATCH", f"repos/{repository}/check-runs/{check_run_id}",
+            "-f", "name=SafeLane",
+            "-f", "status=completed",
+            "-f", "conclusion=cancelled",
+            "-f", "output[title]=Superseded by a newer PR head",
+            "-f", f"output[summary]=This assessment was superseded by {superseded_by_head}.",
+            "--header", "Accept: application/vnd.github+json",
+        )
+        try:
+            self._runner(arguments, None)
+        except (OSError, RuntimeError) as exc:
+            raise GitHubCheckError("GitHub Check invalidation failed") from exc
+
 
 def _conclusion(assessment: dict[str, Any]) -> tuple[str, str]:
     status = assessment["review"]["status"]

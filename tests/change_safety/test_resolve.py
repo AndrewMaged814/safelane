@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 from safelane.change_safety import (
@@ -104,3 +105,32 @@ def test_rejection_records_review_but_emits_no_rollout_decision(tmp_path: Path) 
     assert resolved.assessment["review"]["status"] == "rejected"
     assert resolved.assessment["review"]["resolution"]["action"] == "reject"
     assert resolved.decision is None
+
+
+def test_new_head_removes_prior_authorizing_decision(tmp_path: Path) -> None:
+    host = GuardedHost()
+    safety = ChangeSafety(
+        host=host,
+        state_dir=tmp_path,
+        analyzer_factory=lambda policy: NoFindingAnalyzer(),
+        clock=iter([
+            "2026-08-12T09:00:00Z",
+            "2026-08-12T09:05:00Z",
+            "2026-08-12T09:10:00Z",
+        ]).__next__,
+    )
+    first = safety.assess(PullRequestRef("acme/payments", 42))
+    safety.resolve(ResolutionCommand(
+        handle=first.handle,
+        action="approve",
+        selected_profile="Guarded",
+        actor="andrew",
+    ))
+    decision_path = tmp_path / "acme--payments" / "pr-42" / "decision.json"
+    assert decision_path.exists()
+
+    host.snapshot = replace(host.snapshot, head_sha="c" * 40)
+    second = safety.assess(PullRequestRef("acme/payments", 42))
+
+    assert second.assessment["change"]["head_sha"] == "c" * 40
+    assert not decision_path.exists()

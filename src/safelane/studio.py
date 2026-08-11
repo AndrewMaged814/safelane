@@ -230,8 +230,14 @@ class _StudioHandler(BaseHTTPRequestHandler):
                     result = self.studio_service.dashboard()
                     result["approval_token"] = self.studio_service.approval_token
                     self._json(200, result)
-                except PullRequestStudioError:
-                    self._json(502, {"error": "repository_unavailable"})
+                except PullRequestStudioError as exc:
+                    if isinstance(self.studio_service, RepositoryStudioService):
+                        self._json(422, {
+                            "error": "repository_assessment_failed",
+                            "message": str(exc),
+                        })
+                    else:
+                        self._json(502, {"error": "repository_unavailable"})
                 return
             if path == "/api/profiles":
                 result = self.studio_service.profiles()
