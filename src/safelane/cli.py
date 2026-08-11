@@ -9,7 +9,10 @@ from jsonschema import Draft202012Validator
 
 from .artifacts import load_json_bytes, load_yaml_bytes, validate_artifact
 from .demo_repository import create_demo_repository
+from .engine import SafeLaneEngine
 from .evaluation import run_ollama_evaluation
+from .risk_finder import FakeRiskFinder
+from .studio import StudioService, StudioWorkspace, serve_studio
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -32,6 +35,7 @@ EXAMPLES = [
     ("image-catalog-v1", "demo/image-catalog.example.json", "json"),
     ("probe-result-v1", "demo/expected/probe-result-failed.example.json", "json"),
     ("verification-receipt-v1", "demo/expected/receipt-strict.example.json", "json"),
+    ("assessment-v2", "demo/studio-risky/assessment.json", "json"),
     ("policy-v2", "policy.yaml", "yaml"),
     ("trusted-probes-v1", "demo/trusted-probes.yaml", "yaml"),
 ]
@@ -89,6 +93,11 @@ def main(argv: list[str] | None = None) -> int:
         default=ROOT / "demo/evaluation/ollama-observations.json",
     )
     evaluation.add_argument("--base-url", default="http://127.0.0.1:11434")
+    studio = subparsers.add_parser(
+        "studio", help="serve the local assessment review and approval surface"
+    )
+    studio.add_argument("--workspace", type=Path, required=True)
+    studio.add_argument("--port", type=int, default=4173)
     args = parser.parse_args(argv)
     if args.command == "validate-fixtures":
         validate_fixtures()
@@ -97,6 +106,18 @@ def main(argv: list[str] | None = None) -> int:
         result = load_json_bytes(args.output.read_bytes())
         print(result["summary"]["result"])
         return 0 if passed else 1
+    elif args.command == "studio":
+        if not 1 <= args.port <= 65_535:
+            parser.error("--port must be between 1 and 65535")
+        engine = SafeLaneEngine(
+            policy_path=ROOT / "policy.yaml",
+            trusted_probes_path=ROOT / "demo/trusted-probes.yaml",
+            risk_finder=FakeRiskFinder(b"{}", status="unavailable"),
+        )
+        serve_studio(
+            StudioService(StudioWorkspace(args.workspace), engine),
+            port=args.port,
+        )
     return 0
 
 

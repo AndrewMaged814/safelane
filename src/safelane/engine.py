@@ -228,6 +228,8 @@ class SafeLaneEngine:
 
     def approve(self, current_assessment: dict[str, Any], human_event: dict[str, Any]) -> ResolvedArtifacts:
         validate_artifact("assessment-v2", current_assessment)
+        if current_assessment["policy_version"] != self._policy["policy_version"]:
+            raise ResolutionError("assessment policy is stale")
         if current_assessment["review"]["status"] != "unresolved":
             raise ResolutionError("assessment is already resolved")
         if _assessment_result_hash(current_assessment) != current_assessment["assessment_result_sha256"]:
@@ -256,6 +258,45 @@ class SafeLaneEngine:
         validate_artifact("assessment-v2", resolved)
         validate_artifact("decision-v3", decision)
         return ResolvedArtifacts(resolved, decision)
+
+    def validate_workspace_artifacts(
+        self,
+        assessment: dict[str, Any],
+        decision: dict[str, Any] | None,
+    ) -> None:
+        """Validate the exact assessment/authorization pair exposed by Studio."""
+        validate_artifact("assessment-v2", assessment)
+        if assessment["policy_version"] != self._policy["policy_version"]:
+            raise ResolutionError("assessment policy is stale")
+        if _assessment_result_hash(assessment) != assessment["assessment_result_sha256"]:
+            raise ResolutionError("assessment result hash does not match immutable content")
+
+        review = assessment["review"]
+        if review["status"] == "unresolved":
+            if decision is not None:
+                raise ResolutionError("unresolved assessment cannot have a decision")
+            return
+        if decision is None:
+            raise ResolutionError("resolved assessment is missing its decision")
+
+        validate_artifact("decision-v3", decision)
+        event = review["resolution"]
+        if (
+            event["type"] == "automatic"
+            and event["resolved_at"] != assessment["assessed_at"]
+        ):
+            raise ResolutionError("automatic resolution must use the assessment timestamp")
+        expected_event = {
+            "assessment_id": assessment["assessment_id"],
+            "head_sha": assessment["change"]["head_sha"],
+            "assessment_input_sha256": assessment["assessment_input_sha256"],
+            "assessment_result_sha256": assessment["assessment_result_sha256"],
+        }
+        if any(event[key] != value for key, value in expected_event.items()):
+            raise ResolutionError("resolution does not bind the current assessment")
+        expected_decision = self._decision(assessment, event)
+        if decision != expected_decision:
+            raise ResolutionError("decision does not exactly match the resolved assessment")
 
     def _read_git_evidence(self, worktree: Path, request: dict[str, Any]) -> _GitEvidence:
         def run(*args: str, text: bool = False) -> subprocess.CompletedProcess[Any]:

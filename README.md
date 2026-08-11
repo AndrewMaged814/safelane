@@ -19,7 +19,10 @@
 </p>
 
 > [!IMPORTANT]
-> SafeLane is a pre-alpha hackathon project. The risk policy, contracts, evaluation, and Studio interaction are specified; the runtime engine and end-to-end rollout integration are not implemented yet. Nothing in this repository is production-ready.
+> SafeLane is a pre-alpha hackathon project. The pre-final decision spine—contracts, deterministic
+> engine, bounded Ollama adapter, evaluation fixtures, and local Studio approval—is implemented. The
+> rollout compiler, cluster integration, and end-to-end release proof are not implemented yet. Nothing
+> in this repository is production-ready.
 >
 > The product narrative below predates the 2026-08-09 pre-final v3.2 scope and is scheduled for its
 > publishing rewrite before recording. It is not a build instruction. Follow [`CONTEXT.md`](CONTEXT.md),
@@ -79,8 +82,8 @@ Risk changes exposure and observation time. It does **not** weaken the service's
 
 SafeLane separates review evidence from the deployment handoff:
 
-- **`assessment.json` v1** contains the full SHA-bound assessment: evidence status, AI risk findings, incident connections, failure propensity, safety floors, explanations, and review state. Studio reads it.
-- **`decision.json` v2** is emitted only after the assessment resolves automatically or receives approval. It contains the final risk result and fully resolved rollout profile. The release workstream reads it.
+- **`assessment.json` v2** contains the full SHA-bound assessment: evidence status, verified AI findings, deterministic policy trace, safety floors, rollout options, and review state. Studio reads it.
+- **`decision.json` v3** is emitted only after the assessment resolves automatically or receives approval. It contains the final risk result and fully resolved rollout profile. The release workstream reads it.
 
 A new push invalidates the previous approval. The canonical field and lifecycle specification lives in [`contract.md`](contract.md).
 
@@ -102,17 +105,24 @@ See [`docs/risk-signals.md`](docs/risk-signals.md) for the complete Phase 1 poli
 
 ## SafeLane Studio
 
-Studio is a small local review and policy tool, not a deployment dashboard. It explains the latest assessment for each pull request and lets a user approve the suggested rollout or choose a more careful valid profile. Argo's own dashboard remains responsible for live rollout controls.
+Studio is a small local assessment-review tool, not a deployment dashboard or policy editor. It
+explains one fixed workspace assessment and records approval for a valid built-in rollout. Argo's own
+dashboard remains responsible for live rollout controls.
 
-The current Studio is an interaction prototype with in-memory state:
+Run the checked-in Risky demo from a disposable workspace:
 
 ```powershell
-python -m http.server 4173 --directory prototypes/safelane-studio
+$studioWorkspace = Join-Path $env:TEMP ("safelane-studio-" + [guid]::NewGuid().ToString("N"))
+New-Item -ItemType Directory -Path $studioWorkspace | Out-Null
+Copy-Item demo/studio-risky/assessment.json (Join-Path $studioWorkspace "assessment.json")
+uv run safelane studio --workspace $studioWorkspace
 ```
 
-Open <http://localhost:4173/?page=changes>.
+Open <http://127.0.0.1:4173>. Approval atomically writes the resolved assessment first and the exact
+`decision.json` authorization last. It does not deploy anything.
 
-The prototype never writes policy files and never deploys anything. Its behavior is specified in [`docs/safelane-studio.md`](docs/safelane-studio.md).
+The demo steps are also recorded in [`demo/studio-risky/README.md`](demo/studio-risky/README.md), and
+the interaction contract lives in [`docs/safelane-studio.md`](docs/safelane-studio.md).
 
 ## Evaluation boundary
 
@@ -132,7 +142,7 @@ These gates test conformance and demo readiness. They do not establish productio
 | Assessment and rollout contracts | complete |
 | Rollout profiles and Studio interaction | complete |
 | Golden evaluation specification | complete |
-| Runtime scorer and policy engine | not started |
+| Andrew-owned decision spine and Studio | complete |
 | Argo Rollouts integration | not integrated |
 | End-to-end demo | not started |
 
