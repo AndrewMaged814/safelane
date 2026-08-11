@@ -108,6 +108,7 @@ See [`docs/risk-signals.md`](docs/risk-signals.md) for the complete Phase 1 poli
 Studio is a small local assessment-review tool, not a deployment dashboard or policy editor. It
 explains one fixed workspace assessment and records approval for a valid built-in rollout. Argo's own
 dashboard remains responsible for live rollout controls.
+Studio approval records a local rollout decision; it does not start a release.
 
 Run the checked-in Risky demo from a disposable workspace:
 
