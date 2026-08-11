@@ -116,6 +116,10 @@ class GitHubPullRequestProvider:
             snapshot.number, snapshot.base_sha, snapshot.head_sha
         )
 
+    @property
+    def command_runner(self) -> CommandRunner:
+        return self._runner
+
     def pull_request_diff(self, number: int, base_sha: str, head_sha: str) -> bytes:
         del number
         return self._runner(
@@ -182,7 +186,6 @@ _ANALYSIS_SCHEMA: dict[str, Any] = {
                 "additionalProperties": False,
                 "required": [
                     "category",
-                    "severity",
                     "hypothesis_kind",
                     "verification_intent_kind",
                     "approval_question_kind",
@@ -196,7 +199,6 @@ _ANALYSIS_SCHEMA: dict[str, Any] = {
                             "operability",
                         ]
                     },
-                    "severity": {"enum": ["low", "medium", "high"]},
                     "hypothesis_kind": {
                         "const": "changed_behavior_may_violate_contract"
                     },
@@ -293,7 +295,7 @@ class OllamaPullRequestAnalyzer:
             "Review this exact pull-request diff for concrete release risks. Return only JSON "
             "matching the schema. Every finding must cite one or more tuples copied exactly from "
             "AUTHORIZED SPANS. Do not invent incidents, runtime facts, files, or line numbers. "
-            "Choose only a category and severity; SafeLane renders all explanatory prose. "
+            "Choose only a safety-case category; backend policy maps it to rollout care. "
             "Use an empty findings array when the diff does not support a concrete claim.\n\n"
             f"AUTHORIZED SPANS\n{canonical_json_bytes(authorized_spans).decode().rstrip()}\n\n"
             f"DIFF\n{raw_diff.decode('utf-8')}"
@@ -420,12 +422,19 @@ class PullRequestAssessmentEngine:
             tier = "guarded"
             reason = "This PR is outside the bounded Fast scope."
 
-        high = next((item for item in findings if item["severity"] == "high"), None)
-        medium = next((item for item in findings if item["severity"] == "medium"), None)
-        if high is not None:
-            tier, reason = "risky", high["title"]
-        elif medium is not None and self._TIER_RANK[tier] < self._TIER_RANK["guarded"]:
-            tier, reason = "guarded", medium["title"]
+        if "safety_case" in self.policy:
+            for finding in findings:
+                floor = self.policy["safety_case"]["minimum_tier"][finding["category"]]
+                finding["policy_floor"] = floor
+                if self._TIER_RANK[floor] > self._TIER_RANK[tier]:
+                    tier, reason = floor, finding["title"]
+        else:
+            high = next((item for item in findings if item["severity"] == "high"), None)
+            medium = next((item for item in findings if item["severity"] == "medium"), None)
+            if high is not None:
+                tier, reason = "risky", high["title"]
+            elif medium is not None and self._TIER_RANK[tier] < self._TIER_RANK["guarded"]:
+                tier, reason = "guarded", medium["title"]
         if ai_status != "complete" and tier == "safe":
             tier = "guarded"
             reason = "AI evidence is incomplete, so SafeLane will not infer Fast eligibility."
@@ -472,28 +481,32 @@ class PullRequestAssessmentEngine:
             "stages": copy.deepcopy(configured["stages"]),
         }
 
-    @staticmethod
     def _verified_finding(
-        candidate: Any, allowed: set[DiffSpan], index: int
+        self, candidate: Any, allowed: set[DiffSpan], index: int
     ) -> dict[str, Any] | None:
         if not isinstance(candidate, dict):
             return None
         required = {
             "category",
-            "severity",
             "hypothesis_kind",
             "verification_intent_kind",
             "approval_question_kind",
             "remediation_kind",
             "spans",
         }
+        repository_policy = "safety_case" in self.policy
+        if not repository_policy:
+            required.add("severity")
         if set(candidate) != required:
             return None
-        if candidate["severity"] not in {"low", "medium", "high"}:
+        if not repository_policy and candidate["severity"] not in {"low", "medium", "high"}:
             return None
-        if candidate["category"] not in {
-            "availability", "compatibility", "data", "security", "operability"
-        }:
+        accepted = (
+            set(self.policy["safety_case"]["accepted_categories"])
+            if repository_policy
+            else {"availability", "compatibility", "data", "security", "operability"}
+        )
+        if candidate["category"] not in accepted:
             return None
         expected_kinds = {
             "hypothesis_kind": "changed_behavior_may_violate_contract",
@@ -516,16 +529,18 @@ class PullRequestAssessmentEngine:
         if any(span not in allowed for span in cited):
             return None
         title, rationale = _FINDING_COPY[candidate["category"]]
-        return {
+        finding = {
             "id": f"finding-{index:03d}",
             "title": title,
             "category": candidate["category"],
-            "severity": candidate["severity"],
             "rationale": rationale,
             "spans": candidate["spans"],
             "safety_case": expected_kinds,
             "source_references_verified": True,
         }
+        if not repository_policy:
+            finding["severity"] = candidate["severity"]
+        return finding
 
 
 class PullRequestStudioService:

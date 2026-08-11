@@ -23,6 +23,12 @@ release_service:
   critical: true
   downstream_dependents: [checkout]
   path_prefixes: [src/payments/]
+  deployment:
+    namespace: payments
+    rollout_name: payments-api
+    container_name: api
+    workload_label: payments-api
+    analysis_template: payments-api-contract
 scope:
   small_max_files: {small_max_files}
   small_max_lines: 50
@@ -38,6 +44,14 @@ ai:
   seed: 42
   num_ctx: 8192
   num_predict: 768
+safety_case:
+  accepted_categories: [availability, compatibility, data, security, operability]
+  minimum_tier:
+    availability: risky
+    compatibility: guarded
+    data: risky
+    security: risky
+    operability: guarded
 rollout:
   traffic_router: none
   max_surge: 1
@@ -157,3 +171,33 @@ def test_refresh_reuses_exact_head_assessment_without_rerunning_ai(tmp_path: Pat
     assert second.assessment == first.assessment
     assert second.automatic_decision == first.automatic_decision
     assert analyzer.calls == 1
+
+
+def test_backend_policy_not_ai_maps_verified_category_to_tier(tmp_path: Path) -> None:
+    host = FakePullRequestHost()
+
+    class SafetyCaseAnalyzer:
+        def analyze(self, raw_diff: bytes, authorized_spans: list[dict]) -> dict:
+            return {
+                "status": "complete",
+                "findings": [{
+                    "category": "availability",
+                    "hypothesis_kind": "changed_behavior_may_violate_contract",
+                    "verification_intent_kind": "verify_changed_contract_during_rollout",
+                    "approval_question_kind": "confirm_contract_is_preserved",
+                    "remediation_kind": "preserve_previous_contract_or_add_compatibility",
+                    "spans": [authorized_spans[0]],
+                }],
+            }
+
+    outcome = ChangeSafety(
+        host=host,
+        state_dir=tmp_path,
+        analyzer_factory=lambda policy: SafetyCaseAnalyzer(),
+        clock=lambda: "2026-08-12T09:00:00Z",
+    ).assess(PullRequestRef("acme/payments", 42))
+
+    assert outcome.assessment["findings"][0]["category"] == "availability"
+    assert "severity" not in outcome.assessment["findings"][0]
+    assert outcome.assessment["risk"]["tier"] == "risky"
+    assert outcome.assessment["risk"]["minimum_profile"] == "Strict"

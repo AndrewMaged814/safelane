@@ -58,6 +58,9 @@ function shell(content, active = "changes", narrow = false) {
         <a class="nav-link ${active === "profiles" ? "active" : ""}" href="/profiles" data-nav>
           <span class="nav-icon">▤</span>Profiles
         </a>
+        <a class="nav-link ${active === "outcomes" ? "active" : ""}" href="/outcomes" data-nav>
+          <span class="nav-icon">◎</span>Outcomes
+        </a>
       </nav>
       <div class="repo-card"><span>Connected repository</span><strong>${escapeHtml(repository)}</strong><small>GitHub · open pull requests</small></div>
     </aside>
@@ -113,7 +116,7 @@ async function renderChanges() {
     return;
   }
   const status = state.filter === "needs_review" ? "unresolved" : "resolved";
-  const changes = state.dashboard.changes.filter((change) => change.review_status === status);
+  const changes = state.dashboard.changes.filter((change) => status === "unresolved" ? change.review_status === "unresolved" : change.review_status !== "unresolved");
   const needs = state.dashboard.counts.needs_review;
   const resolved = state.dashboard.counts.resolved;
   const title = status === "unresolved" ? "Changes needing review" : "Resolved changes";
@@ -204,7 +207,8 @@ function approvalPanel(assessment, token) {
   if (assessment.review.status !== "unresolved") {
     const automatic = assessment.review.resolution.type === "automatic";
     const rejected = assessment.review.status === "rejected";
-    return `<section class="card approval"><div class="${rejected ? "rejected" : "approved"}">${rejected ? "✕ Rejected by reviewer" : `✓ ${automatic ? "Resolved automatically" : "Approved by reviewer"}`}</div><div class="buttons"><a class="button" href="/changes" data-nav>Return to Changes</a></div></section>`;
+    const compiler = rejected ? "" : `<div class="release-compiler"><label for="release-image">Immutable release image</label><input id="release-image" placeholder="ghcr.io/acme/service@sha256:…"><button class="button primary" id="compile">Compile Argo rollout</button></div>`;
+    return `<section class="card approval"><div><div class="${rejected ? "rejected" : "approved"}">${rejected ? "✕ Rejected by reviewer" : `✓ ${automatic ? "Resolved automatically" : "Approved by reviewer"}`}</div>${compiler}<p id="approval-message" class="action-message"></p></div><div class="buttons"><a class="button" href="/changes" data-nav>Return to Changes</a></div></section>`;
   }
   const options = assessment.rollout_options.map((profile) => `<option value="${escapeHtml(profile.name)}">${escapeHtml(profile.name)}</option>`).join("");
   const only = assessment.rollout_options.length === 1 ? assessment.rollout_options[0].name : null;
@@ -212,7 +216,7 @@ function approvalPanel(assessment, token) {
 }
 
 function rolloutPreview(profile, evidence, confidence) {
-  return `<section class="card rollout" id="rollout-preview"><div class="card-head"><div><h2>${escapeHtml(profile.name)} rollout</h2><p class="copy">The built-in profile is selected by SafeLane's policy floor.</p></div><span class="version">${profile.replicas} replicas</span></div>${rolloutRail(profile)}<div class="health"><div><span>Files</span><strong>${evidence.files_changed}</strong></div><div><span>Changed lines</span><strong>${evidence.lines_changed}</strong></div><div><span>AI evidence</span><strong>${escapeHtml(evidence.ai_status)}</strong></div><div><span>Confidence</span><strong>${escapeHtml(confidence)}</strong></div></div></section>`;
+  return `<section class="card rollout" id="rollout-preview"><div class="card-head"><div><h2>${escapeHtml(profile.name)} rollout</h2><p class="copy">The repository-owned policy defines this profile; backend safety floors select it.</p></div><span class="version">${profile.replicas} replicas</span></div>${rolloutRail(profile)}<div class="health"><div><span>Files</span><strong>${evidence.files_changed}</strong></div><div><span>Changed lines</span><strong>${evidence.lines_changed}</strong></div><div><span>AI evidence</span><strong>${escapeHtml(evidence.ai_status)}</strong></div><div><span>Confidence</span><strong>${escapeHtml(confidence)}</strong></div></div></section>`;
 }
 
 async function renderAssessment(number) {
@@ -251,6 +255,29 @@ async function renderAssessment(number) {
   }
   document.querySelector("#approve")?.addEventListener("click", () => submitApproval(assessment, snapshot.approval_token));
   document.querySelector("#reject")?.addEventListener("click", () => submitResolution(assessment, snapshot.approval_token, "reject"));
+  document.querySelector("#compile")?.addEventListener("click", () => submitCompilation(assessment, snapshot.approval_token));
+}
+
+async function submitCompilation(assessment, token) {
+  const button = document.querySelector("#compile");
+  const message = document.querySelector("#approval-message");
+  button.disabled = true;
+  message.textContent = "Compiling SHA-bound rollout…";
+  try {
+    const release = await api(`/api/assessments/${assessment.change.number}/compile`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-SafeLane-CSRF": token },
+      body: JSON.stringify({ image: document.querySelector("#release-image").value.trim() }),
+    });
+    message.className = "action-message approved";
+    message.textContent = `Validated Argo rollout written to ${release.path}`;
+    toast("Argo rollout compiled and bound to this exact decision.");
+  } catch (error) {
+    message.className = "action-message error";
+    message.textContent = error.message;
+  } finally {
+    button.disabled = false;
+  }
 }
 
 async function submitApproval(assessment, token) {
@@ -306,7 +333,20 @@ async function renderProfiles() {
     const stages = profile.stages.map((stage) => stage.exposure_pods === profile.replicas ? "all" : stage.exposure_pods).join(" → ");
     return `<article class="profile-card" style="--profile:${color};--soft:${soft}"><div class="profile-icon">${initial}</div><h2>${profile.name}</h2><p>${descriptions[profile.name]}</p><code>${stages} · ${profile.stages.some((stage) => stage.analysis) ? "trusted analysis" : "readiness"}</code></article>`;
   }).join("");
-  app.innerHTML = shell(`<header class="page-head"><div><div class="eyebrow">Rollout policy</div><h1>Profiles</h1><p>Built-in profiles set the minimum rollout behavior. SafeLane selects them from each open PR assessment.</p></div><span class="version">POLICY ${escapeHtml(result.policy_version)}</span></header><section class="profiles">${cards}</section><section class="card policy-note"><strong>Profiles are read-only in this version.</strong><p>Approval records one of these server-owned rollout plans. It does not start a release.</p></section>`, "profiles");
+  app.innerHTML = shell(`<header class="page-head"><div><div class="eyebrow">Repository safety contract</div><h1>Profiles</h1><p>The policy at the PR base SHA defines the rollout behavior. SafeLane's backend selects the minimum required care.</p></div><span class="version">POLICY ${escapeHtml(result.policy_version)}</span></header><section class="profiles">${cards}</section><section class="card policy-note"><strong>Profiles are repository-owned and read-only here.</strong><p>A pull request may propose a future policy change, but it cannot weaken the policy assessing itself.</p></section>`, "profiles");
+}
+
+async function renderOutcomes() {
+  loading("Reading bound rollout receipts…");
+  let result;
+  try { result = await api("/api/outcomes"); }
+  catch (error) { showError(error.message); return; }
+  const tiers = ["safe", "guarded", "risky"];
+  const cards = tiers.map((tier) => {
+    const bucket = result.by_tier[tier] || { total: 0, succeeded: 0, failed_or_aborted: 0, incidents_within_24h: 0 };
+    return `<article class="profile-card"><div class="profile-icon">${tier[0].toUpperCase()}</div><h2>${tier}</h2><p>${bucket.total} bound rollout${bucket.total === 1 ? "" : "s"}</p><code>${bucket.succeeded} succeeded · ${bucket.failed_or_aborted} failed/aborted · ${bucket.incidents_within_24h} incidents</code></article>`;
+  }).join("");
+  app.innerHTML = shell(`<header class="page-head"><div><div class="eyebrow">Observed releases</div><h1>Rollout outcomes</h1><p>Exact-decision receipts only. These counts describe outcomes; they are not a model accuracy score.</p></div><span class="version">${result.total} RECEIPTS</span></header><section class="profiles">${cards}</section><section class="card policy-note"><strong>Calibration without fake certainty</strong><p>Use these receipts to inspect where cautious lanes fail or remain clean. A successful Strict rollout is not automatically a false positive.</p></section>`, "outcomes");
 }
 
 function openRepositoryDialog() {
@@ -354,6 +394,7 @@ async function renderRoute() {
   const detail = location.pathname.match(/^\/changes\/(\d+)$/);
   if (detail) return renderAssessment(Number(detail[1]));
   if (location.pathname === "/profiles") return renderProfiles();
+  if (location.pathname === "/outcomes") return renderOutcomes();
   return renderChanges();
 }
 

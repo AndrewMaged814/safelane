@@ -239,6 +239,13 @@ class _StudioHandler(BaseHTTPRequestHandler):
                 result["approval_token"] = self.studio_service.approval_token
                 self._json(200, result)
                 return
+            if path == "/api/outcomes" and isinstance(
+                self.studio_service, RepositoryStudioService
+            ):
+                result = self.studio_service.outcomes()
+                result["repository"] = self.studio_service.provider.repository
+                self._json(200, result)
+                return
             assessment_match = re.fullmatch(r"/api/assessments/(\d+)", path)
             if assessment_match:
                 try:
@@ -272,7 +279,7 @@ class _StudioHandler(BaseHTTPRequestHandler):
             ),
         }.get(path)
         if static is None and (
-            path in {"/changes", "/profiles"}
+            path in {"/changes", "/profiles", "/outcomes"}
             or re.fullmatch(r"/changes/\d+", path)
         ):
             static = (_STATIC / "index.html", "text/html; charset=utf-8")
@@ -291,9 +298,17 @@ class _StudioHandler(BaseHTTPRequestHandler):
         path = urlsplit(self.path).path
         pr_approval = re.fullmatch(r"/api/assessments/(\d+)/approve", path)
         pr_resolution = re.fullmatch(r"/api/assessments/(\d+)/resolve", path)
+        pr_compilation = re.fullmatch(r"/api/assessments/(\d+)/compile", path)
+        pr_outcome = re.fullmatch(r"/api/assessments/(\d+)/outcomes", path)
         repository_connection = path == "/api/connect"
         if isinstance(self.studio_service, (PullRequestStudioService, RepositoryStudioService)):
-            if pr_approval is None and pr_resolution is None and not repository_connection:
+            if (
+                pr_approval is None
+                and pr_resolution is None
+                and pr_compilation is None
+                and pr_outcome is None
+                and not repository_connection
+            ):
                 self._json(404, {"error": "not_found"})
                 return
         elif path != "/api/approve":
@@ -323,7 +338,21 @@ class _StudioHandler(BaseHTTPRequestHandler):
                     )
                     result["approval_token"] = self.studio_service.approval_token
                 else:
-                    if pr_resolution is not None and isinstance(
+                    if pr_outcome is not None and isinstance(
+                        self.studio_service, RepositoryStudioService
+                    ):
+                        result = self.studio_service.record_outcome(
+                            int(pr_outcome.group(1)), payload,
+                            approval_token=self.headers.get("X-SafeLane-CSRF"),
+                        )
+                    elif pr_compilation is not None and isinstance(
+                        self.studio_service, RepositoryStudioService
+                    ):
+                        result = self.studio_service.compile(
+                            int(pr_compilation.group(1)), payload,
+                            approval_token=self.headers.get("X-SafeLane-CSRF"),
+                        )
+                    elif pr_resolution is not None and isinstance(
                         self.studio_service, RepositoryStudioService
                     ):
                         result = self.studio_service.resolve(

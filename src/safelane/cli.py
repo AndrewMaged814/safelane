@@ -11,6 +11,7 @@ from .artifacts import canonical_json_bytes, load_json_bytes, load_yaml_bytes, v
 from .change_safety import ChangeSafety, PullRequestRef
 from .demo_repository import create_demo_repository
 from .evaluation import run_ollama_evaluation
+from .github_checks import GitHubCheckPublisher
 from .pr_studio import (
     GitHubPullRequestProvider,
     OllamaPullRequestAnalyzer,
@@ -22,7 +23,7 @@ from .studio import serve_studio
 
 ROOT = Path(__file__).resolve().parents[2]
 SCHEMAS = [
-    "repository-policy-v1",
+    "repository-policy-v1", "argo-rollout-v1", "rollout-outcome-v1",
     "assessment-request-v2", "policy-v2", "ai-response-v2", "assessment-v2", "decision-v3",
     "release-request-v1", "image-catalog-v1", "trusted-probes-v1", "probe-result-v1",
     "verification-receipt-v1",
@@ -188,6 +189,9 @@ def _build_workflow(provider, state_dir: Path, base_url: str) -> ChangeSafety:
         host=provider,
         state_dir=state_dir,
         analyzer_factory=analyzer_factory,
+        check_publisher=GitHubCheckPublisher(
+            command_runner=provider.command_runner
+        ),
     )
 
 

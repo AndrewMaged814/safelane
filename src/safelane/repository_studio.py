@@ -9,9 +9,11 @@ from .change_safety import (
     ChangeSafety,
     ChangeSafetyError,
     PullRequestRef,
+    ReleaseBinding,
     ResolutionCommand,
 )
 from .pr_studio import GitHubPullRequestProvider, PullRequestStudioError
+from .outcomes import OutcomeError, OutcomeLedger, OutcomeObservation, StageObservation
 
 
 class OpenPullRequestProvider(Protocol):
@@ -47,6 +49,7 @@ class RepositoryStudioService:
         self._provider_factory = provider_factory or GitHubPullRequestProvider
         self._open: dict[int, dict[str, Any]] = {}
         self.reviewer = reviewer
+        self._outcome_ledger = OutcomeLedger(state_dir=self.state_root)
 
     def dashboard(self) -> dict[str, Any]:
         rows: list[dict[str, Any]] = []
@@ -156,6 +159,83 @@ class RepositoryStudioService:
         }
         return self.resolve(number, translated, approval_token=approval_token)
 
+    def compile(
+        self,
+        number: int,
+        payload: Any,
+        *,
+        approval_token: str | None,
+    ) -> dict[str, Any]:
+        if approval_token is None or not secrets.compare_digest(
+            approval_token, self.approval_token
+        ):
+            raise PullRequestStudioError("invalid compilation token")
+        if (
+            not isinstance(payload, dict)
+            or set(payload) != {"image"}
+            or not isinstance(payload["image"], str)
+        ):
+            raise PullRequestStudioError("invalid release binding")
+        assessment = self.assessment(number)
+        try:
+            bundle = self.workflow.compile(ReleaseBinding(
+                handle=AssessmentHandle(
+                    assessment["assessment_id"],
+                    assessment["assessment_result_sha256"],
+                ),
+                image=payload["image"],
+            ))
+        except ChangeSafetyError as exc:
+            raise PullRequestStudioError(str(exc)) from exc
+        return {
+            "path": str(bundle.path),
+            "decision_sha256": bundle.decision_sha256,
+            "manifest": bundle.manifest,
+        }
+
+    def record_outcome(
+        self,
+        number: int,
+        payload: Any,
+        *,
+        approval_token: str | None,
+    ) -> dict[str, Any]:
+        if approval_token is None or not secrets.compare_digest(
+            approval_token, self.approval_token
+        ):
+            raise PullRequestStudioError("invalid outcome token")
+        required = {
+            "rollout_uid", "result", "stages", "incident_within_24h"
+        }
+        if not isinstance(payload, dict) or set(payload) != required:
+            raise PullRequestStudioError("invalid rollout outcome")
+        if not isinstance(payload["stages"], list):
+            raise PullRequestStudioError("invalid rollout stages")
+        try:
+            stages = tuple(StageObservation(
+                set_weight=stage["set_weight"],
+                outcome=stage["outcome"],
+                analysis_outcome=stage["analysis_outcome"],
+            ) for stage in payload["stages"] if isinstance(stage, dict))
+            if len(stages) != len(payload["stages"]):
+                raise ValueError("invalid stage")
+            return self._outcome_ledger.record(OutcomeObservation(
+                repository=self.provider.repository,
+                pull_request=number,
+                rollout_uid=payload["rollout_uid"],
+                result=payload["result"],
+                stages=stages,
+                incident_within_24h=payload["incident_within_24h"],
+            ))
+        except (KeyError, TypeError, ValueError, OutcomeError) as exc:
+            raise PullRequestStudioError(str(exc)) from exc
+
+    def outcomes(self) -> dict[str, Any]:
+        try:
+            return self._outcome_ledger.summary()
+        except OutcomeError as exc:
+            raise PullRequestStudioError(str(exc)) from exc
+
     def connect(
         self,
         payload: Any,
@@ -183,6 +263,7 @@ class RepositoryStudioService:
         self.workspace = self.state_root / provider.repository.replace("/", "--")
         self.workspace.mkdir(parents=True, exist_ok=True)
         self.workflow = self._workflow_factory(provider, self.state_root)
+        self._outcome_ledger = OutcomeLedger(state_dir=self.state_root)
         self._open = {}
         return self.dashboard()
 

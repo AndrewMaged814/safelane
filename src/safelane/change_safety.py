@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import copy
 import os
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Literal, Protocol
+
+import yaml
 
 from .artifacts import (
     ArtifactError,
@@ -98,12 +101,31 @@ class ResolutionOutcome:
     decision: dict[str, Any] | None
 
 
+@dataclass(frozen=True)
+class ReleaseBinding:
+    handle: AssessmentHandle
+    image: str
+
+
+@dataclass(frozen=True)
+class RolloutBundle:
+    manifest: dict[str, Any]
+    decision_sha256: str
+    path: Path
+
+
 class PullRequestHost(Protocol):
     def get_pull_request(self, change: PullRequestRef) -> PullRequestSnapshot: ...
 
     def read_file(self, repository: str, revision: str, path: str) -> bytes: ...
 
     def diff(self, snapshot: PullRequestSnapshot) -> bytes: ...
+
+
+class CheckPublisher(Protocol):
+    def publish(
+        self, assessment: dict[str, Any], *, check_run_id: int | None = None
+    ) -> Any: ...
 
 
 AnalyzerFactory = Callable[[dict[str, Any]], PullRequestAnalyzer]
@@ -121,11 +143,13 @@ class ChangeSafety:
         host: PullRequestHost,
         state_dir: Path,
         analyzer_factory: AnalyzerFactory,
+        check_publisher: CheckPublisher | None = None,
         clock: Clock | None = None,
     ) -> None:
         self._host = host
         self._state_dir = state_dir.resolve()
         self._analyzer_factory = analyzer_factory
+        self._check_publisher = check_publisher
         self._clock = clock or _utc_now
 
     def assess(self, change: PullRequestRef) -> AssessmentOutcome:
@@ -136,6 +160,7 @@ class ChangeSafety:
         diff = self._host.diff(snapshot)
         cached = self._cached(snapshot, policy_bytes, diff)
         if cached is not None:
+            self._publish_check(cached.assessment)
             return cached
         analyzer = self._analyzer_factory(copy.deepcopy(policy))
         evaluator = PullRequestAssessmentEngine(
@@ -166,6 +191,7 @@ class ChangeSafety:
             assessment["review"] = {"status": "approved", "resolution": resolution}
             decision = self._decision(assessment, "Fast", resolution)
         self._write(snapshot, assessment, decision)
+        self._publish_check(assessment)
         return AssessmentOutcome(
             assessment=assessment,
             automatic_decision=decision,
@@ -286,7 +312,110 @@ class ChangeSafety:
                 assessment_path.with_name("decision.json"),
                 canonical_json_bytes(decision),
             )
+        self._publish_check(resolved)
         return ResolutionOutcome(assessment=resolved, decision=decision)
+
+    def compile(self, binding: ReleaseBinding) -> RolloutBundle:
+        assessment_path = self._assessment_path(binding.handle)
+        try:
+            assessment = load_json_bytes(assessment_path.read_bytes())
+            decision = load_json_bytes(
+                assessment_path.with_name("decision.json").read_bytes()
+            )
+        except (OSError, ArtifactError) as exc:
+            raise AssessmentNotFound(binding.handle.assessment_id) from exc
+        if (
+            assessment.get("assessment_id") != binding.handle.assessment_id
+            or assessment.get("assessment_result_sha256")
+            != binding.handle.assessment_result_sha256
+            or _assessment_result_hash(assessment)
+            != binding.handle.assessment_result_sha256
+        ):
+            raise AssessmentStale("release binding does not match the assessment")
+        review = assessment.get("review", {})
+        resolution = review.get("resolution")
+        if review.get("status") != "approved" or not isinstance(resolution, dict):
+            raise AssessmentStale("release requires an approved assessment")
+        selected_profile = resolution.get("selected_profile")
+        expected_decision = self._decision(
+            assessment, selected_profile, resolution
+        )
+        if decision != expected_decision:
+            raise AssessmentStale("rollout decision does not match the approved assessment")
+        if not re.fullmatch(r".+@sha256:[0-9a-f]{64}", binding.image):
+            raise ChangeSafetyError("release image must use an immutable sha256 digest")
+
+        change = PullRequestRef(
+            assessment["change"]["repository"], assessment["change"]["number"]
+        )
+        current = self._host.get_pull_request(change)
+        if current.head_sha != assessment["change"]["head_sha"]:
+            raise AssessmentStale("pull request has a newer head revision")
+        policy_bytes = self._read_base_policy(current)
+        if sha256(policy_bytes) != assessment["policy"]["sha256"]:
+            raise AssessmentStale("base policy no longer matches the assessment")
+        policy = self._load_policy(policy_bytes, current.base_sha)
+
+        decision_hash = sha256(decision)
+        deployment = policy["release_service"]["deployment"]
+        labels = {"app.kubernetes.io/name": deployment["workload_label"]}
+        steps: list[dict[str, Any]] = []
+        for stage in decision["profile"]["stages"]:
+            steps.append({"setWeight": stage["set_weight"]})
+            if stage["analysis"]:
+                steps.append({
+                    "analysis": {
+                        "templates": [{
+                            "templateName": deployment["analysis_template"]
+                        }]
+                    }
+                })
+        manifest = {
+            "apiVersion": "argoproj.io/v1alpha1",
+            "kind": "Rollout",
+            "metadata": {
+                "name": deployment["rollout_name"],
+                "namespace": deployment["namespace"],
+                "annotations": {
+                    "safelane.dev/assessment-id": assessment["assessment_id"],
+                    "safelane.dev/assessment-result-sha256": assessment[
+                        "assessment_result_sha256"
+                    ],
+                    "safelane.dev/decision-sha256": decision_hash,
+                    "safelane.dev/head-sha": assessment["change"]["head_sha"],
+                    "safelane.dev/policy-sha256": assessment["policy"]["sha256"],
+                },
+            },
+            "spec": {
+                "replicas": policy["release_service"]["replicas"],
+                "selector": {"matchLabels": dict(labels)},
+                "template": {
+                    "metadata": {"labels": dict(labels)},
+                    "spec": {
+                        "containers": [{
+                            "name": deployment["container_name"],
+                            "image": binding.image,
+                        }]
+                    },
+                },
+                "strategy": {
+                    "canary": {
+                        "maxSurge": policy["rollout"]["max_surge"],
+                        "maxUnavailable": policy["rollout"]["max_unavailable"],
+                        "steps": steps,
+                    }
+                },
+            },
+        }
+        validate_artifact("argo-rollout-v1", manifest)
+        release_directory = assessment_path.parent / "release"
+        release_directory.mkdir(exist_ok=True)
+        path = release_directory / "rollout.yaml"
+        raw = yaml.safe_dump(
+            manifest, sort_keys=False, allow_unicode=True
+        ).encode("utf-8")
+        _atomic_write(path, raw)
+        return RolloutBundle(manifest=manifest, decision_sha256=decision_hash, path=path)
 
     def _read_base_policy(self, snapshot: PullRequestSnapshot) -> bytes:
         try:
@@ -411,6 +540,53 @@ class ChangeSafety:
 
     def _directory(self, repository: str, number: int) -> Path:
         return self._state_dir / repository.replace("/", "--") / f"pr-{number}"
+
+    def _publish_check(self, assessment: dict[str, Any]) -> None:
+        if self._check_publisher is None:
+            return
+        directory = self._directory(
+            assessment["change"]["repository"], assessment["change"]["number"]
+        )
+        projection_path = directory / "github-check.json"
+        key = {
+            "assessment_id": assessment["assessment_id"],
+            "assessment_result_sha256": assessment["assessment_result_sha256"],
+            "review_status": assessment["review"]["status"],
+            "head_sha": assessment["change"]["head_sha"],
+        }
+        existing: dict[str, Any] | None = None
+        try:
+            candidate = load_json_bytes(projection_path.read_bytes())
+            if isinstance(candidate, dict):
+                existing = candidate
+        except (OSError, ArtifactError):
+            pass
+        if existing is not None and existing.get("key") == key:
+            return
+        check_run_id = None
+        if (
+            existing is not None
+            and existing.get("key", {}).get("head_sha") == key["head_sha"]
+            and isinstance(existing.get("id"), int)
+        ):
+            check_run_id = existing["id"]
+        try:
+            publication = self._check_publisher.publish(
+                assessment, check_run_id=check_run_id
+            )
+            record = {
+                "status": "published",
+                "id": publication.id,
+                "url": publication.url,
+                "key": key,
+            }
+        except (OSError, RuntimeError, ValueError) as exc:
+            record = {
+                "status": "unavailable",
+                "error": str(exc),
+                "key": key,
+            }
+        _atomic_write(projection_path, canonical_json_bytes(record))
 
     @staticmethod
     def _validate_snapshot(

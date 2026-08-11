@@ -6,6 +6,12 @@ release_service:
   critical: false
   downstream_dependents: []
   path_prefixes: [src/safelane/]
+  deployment:
+    namespace: safelane-demo
+    rollout_name: safelane
+    container_name: safelane
+    workload_label: safelane
+    analysis_template: safelane-contract
 scope:
   small_max_files: 2
   small_max_lines: 50
@@ -21,6 +27,14 @@ ai:
   seed: 42
   num_ctx: 8192
   num_predict: 768
+safety_case:
+  accepted_categories: [availability, compatibility, data, security, operability]
+  minimum_tier:
+    availability: guarded
+    compatibility: guarded
+    data: risky
+    security: risky
+    operability: guarded
 rollout:
   traffic_router: none
   max_surge: 1

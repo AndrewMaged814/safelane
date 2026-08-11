@@ -60,3 +60,22 @@ def test_studio_projects_canonical_assessment_and_resolution(tmp_path: Path) -> 
     assert resolved["review"]["status"] == "approved"
     assert resolved["decision"]["schema_version"] == "rollout-decision-v1"
 
+    release = studio.compile(42, {
+        "image": "ghcr.io/acme/payments@sha256:" + "c" * 64,
+    }, approval_token=studio.approval_token)
+
+    assert release["manifest"]["kind"] == "Rollout"
+    assert release["path"].endswith("rollout.yaml")
+
+    receipt = studio.record_outcome(42, {
+        "rollout_uid": "rollout-uid-123",
+        "result": "succeeded",
+        "stages": [
+            {"set_weight": 40, "outcome": "succeeded", "analysis_outcome": "passed"},
+            {"set_weight": 100, "outcome": "succeeded", "analysis_outcome": "not_run"},
+        ],
+        "incident_within_24h": False,
+    }, approval_token=studio.approval_token)
+
+    assert receipt["profile"] == "Guarded"
+    assert studio.outcomes()["total"] == 1
