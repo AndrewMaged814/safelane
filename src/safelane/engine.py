@@ -56,6 +56,7 @@ class _GitEvidence:
     files: tuple[str, ...]
     lines_changed: int
     valid_utf8: bool
+    binary_patch: bool
 
 
 _TIER_RANK = {"safe": 0, "guarded": 1, "risky": 2}
@@ -95,11 +96,16 @@ class SafeLaneEngine:
         except (OSError, ArtifactError) as exc:
             raise AssessmentError(str(exc)) from exc
         evidence = self._read_git_evidence(worktree, request)
+        if evidence.binary_patch:
+            raise AssessmentError("binary patches are unsupported")
         recognized_prefixes = tuple(self._policy["release_service"]["path_prefixes"])
-        all_paths_recognized = bool(evidence.files) and all(
-            path.startswith(recognized_prefixes) for path in evidence.files
-        )
-        services = ["demo-api"] if all_paths_recognized else []
+        recognized_files = [
+            path for path in evidence.files if path.startswith(recognized_prefixes)
+        ]
+        if not recognized_files:
+            raise AssessmentError("change must affect exactly one mapped release service")
+        all_paths_recognized = len(recognized_files) == len(evidence.files)
+        services = ["demo-api"]
 
         attempt, ai_status, findings, safeguard = self._assess_ai(evidence, all_paths_recognized)
         baseline_tier = self._baseline(len(evidence.files), evidence.lines_changed, all_paths_recognized)
@@ -112,7 +118,7 @@ class SafeLaneEngine:
             floors.append("evidence.diff_invalid_utf8")
         if len(evidence.raw) > self._policy["ai"]["max_diff_bytes"]:
             floors.append("evidence.diff_over_budget")
-        if ai_status != "complete":
+        if ai_status in {"partial", "unavailable"}:
             floors.append("evidence.ai_incomplete")
         if findings and safeguard is None:
             floors.append("evidence.safeguard_invalid")
@@ -263,13 +269,16 @@ class SafeLaneEngine:
         def run(*args: str, text: bool = False) -> subprocess.CompletedProcess[Any]:
             environment = os.environ.copy()
             environment.update({"LC_ALL": "C", "LANG": "C", "GIT_PAGER": "cat"})
-            return subprocess.run(
+            completed = subprocess.run(
                 ["git", "-C", str(worktree), *args],
                 check=True,
                 capture_output=True,
                 text=text,
                 env=environment,
             )
+            if completed.stderr:
+                raise AssessmentError("Git command wrote to stderr")
+            return completed
 
         try:
             if run("status", "--porcelain", text=True).stdout:
@@ -287,14 +296,15 @@ class SafeLaneEngine:
         except subprocess.CalledProcessError as exc:
             raise AssessmentError("invalid Git worktree or revision range") from exc
         raw = result.stdout
+        files, binary_patch = _parse_diff_metadata(raw)
         try:
             text_diff = raw.decode("utf-8")
             valid_utf8 = True
-            spans, files, lines_changed = _parse_diff(text_diff)
+            spans, _, lines_changed = _parse_diff(text_diff)
         except UnicodeDecodeError:
             valid_utf8 = False
-            spans, files, lines_changed = frozenset(), tuple(), 0
-        return _GitEvidence(raw, spans, files, lines_changed, valid_utf8)
+            spans, lines_changed = frozenset(), 0
+        return _GitEvidence(raw, spans, files, lines_changed, valid_utf8, binary_patch)
 
     def _assess_ai(
         self, evidence: _GitEvidence, all_paths_recognized: bool
@@ -505,6 +515,28 @@ def _parse_diff(diff: str) -> tuple[frozenset[_DiffSpan], tuple[str, ...], int]:
             new_line += 1
             lines_changed += 1
     return frozenset(spans), tuple(files), lines_changed
+
+
+def _parse_diff_metadata(raw: bytes) -> tuple[tuple[str, ...], bool]:
+    files: list[str] = []
+    binary_patch = False
+    for line in raw.splitlines():
+        if line == b"GIT binary patch" or (
+            line.startswith(b"Binary files ") and line.endswith(b" differ")
+        ):
+            binary_patch = True
+        if not line.startswith(b"diff --git "):
+            continue
+        match = re.match(rb"^diff --git a/(.+) b/(.+)$", line)
+        if match and match.group(1) == match.group(2):
+            try:
+                path = match.group(2).decode("utf-8")
+            except UnicodeDecodeError:
+                path = f"<unrecognized-path-{len(files)}>"
+        else:
+            path = f"<unrecognized-path-{len(files)}>"
+        files.append(path)
+    return tuple(files), binary_patch
 
 
 def _assessment_result_hash(assessment: dict[str, Any]) -> str:
