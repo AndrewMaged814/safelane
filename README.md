@@ -146,6 +146,10 @@ The checked-in `build-and-attest.yml` workflow builds the exact PR head, labels 
 that full revision, pushes its immutable digest to GHCR, and signs GitHub artifact provenance. The
 base-owned policy pins that workflow as the only accepted signer.
 
+GitHub does not provide artifact attestations for user-owned private repositories. The workflow
+still publishes the immutable image there and reports that limitation, but SafeLane deliberately
+keeps release compilation blocked until the repository visibility or plan supports attestations.
+
 SafeLane still does not merge the PR or apply the manifest to a cluster.
 Use the repository chip in Studio's top bar to connect another local path, GitHub URL, or
 `owner/repository` without restarting the server.

@@ -61,6 +61,10 @@ PR head, base policy, trusted-probe catalog, signed image identity, and exact de
 writing a schema-valid Argo Rollout. Missing, stale, rejected, or mismatched authorization emits no
 manifest. A new assessment removes any compiled manifest for the older authorization.
 
+GitHub artifact attestations are unavailable for user-owned private repositories. In that case the
+checked-in build workflow reports the limitation, and image registration/rollout compilation remain
+fail-closed rather than silently treating an unsigned private image as trusted.
+
 When GitHub App credentials have Checks write permission, SafeLane creates an exact-head Check Run.
 Unresolved reviews are `action_required`, approvals are `success`, rejections are `failure`, and a
 new head cancels the earlier run before creating the replacement. Check delivery is a projection;

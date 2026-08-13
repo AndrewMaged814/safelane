@@ -1,4 +1,4 @@
-name: Build and attest SafeLane image
+name: Build SafeLane image
 
 on:
   pull_request:
@@ -41,8 +41,20 @@ jobs:
           labels: org.opencontainers.image.revision=${{ github.event.pull_request.head.sha }}
 
       - name: Attest image provenance
+        if: ${{ github.event.repository.visibility == 'public' }}
         uses: actions/attest-build-provenance@v2
         with:
           subject-name: ghcr.io/andrewmaged814/safelane
           subject-digest: ${{ steps.push.outputs.digest }}
           push-to-registry: true
+
+      - name: Explain private-repository provenance limit
+        if: ${{ github.event.repository.visibility != 'public' }}
+        env:
+          IMAGE_DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          echo "::notice title=Image built without GitHub attestation::GitHub does not offer artifact attestations to user-owned private repositories. SafeLane will keep release compilation blocked for this image."
+          echo "### SafeLane image" >> "$GITHUB_STEP_SUMMARY"
+          echo "Built immutable digest: \`$IMAGE_DIGEST\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "GitHub attestation is unavailable for this user-owned private repository, so SafeLane will fail closed if this image is submitted for release compilation." >> "$GITHUB_STEP_SUMMARY"
