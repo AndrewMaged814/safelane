@@ -1,6 +1,6 @@
 # Assess pull requests through a base-owned repository safety contract
 
-SafeLane will expose one deep `ChangeSafety` module with three lifecycle operations:
+SafeLane will expose one deep `SafeLaneEngine` module with three lifecycle operations:
 `assess(PullRequestRef)`, `resolve(ResolutionCommand)`, and
 `compile(ReleaseBinding)`. Callers identify a pull request or an earlier assessment; they do not
 supply diffs, policy paths, hashes, timestamps, tiers, or rollout stages.

@@ -5,7 +5,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from safelane.artifacts import load_json_bytes
-from safelane.change_safety import ChangeSafety, PullRequestRef, ResolutionCommand
+from safelane.engine import SafeLaneEngine, PullRequestRef, ResolutionCommand
 
 from .test_resolve import GuardedHost, NoFindingAnalyzer
 
@@ -35,7 +35,7 @@ class RecordingPublisher:
 
 def test_assessment_creates_and_resolution_updates_same_check_run(tmp_path: Path) -> None:
     publisher = RecordingPublisher()
-    safety = ChangeSafety(
+    safety = SafeLaneEngine(
         host=GuardedHost(),
         state_dir=tmp_path,
         analyzer_factory=lambda policy: NoFindingAnalyzer(),
@@ -62,7 +62,7 @@ def test_assessment_creates_and_resolution_updates_same_check_run(tmp_path: Path
 def test_new_head_invalidates_previous_check_before_creating_next(tmp_path: Path) -> None:
     publisher = RecordingPublisher()
     host = GuardedHost()
-    safety = ChangeSafety(
+    safety = SafeLaneEngine(
         host=host,
         state_dir=tmp_path,
         analyzer_factory=lambda policy: NoFindingAnalyzer(),
@@ -90,7 +90,7 @@ def test_failed_check_publication_retries_on_refresh(tmp_path: Path) -> None:
             return Publication(914, "https://github.com/acme/payments/runs/914")
 
     publisher = FlakyPublisher()
-    safety = ChangeSafety(
+    safety = SafeLaneEngine(
         host=GuardedHost(),
         state_dir=tmp_path,
         analyzer_factory=lambda policy: NoFindingAnalyzer(),
@@ -109,7 +109,7 @@ def test_failed_old_head_invalidation_is_retained_and_retried(
 ) -> None:
     publisher = RecordingPublisher()
     host = GuardedHost()
-    safety = ChangeSafety(
+    safety = SafeLaneEngine(
         host=host,
         state_dir=tmp_path,
         analyzer_factory=lambda policy: NoFindingAnalyzer(),
@@ -150,7 +150,7 @@ def test_failed_same_head_patch_retries_the_existing_check_not_a_duplicate(
             return Publication(913, "https://github.com/acme/payments/runs/913")
 
     publisher = FlakyPatchPublisher()
-    safety = ChangeSafety(
+    safety = SafeLaneEngine(
         host=GuardedHost(),
         state_dir=tmp_path,
         analyzer_factory=lambda policy: NoFindingAnalyzer(),

@@ -361,3 +361,102 @@ def test_repository_can_be_switched_through_the_studio_service(tmp_path: Path) -
     assert snapshot["repository"] == "acme/catalog"
     assert service.workspace == (tmp_path / "state" / "acme--catalog").resolve()
     assert snapshot["changes"][0]["title"] == "Remove retry ceiling"
+
+
+class _NoFindings:
+    def analyze(
+        self, raw_diff: bytes, authorized_spans: list[dict[str, Any]]
+    ) -> dict[str, Any]:
+        return {"status": "complete", "findings": []}
+
+
+def _engine() -> PullRequestAssessmentEngine:
+    return PullRequestAssessmentEngine(
+        policy_path=ROOT / "policy.yaml", analyzer=_NoFindings()
+    )
+
+
+def _docs_diff(count: int) -> bytes:
+    parts: list[str] = []
+    for index in range(count):
+        parts.append(
+            f"diff --git a/docs/note-{index}.md b/docs/note-{index}.md\n"
+            f"--- a/docs/note-{index}.md\n"
+            f"+++ b/docs/note-{index}.md\n"
+            "@@ -1 +1 @@\n"
+            f"-old copy {index}\n"
+            f"+clearer copy {index}\n"
+        )
+    return "".join(parts).encode()
+
+
+def test_large_documentation_only_diff_stays_fast() -> None:
+    result = _engine().assess("acme/payments", {"number": 42}, _docs_diff(10))
+
+    assert result["evidence"]["files_changed"] == 10
+    assert result["tier"] == "safe"
+    assert result["profile"] == "Fast"
+    assert "change_class.docs" in result["policy_rules"]
+    assert "change_class.safe_change" in result["policy_rules"]
+
+
+def test_large_formatting_only_diff_stays_fast() -> None:
+    parts: list[str] = []
+    for index in range(10):
+        parts.append(
+            f"diff --git a/src/demo_api/mod_{index}.py b/src/demo_api/mod_{index}.py\n"
+            f"--- a/src/demo_api/mod_{index}.py\n"
+            f"+++ b/src/demo_api/mod_{index}.py\n"
+            "@@ -1 +1 @@\n"
+            f"-x = {index}\n"
+            f"+x={index}\n"
+        )
+    result = _engine().assess("acme/payments", {"number": 42}, "".join(parts).encode())
+
+    assert result["tier"] == "safe"
+    assert result["profile"] == "Fast"
+    assert "change_class.formatting" in result["policy_rules"]
+
+
+def test_docs_on_a_sensitive_path_cannot_enter_fast() -> None:
+    documentation = b"""diff --git a/src/app/auth/README.md b/src/app/auth/README.md
+--- a/src/app/auth/README.md
++++ b/src/app/auth/README.md
+@@ -1 +1 @@
+-old copy
++clearer copy
+"""
+
+    result = _engine().assess("acme/payments", {"number": 42}, documentation)
+
+    assert result["tier"] == "guarded"
+    assert result["profile"] == "Guarded"
+    assert "change_class.docs" in result["policy_rules"]
+    assert "change_class.sensitive" in result["policy_rules"]
+
+
+def test_docs_mixed_with_application_code_is_not_a_safe_change() -> None:
+    parts = [
+        "diff --git a/README.md b/README.md\n"
+        "--- a/README.md\n"
+        "+++ b/README.md\n"
+        "@@ -1 +1 @@\n"
+        "-old copy\n"
+        "+clearer copy\n"
+    ]
+    for index in range(9):
+        parts.append(
+            f"diff --git a/src/demo_api/mod_{index}.py b/src/demo_api/mod_{index}.py\n"
+            f"--- a/src/demo_api/mod_{index}.py\n"
+            f"+++ b/src/demo_api/mod_{index}.py\n"
+            "@@ -1 +1 @@\n"
+            f"-return {index}\n"
+            f"+return {index + 1}\n"
+        )
+
+    result = _engine().assess("acme/payments", {"number": 42}, "".join(parts).encode())
+
+    assert result["evidence"]["files_changed"] == 10
+    assert "change_class.safe_change" not in result["policy_rules"]
+    assert result["tier"] == "risky"
+    assert result["profile"] == "Strict"

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from safelane.change_safety import PullRequestRef
+from safelane.engine import PullRequestRef
 from safelane.pr_studio import GitHubPullRequestProvider
 
 

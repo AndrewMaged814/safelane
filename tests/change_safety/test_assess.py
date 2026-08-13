@@ -5,9 +5,9 @@ from pathlib import Path
 
 import pytest
 
-from safelane.change_safety import (
+from safelane.engine import (
     ChangeMoved,
-    ChangeSafety,
+    SafeLaneEngine,
     ImageRegistration,
     PolicyInvalid,
     PullRequestRef,
@@ -21,7 +21,7 @@ HEAD_SHA = "b" * 40
 TEST_IMAGE = "ghcr.io/acme/payments@sha256:" + "c" * 64
 
 
-def register_test_image(safety: ChangeSafety, *, image: str = TEST_IMAGE) -> None:
+def register_test_image(safety: SafeLaneEngine, *, image: str = TEST_IMAGE) -> None:
     class Verified:
         def verify(
             self, *, repository, source_revision, image, signer_workflow
@@ -190,7 +190,7 @@ class NoFindingAnalyzer:
 
 def test_assessment_uses_repository_policy_from_base_sha(tmp_path: Path) -> None:
     host = FakePullRequestHost()
-    safety = ChangeSafety(
+    safety = SafeLaneEngine(
         host=host,
         state_dir=tmp_path,
         analyzer_factory=lambda policy: NoFindingAnalyzer(),
@@ -219,7 +219,7 @@ def test_assessment_uses_repository_policy_from_base_sha(tmp_path: Path) -> None
 def test_refresh_reuses_exact_head_assessment_without_rerunning_ai(tmp_path: Path) -> None:
     host = FakePullRequestHost()
     analyzer = NoFindingAnalyzer()
-    safety = ChangeSafety(
+    safety = SafeLaneEngine(
         host=host,
         state_dir=tmp_path,
         analyzer_factory=lambda policy: analyzer,
@@ -251,7 +251,7 @@ def test_backend_policy_not_ai_maps_verified_category_to_tier(tmp_path: Path) ->
                 }],
             }
 
-    outcome = ChangeSafety(
+    outcome = SafeLaneEngine(
         host=host,
         state_dir=tmp_path,
         analyzer_factory=lambda policy: SafetyCaseAnalyzer(),
@@ -277,7 +277,7 @@ def test_assessment_does_not_publish_when_base_moves_during_analysis(
             host.snapshot = replace(host.snapshot, base_sha="d" * 40)
             return result
 
-    safety = ChangeSafety(
+    safety = SafeLaneEngine(
         host=host,
         state_dir=tmp_path,
         analyzer_factory=lambda policy: MovingAnalyzer(),
@@ -306,7 +306,7 @@ def test_non_fast_profiles_require_a_pre_terminal_analysis_checkpoint(
     host.files[(BASE_SHA, ".safelane/policy.yaml")] = weakened.encode()
 
     with pytest.raises(PolicyInvalid, match="analysis checkpoint"):
-        ChangeSafety(
+        SafeLaneEngine(
             host=host,
             state_dir=tmp_path,
             analyzer_factory=lambda policy: NoFindingAnalyzer(),

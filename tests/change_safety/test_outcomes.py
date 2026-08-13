@@ -13,8 +13,8 @@ from safelane.artifacts import (
     sha256,
     validate_artifact,
 )
-from safelane.change_safety import (
-    ChangeSafety,
+from safelane.engine import (
+    SafeLaneEngine,
     PullRequestRef,
     ReleaseBinding,
     ResolutionCommand,
@@ -31,7 +31,7 @@ from .test_resolve import GuardedHost, NoFindingAnalyzer
 
 
 def test_rollout_outcome_receipt_binds_release_and_feeds_calibration(tmp_path: Path) -> None:
-    safety = ChangeSafety(
+    safety = SafeLaneEngine(
         host=GuardedHost(),
         state_dir=tmp_path,
         analyzer_factory=lambda policy: NoFindingAnalyzer(),
@@ -109,7 +109,7 @@ def test_rollout_outcome_receipt_binds_release_and_feeds_calibration(tmp_path: P
 def test_outcome_rejects_assessment_content_changed_after_compilation(
     tmp_path: Path,
 ) -> None:
-    safety = ChangeSafety(
+    safety = SafeLaneEngine(
         host=GuardedHost(),
         state_dir=tmp_path,
         analyzer_factory=lambda policy: NoFindingAnalyzer(),
@@ -152,7 +152,7 @@ def test_outcome_rejects_assessment_content_changed_after_compilation(
 def test_outcome_rejects_decision_not_exactly_derived_from_assessment(
     tmp_path: Path,
 ) -> None:
-    safety = ChangeSafety(
+    safety = SafeLaneEngine(
         host=GuardedHost(),
         state_dir=tmp_path,
         analyzer_factory=lambda policy: NoFindingAnalyzer(),
@@ -204,7 +204,7 @@ def test_outcome_rejects_decision_not_exactly_derived_from_assessment(
 def test_outcome_rejects_success_that_contains_failed_or_skipped_stages(
     tmp_path: Path,
 ) -> None:
-    safety = ChangeSafety(
+    safety = SafeLaneEngine(
         host=GuardedHost(),
         state_dir=tmp_path,
         analyzer_factory=lambda policy: NoFindingAnalyzer(),

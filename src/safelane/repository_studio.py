@@ -4,10 +4,10 @@ import secrets
 from pathlib import Path
 from typing import Any, Callable, Protocol
 
-from .change_safety import (
+from .engine import (
     AssessmentHandle,
-    ChangeSafety,
-    ChangeSafetyError,
+    SafeLaneEngine,
+    SafeLaneEngineError,
     PullRequestRef,
     ReleaseBinding,
     RepositoryNotConfigured,
@@ -23,17 +23,17 @@ class OpenPullRequestProvider(Protocol):
     def list_open_pull_requests(self) -> list[dict[str, Any]]: ...
 
 
-WorkflowFactory = Callable[[OpenPullRequestProvider, Path], ChangeSafety]
+WorkflowFactory = Callable[[OpenPullRequestProvider, Path], SafeLaneEngine]
 
 
 class RepositoryStudioService:
-    """Studio projection over the canonical ChangeSafety workflow."""
+    """Studio projection over the canonical SafeLaneEngine workflow."""
 
     def __init__(
         self,
         *,
         provider: OpenPullRequestProvider,
-        workflow: ChangeSafety,
+        workflow: SafeLaneEngine,
         state_root: Path,
         workflow_factory: WorkflowFactory | None = None,
         provider_factory: Callable[[str], OpenPullRequestProvider] | None = None,
@@ -77,7 +77,7 @@ class RepositoryStudioService:
                     PullRequestRef(self.provider.repository, pull_request["number"])
                 )
                 rows.append(row)
-        except (ChangeSafetyError, OSError, KeyError, TypeError) as exc:
+        except (SafeLaneEngineError, OSError, KeyError, TypeError) as exc:
             raise PullRequestStudioError(str(exc)) from exc
         self._open = current
         rows.sort(key=lambda row: (
@@ -156,7 +156,7 @@ class RepositoryStudioService:
                 selected_profile=payload["selected_profile"],
                 actor=payload["actor"],
             ))
-        except (ChangeSafetyError, TypeError, ValueError) as exc:
+        except (SafeLaneEngineError, TypeError, ValueError) as exc:
             raise PullRequestStudioError(str(exc)) from exc
         self._open[number] = outcome.assessment
         return {**outcome.assessment, "decision": outcome.decision}
@@ -205,7 +205,7 @@ class RepositoryStudioService:
                 ),
                 image=payload["image"],
             ))
-        except ChangeSafetyError as exc:
+        except SafeLaneEngineError as exc:
             raise PullRequestStudioError(str(exc)) from exc
         return {
             "path": str(bundle.path),

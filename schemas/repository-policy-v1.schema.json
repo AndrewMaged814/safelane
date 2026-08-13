@@ -25,6 +25,7 @@
     "image_provenance": {"$ref": "#/$defs/image_provenance"},
     "trusted_probe_catalog": {"$ref": "#/$defs/trusted_probe_catalog"},
     "rollout": {"$ref": "#/$defs/rollout"},
+    "change_classes": {"$ref": "#/$defs/change_classes"},
     "profiles": {
       "type": "object",
       "additionalProperties": false,
@@ -167,6 +168,17 @@
         "traffic_router": {"enum": ["none"]},
         "max_surge": {"type": "integer", "minimum": 0},
         "max_unavailable": {"type": "integer", "minimum": 0}
+      }
+    },
+    "change_classes": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sensitive_path_prefixes": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1, "maxLength": 512}
+        }
       }
     },
     "profile": {

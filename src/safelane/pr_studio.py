@@ -24,6 +24,13 @@ from .artifacts import (
     load_yaml_bytes,
     sha256,
 )
+from .change_classes import (
+    classify_change,
+    is_docs,
+    is_image,
+    is_test,
+    sensitive_path_prefixes_from_policy,
+)
 from .diff_evidence import DiffSpan, parse_diff, parse_diff_metadata
 
 
@@ -79,7 +86,7 @@ class GitHubPullRequestProvider:
         return pull_requests
 
     def get_pull_request(self, change: Any) -> Any:
-        from .change_safety import PullRequestSnapshot
+        from .engine import PullRequestSnapshot
 
         if change.repository != self.repository:
             raise PullRequestStudioError("pull request belongs to another repository")
@@ -263,8 +270,6 @@ _FINDING_COPY = {
     ),
 }
 
-_DOCUMENTATION_PREFIXES = ("docs/",)
-
 
 class OllamaPullRequestAnalyzer:
     """One bounded local-model call whose source citations are verified by normal code."""
@@ -415,8 +420,18 @@ class PullRequestAssessmentEngine:
         if invalid_finding and ai_status == "complete":
             ai_status = "partial"
 
+        change_class = classify_change(
+            files,
+            spans,
+            sensitive_path_prefixes=sensitive_path_prefixes_from_policy(self.policy),
+        )
         scope = self.policy["scope"]
-        if len(files) >= scope["large_min_files"] or lines_changed >= scope["large_min_lines"]:
+        if change_class.safe_change:
+            tier = "safe"
+            reason = (
+                "This PR only changes documentation, tests, images, or formatting."
+            )
+        elif len(files) >= scope["large_min_files"] or lines_changed >= scope["large_min_lines"]:
             tier = "risky"
             reason = "This PR crosses the large-change safety threshold."
         elif (
@@ -444,10 +459,16 @@ class PullRequestAssessmentEngine:
                 tier, reason = "risky", high["title"]
             elif medium is not None and self._TIER_RANK[tier] < self._TIER_RANK["guarded"]:
                 tier, reason = "guarded", medium["title"]
+        if (
+            change_class.sensitive_paths
+            and self._TIER_RANK[tier] < self._TIER_RANK["guarded"]
+        ):
+            tier = "guarded"
+            reason = "This PR touches a sensitive path."
         if ai_status != "complete" and tier == "safe":
             tier = "guarded"
             reason = "AI evidence is incomplete, so SafeLane will not infer Fast eligibility."
-        if binary_patch and tier == "safe":
+        if binary_patch and tier == "safe" and not change_class.safe_change:
             tier = "guarded"
             reason = "Binary changes require a guarded rollout."
 
@@ -467,6 +488,7 @@ class PullRequestAssessmentEngine:
             policy_rules.append("evidence.path_unrecognized")
         if binary_patch:
             policy_rules.append("evidence.binary_patch")
+        policy_rules.extend(change_class.policy_rule_ids)
         return {
             "tier": tier,
             "profile": profile,
@@ -976,9 +998,7 @@ def _assessment_input_hash(assessment: dict[str, Any]) -> str:
 def _recognized_path(path: str, service_prefixes: tuple[str, ...]) -> bool:
     if path.startswith(service_prefixes):
         return True
-    return path == "README.md" or (
-        path.endswith(".md") and path.startswith(_DOCUMENTATION_PREFIXES)
-    )
+    return is_docs(path) or is_test(path) or is_image(path)
 
 
 def _span_dict(span: DiffSpan) -> dict[str, Any]:

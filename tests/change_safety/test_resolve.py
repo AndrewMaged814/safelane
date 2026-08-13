@@ -6,10 +6,10 @@ from pathlib import Path
 import pytest
 import safelane.change_safety as change_safety_module
 
-from safelane.change_safety import (
+from safelane.engine import (
     AssessmentHandle,
     AssessmentStale,
-    ChangeSafety,
+    SafeLaneEngine,
     PullRequestRef,
     ReleaseBinding,
     ResolutionCommand,
@@ -51,7 +51,7 @@ new file mode 100644
 
 def test_approval_binds_decision_to_current_assessment_and_actor(tmp_path: Path) -> None:
     host = GuardedHost()
-    safety = ChangeSafety(
+    safety = SafeLaneEngine(
         host=host,
         state_dir=tmp_path,
         analyzer_factory=lambda policy: NoFindingAnalyzer(),
@@ -86,7 +86,7 @@ def test_approval_binds_decision_to_current_assessment_and_actor(tmp_path: Path)
 
 def test_rejection_records_review_but_emits_no_rollout_decision(tmp_path: Path) -> None:
     host = GuardedHost()
-    safety = ChangeSafety(
+    safety = SafeLaneEngine(
         host=host,
         state_dir=tmp_path,
         analyzer_factory=lambda policy: NoFindingAnalyzer(),
@@ -114,7 +114,7 @@ def test_rejection_records_review_but_emits_no_rollout_decision(tmp_path: Path) 
 
 def test_new_head_removes_prior_authorizing_decision(tmp_path: Path) -> None:
     host = GuardedHost()
-    safety = ChangeSafety(
+    safety = SafeLaneEngine(
         host=host,
         state_dir=tmp_path,
         analyzer_factory=lambda policy: NoFindingAnalyzer(),
@@ -153,7 +153,7 @@ def test_base_revision_move_invalidates_review_even_when_policy_bytes_match(
     tmp_path: Path,
 ) -> None:
     host = GuardedHost()
-    safety = ChangeSafety(
+    safety = SafeLaneEngine(
         host=host,
         state_dir=tmp_path,
         analyzer_factory=lambda policy: NoFindingAnalyzer(),
@@ -181,7 +181,7 @@ def test_base_revision_move_invalidates_review_even_when_policy_bytes_match(
 def test_interrupted_approval_never_leaves_a_compilable_authorization(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    safety = ChangeSafety(
+    safety = SafeLaneEngine(
         host=GuardedHost(),
         state_dir=tmp_path,
         analyzer_factory=lambda policy: NoFindingAnalyzer(),

@@ -1,3 +1,5 @@
+"""Implementation of the canonical SafeLaneEngine. Import from safelane.engine."""
+
 from __future__ import annotations
 
 import copy
@@ -28,35 +30,35 @@ from .pr_studio import PullRequestAnalyzer, PullRequestAssessmentEngine
 from .state_io import atomic_write as _atomic_write, state_lock
 
 
-class ChangeSafetyError(RuntimeError):
+class SafeLaneEngineError(RuntimeError):
     """A pull request could not be safely assessed or resolved."""
 
 
-class RepositoryNotConfigured(ChangeSafetyError):
+class RepositoryNotConfigured(SafeLaneEngineError):
     pass
 
 
-class PolicyInvalid(ChangeSafetyError):
+class PolicyInvalid(SafeLaneEngineError):
     pass
 
 
-class ChangeMoved(ChangeSafetyError):
+class ChangeMoved(SafeLaneEngineError):
     pass
 
 
-class AssessmentNotFound(ChangeSafetyError):
+class AssessmentNotFound(SafeLaneEngineError):
     pass
 
 
-class AssessmentStale(ChangeSafetyError):
+class AssessmentStale(SafeLaneEngineError):
     pass
 
 
-class AlreadyResolved(ChangeSafetyError):
+class AlreadyResolved(SafeLaneEngineError):
     pass
 
 
-class ProfileNotAllowed(ChangeSafetyError):
+class ProfileNotAllowed(SafeLaneEngineError):
     pass
 
 
@@ -162,8 +164,8 @@ AnalyzerFactory = Callable[[dict[str, Any]], PullRequestAnalyzer]
 Clock = Callable[[], str]
 
 
-class ChangeSafety:
-    """Deep module for exact-revision pull-request safety decisions."""
+class SafeLaneEngine:
+    """Canonical SafeLane engine: assess, resolve, and compile one GitHub pull request."""
 
     POLICY_PATH = ".safelane/policy.yaml"
 
@@ -359,7 +361,7 @@ class ChangeSafety:
         if assessment["review"]["status"] != "unresolved":
             raise AlreadyResolved(command.handle.assessment_id)
         if not command.actor.strip():
-            raise ChangeSafetyError("resolution actor is required")
+            raise SafeLaneEngineError("resolution actor is required")
         if command.action == "decide_later":
             return ResolutionOutcome(assessment=assessment, decision=None)
 
@@ -465,7 +467,7 @@ class ChangeSafety:
         if decision != expected_decision:
             raise AssessmentStale("rollout decision does not match the approved assessment")
         if not re.fullmatch(r".+@sha256:[0-9a-f]{64}", binding.image):
-            raise ChangeSafetyError("release image must use an immutable sha256 digest")
+            raise SafeLaneEngineError("release image must use an immutable sha256 digest")
 
         change = PullRequestRef(
             assessment["change"]["repository"], assessment["change"]["number"]
@@ -523,13 +525,13 @@ class ChangeSafety:
 
     def register_image(self, registration: ImageRegistration) -> Path:
         if not re.fullmatch(r"[^/]+/[^/]+", registration.repository):
-            raise ChangeSafetyError("registered image repository is invalid")
+            raise SafeLaneEngineError("registered image repository is invalid")
         if registration.pull_request < 1:
-            raise ChangeSafetyError("registered image pull request is invalid")
+            raise SafeLaneEngineError("registered image pull request is invalid")
         if not re.fullmatch(r".+@sha256:[0-9a-f]{64}", registration.image):
-            raise ChangeSafetyError("registered image must use an immutable sha256 digest")
+            raise SafeLaneEngineError("registered image must use an immutable sha256 digest")
         if self._image_provenance_verifier is None:
-            raise ChangeSafetyError(
+            raise SafeLaneEngineError(
                 "image registration requires a configured provenance verifier"
             )
         change = PullRequestRef(registration.repository, registration.pull_request)
@@ -538,7 +540,7 @@ class ChangeSafety:
         policy_bytes = self._read_base_policy(snapshot)
         policy = self._load_policy(policy_bytes, snapshot.base_sha)
         if registration.service != policy["release_service"]["name"]:
-            raise ChangeSafetyError("image service does not match base-owned policy")
+            raise SafeLaneEngineError("image service does not match base-owned policy")
         signer_workflow = policy["image_provenance"]["signer_workflow"]
         try:
             provenance = self._image_provenance_verifier.verify(
@@ -548,9 +550,9 @@ class ChangeSafety:
                 signer_workflow=signer_workflow,
             )
         except ImageProvenanceError as exc:
-            raise ChangeSafetyError(str(exc)) from exc
+            raise SafeLaneEngineError(str(exc)) from exc
         if provenance.source_revision != snapshot.head_sha:
-            raise ChangeSafetyError("verified provenance revision does not match")
+            raise SafeLaneEngineError("verified provenance revision does not match")
         current = self._host.get_pull_request(change)
         if current.base_sha != snapshot.base_sha or current.head_sha != snapshot.head_sha:
             raise ChangeMoved("pull request base or head moved during image verification")
@@ -612,7 +614,7 @@ class ChangeSafety:
         unsigned = copy.deepcopy(catalog)
         signature = unsigned.pop("authorization_signature")
         if not signature_matches(unsigned, signature, self._authorization_key):
-            raise ChangeSafetyError("image catalog authorization signature is invalid")
+            raise SafeLaneEngineError("image catalog authorization signature is invalid")
         identities: set[tuple[str, str, str]] = set()
         for item in catalog["application_images"]:
             identity = (item["repository"], item["service"], item["source_revision"])
@@ -621,7 +623,7 @@ class ChangeSafety:
                 or item["source_revision"] != item["oci_revision"]
                 or item["source_revision"] != item["provenance"]["source_revision"]
             ):
-                raise ChangeSafetyError("image catalog provenance is invalid")
+                raise SafeLaneEngineError("image catalog provenance is invalid")
             identities.add(identity)
 
     def _validate_release_image(
@@ -631,8 +633,8 @@ class ChangeSafety:
         try:
             catalog = load_json_bytes(path.read_bytes())
             self._validate_image_catalog(catalog)
-        except (OSError, ArtifactError, ChangeSafetyError) as exc:
-            raise ChangeSafetyError(
+        except (OSError, ArtifactError, SafeLaneEngineError) as exc:
+            raise SafeLaneEngineError(
                 "a signed repository image catalog is required before compilation"
             ) from exc
         expected = {
@@ -652,7 +654,7 @@ class ChangeSafety:
             == assessment["image_provenance"]["signer_workflow"]
         ]
         if len(matching) != 1:
-            raise ChangeSafetyError(
+            raise SafeLaneEngineError(
                 "release image is not catalog-bound to this service and PR head"
             )
         return catalog
@@ -887,9 +889,9 @@ class ChangeSafety:
         change: PullRequestRef, snapshot: PullRequestSnapshot
     ) -> None:
         if snapshot.repository != change.repository or snapshot.number != change.number:
-            raise ChangeSafetyError("pull-request host returned the wrong change")
+            raise SafeLaneEngineError("pull-request host returned the wrong change")
         if len(snapshot.base_sha) != 40 or len(snapshot.head_sha) != 40:
-            raise ChangeSafetyError("pull-request host returned an invalid revision")
+            raise SafeLaneEngineError("pull-request host returned an invalid revision")
 
 
 def _snapshot_dict(snapshot: PullRequestSnapshot) -> dict[str, Any]:

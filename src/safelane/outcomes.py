@@ -18,7 +18,7 @@ from .artifacts import (
 from .authorization import _process_authorization_key
 from .authorization import signature_matches
 from .state_io import atomic_write as _atomic_write, state_lock
-from .change_safety import argo_rollout_for_decision, rollout_decision_for_assessment
+from .engine import argo_rollout_for_decision, rollout_decision_for_assessment
 
 
 class OutcomeError(RuntimeError):

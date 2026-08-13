@@ -4,7 +4,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from safelane.artifacts import canonical_json_bytes
-from safelane.change_safety import ChangeSafety
+from safelane.engine import SafeLaneEngine
 from safelane.cli import _repository_state_root
 from safelane.repository_studio import RepositoryStudioService
 
@@ -70,7 +70,7 @@ def test_unconfigured_legacy_pr_does_not_hide_configured_pr(
     tmp_path: Path,
 ) -> None:
     host = MixedContractPullRequests()
-    workflow = ChangeSafety(
+    workflow = SafeLaneEngine(
         host=host,
         state_dir=tmp_path,
         analyzer_factory=lambda policy: NoFindingAnalyzer(),
@@ -101,7 +101,7 @@ def test_cli_assessment_is_the_same_bytes_studio_reads_by_default(
     host = OpenPullRequests()
     host.local_path = tmp_path
     state_root = _repository_state_root(host, None)
-    cli_workflow = ChangeSafety(
+    cli_workflow = SafeLaneEngine(
         host=host,
         state_dir=state_root,
         analyzer_factory=lambda policy: NoFindingAnalyzer(),
@@ -114,7 +114,7 @@ def test_cli_assessment_is_the_same_bytes_studio_reads_by_default(
     def unexpected_analyzer(policy):
         raise AssertionError("Studio should reuse the CLI assessment")
 
-    studio_workflow = ChangeSafety(
+    studio_workflow = SafeLaneEngine(
         host=host,
         state_dir=state_root,
         analyzer_factory=unexpected_analyzer,
@@ -134,7 +134,7 @@ def test_cli_assessment_is_the_same_bytes_studio_reads_by_default(
 
 def test_studio_projects_canonical_assessment_and_resolution(tmp_path: Path) -> None:
     host = OpenPullRequests()
-    workflow = ChangeSafety(
+    workflow = SafeLaneEngine(
         host=host,
         state_dir=tmp_path,
         analyzer_factory=lambda policy: NoFindingAnalyzer(),

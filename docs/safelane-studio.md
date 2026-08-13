@@ -14,7 +14,7 @@ or an `owner/repository` slug. Changes lists only open pull requests and never s
 working-tree diff.
 
 Every connected repository must own `.safelane/policy.yaml` and its referenced trusted-probe
-catalog. `ChangeSafety` reads both files from the exact PR base SHA, fetches the exact base/head diff,
+catalog. `SafeLaneEngine` reads both files from the exact PR base SHA, fetches the exact base/head diff,
 and rechecks the head before publishing. A PR may change its contract for future assessments but
 cannot weaken the contract assessing itself.
 

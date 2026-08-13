@@ -5,10 +5,10 @@ from pathlib import Path
 import pytest
 
 from safelane.artifacts import canonical_json_bytes, load_json_bytes, validate_artifact
-from safelane.change_safety import (
+from safelane.engine import (
     AssessmentStale,
-    ChangeSafetyError,
-    ChangeSafety,
+    SafeLaneEngineError,
+    SafeLaneEngine,
     PullRequestRef,
     ReleaseBinding,
     ResolutionCommand,
@@ -21,7 +21,7 @@ from .test_resolve import GuardedHost, NoFindingAnalyzer
 
 def test_approved_decision_compiles_sha_bound_argo_rollout(tmp_path: Path) -> None:
     host = GuardedHost()
-    safety = ChangeSafety(
+    safety = SafeLaneEngine(
         host=host,
         state_dir=tmp_path,
         analyzer_factory=lambda policy: NoFindingAnalyzer(),
@@ -65,7 +65,7 @@ def test_approved_decision_compiles_sha_bound_argo_rollout(tmp_path: Path) -> No
 def test_compile_rejects_digest_not_catalog_bound_to_the_assessed_head(
     tmp_path: Path,
 ) -> None:
-    safety = ChangeSafety(
+    safety = SafeLaneEngine(
         host=GuardedHost(),
         state_dir=tmp_path,
         analyzer_factory=lambda policy: NoFindingAnalyzer(),
@@ -83,7 +83,7 @@ def test_compile_rejects_digest_not_catalog_bound_to_the_assessed_head(
     ))
     register_test_image(safety)
 
-    with pytest.raises(ChangeSafetyError, match="not catalog-bound"):
+    with pytest.raises(SafeLaneEngineError, match="not catalog-bound"):
         safety.compile(ReleaseBinding(
             handle=assessed.handle,
             image="ghcr.io/attacker/unrelated@sha256:" + "d" * 64,
@@ -93,7 +93,7 @@ def test_compile_rejects_digest_not_catalog_bound_to_the_assessed_head(
 def test_compile_rejects_offline_forged_approval_and_decision(
     tmp_path: Path,
 ) -> None:
-    safety = ChangeSafety(
+    safety = SafeLaneEngine(
         host=GuardedHost(),
         state_dir=tmp_path,
         analyzer_factory=lambda policy: NoFindingAnalyzer(),

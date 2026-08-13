@@ -9,9 +9,9 @@ from jsonschema import Draft202012Validator
 
 from .artifacts import canonical_json_bytes, load_json_bytes, load_yaml_bytes, validate_artifact
 from .authorization import _load_or_create_authorization_key
-from .change_safety import (
-    ChangeSafety,
-    ChangeSafetyError,
+from .engine import (
+    SafeLaneEngine,
+    SafeLaneEngineError,
     ImageRegistration,
     PullRequestRef,
 )
@@ -188,7 +188,7 @@ def main(argv: list[str] | None = None) -> int:
             outcome = workflow.assess(
                 PullRequestRef(provider.repository, args.number)
             )
-        except (ChangeSafetyError, PullRequestStudioError, OSError, ValueError) as exc:
+        except (SafeLaneEngineError, PullRequestStudioError, OSError, ValueError) as exc:
             parser.error(str(exc))
         print(canonical_json_bytes(outcome.assessment).decode(), end="")
     elif args.command == "register-image":
@@ -207,7 +207,7 @@ def main(argv: list[str] | None = None) -> int:
                 service=args.service,
                 image=args.image,
             ))
-        except (ChangeSafetyError, PullRequestStudioError, OSError, ValueError) as exc:
+        except (SafeLaneEngineError, PullRequestStudioError, OSError, ValueError) as exc:
             parser.error(str(exc))
         print(path)
     return 0
@@ -219,7 +219,7 @@ def _build_workflow(
     base_url: str,
     *,
     check_publisher,
-) -> ChangeSafety:
+) -> SafeLaneEngine:
     def analyzer_factory(repository_policy):
         configuration = repository_policy["ai"]
         return OllamaPullRequestAnalyzer(
@@ -232,7 +232,7 @@ def _build_workflow(
             num_predict=configuration["num_predict"],
         )
 
-    return ChangeSafety(
+    return SafeLaneEngine(
         host=provider,
         state_dir=state_dir,
         analyzer_factory=analyzer_factory,
