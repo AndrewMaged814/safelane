@@ -170,6 +170,7 @@ def test_fast_read_is_resolved_automatically_and_static_shell_has_no_mutation_ui
     assert "${escapeHtml(change.head_sha)}" in script
     assert 'id="rollout-preview"' in script
     assert 'selector.addEventListener("change"' in script
+    assert 'check?.status === "not_configured" ? ""' in script
     assert "renderLegacy" not in script
     assert "Legacy workspace" not in script
     assert "✓ AI finding · source references verified" in script
