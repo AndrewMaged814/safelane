@@ -156,7 +156,10 @@ def main(argv: list[str] | None = None) -> int:
             state_root = _repository_state_root(provider, args.state_dir)
             def workflow_factory(current_provider, current_state_root):
                 return _build_workflow(
-                    current_provider, current_state_root, args.base_url
+                    current_provider,
+                    current_state_root,
+                    args.base_url,
+                    check_publisher=None,
                 )
 
             workflow = workflow_factory(provider, state_root)
@@ -178,6 +181,9 @@ def main(argv: list[str] | None = None) -> int:
                 provider,
                 _repository_state_root(provider, args.state_dir),
                 args.base_url,
+                check_publisher=GitHubCheckPublisher(
+                    command_runner=provider.command_runner
+                ),
             )
             outcome = workflow.assess(
                 PullRequestRef(provider.repository, args.number)
@@ -190,7 +196,10 @@ def main(argv: list[str] | None = None) -> int:
             provider = GitHubPullRequestProvider(args.repository)
             state_root = _repository_state_root(provider, args.state_dir)
             workflow = _build_workflow(
-                provider, state_root, "http://127.0.0.1:11434"
+                provider,
+                state_root,
+                "http://127.0.0.1:11434",
+                check_publisher=None,
             )
             path = workflow.register_image(ImageRegistration(
                 repository=provider.repository,
@@ -204,7 +213,13 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-def _build_workflow(provider, state_dir: Path, base_url: str) -> ChangeSafety:
+def _build_workflow(
+    provider,
+    state_dir: Path,
+    base_url: str,
+    *,
+    check_publisher,
+) -> ChangeSafety:
     def analyzer_factory(repository_policy):
         configuration = repository_policy["ai"]
         return OllamaPullRequestAnalyzer(
@@ -221,9 +236,7 @@ def _build_workflow(provider, state_dir: Path, base_url: str) -> ChangeSafety:
         host=provider,
         state_dir=state_dir,
         analyzer_factory=analyzer_factory,
-        check_publisher=GitHubCheckPublisher(
-            command_runner=provider.command_runner
-        ),
+        check_publisher=check_publisher,
         authorization_key=_load_or_create_authorization_key(provider.repository),
         image_provenance_verifier=GitHubAttestationVerifier(
             command_runner=provider.command_runner

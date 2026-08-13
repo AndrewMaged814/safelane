@@ -243,9 +243,10 @@ async function renderAssessment(number) {
     ? `<code>Trusted probe ${escapeHtml(probe.id)} · ${escapeHtml(probe.selection_source)} · ${escapeHtml(probe.catalog_entry_sha256)}</code>`
     : `<code>Trusted probe not required for Fast rollout</code>`;
   const check = snapshot.github_check;
-  const checkNotice = check?.status === "published"
-    ? `<div class="update">✓ GitHub Check published for this exact head.</div>`
-    : `<div class="update warning">GitHub Check ${escapeHtml(check?.status || "pending")}: ${escapeHtml(check?.error || "publication requires a GitHub App token with Checks write permission")}</div>`;
+  const checkNotice = check?.status === "not_configured" ? ""
+    : check?.status === "published"
+      ? `<div class="update">✓ GitHub Check published for this exact head.</div>`
+      : `<div class="update warning">GitHub Check ${escapeHtml(check?.status || "pending")}: ${escapeHtml(check?.error || "publication requires a GitHub App token with Checks write permission")}</div>`;
   if (!state.dashboard) {
     state.dashboard = {
       repository: change.repository,
