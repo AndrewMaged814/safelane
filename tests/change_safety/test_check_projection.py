@@ -137,3 +137,37 @@ def test_failed_old_head_invalidation_is_retained_and_retried(
     assert "pending_invalidations" not in load_json_bytes(
         projection_path.read_bytes()
     )
+
+
+def test_failed_same_head_patch_retries_the_existing_check_not_a_duplicate(
+    tmp_path: Path,
+) -> None:
+    class FlakyPatchPublisher(RecordingPublisher):
+        def publish(self, assessment, *, check_run_id=None):
+            self.calls.append((assessment, check_run_id))
+            if check_run_id is not None and len(self.calls) == 2:
+                raise RuntimeError("temporary PATCH failure")
+            return Publication(913, "https://github.com/acme/payments/runs/913")
+
+    publisher = FlakyPatchPublisher()
+    safety = ChangeSafety(
+        host=GuardedHost(),
+        state_dir=tmp_path,
+        analyzer_factory=lambda policy: NoFindingAnalyzer(),
+        check_publisher=publisher,
+        clock=iter([
+            "2026-08-12T09:00:00Z",
+            "2026-08-12T09:05:00Z",
+        ]).__next__,
+    )
+    assessed = safety.assess(PullRequestRef("acme/payments", 42))
+    safety.resolve(ResolutionCommand(
+        handle=assessed.handle,
+        action="approve",
+        selected_profile="Guarded",
+        actor="andrew",
+    ))
+
+    safety.assess(PullRequestRef("acme/payments", 42))
+
+    assert [check_id for _, check_id in publisher.calls] == [None, 913, 913]

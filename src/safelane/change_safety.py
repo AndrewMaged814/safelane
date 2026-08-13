@@ -18,8 +18,13 @@ from .artifacts import (
     sha256,
     validate_artifact,
 )
+from .authorization import (
+    authorization_signature,
+    process_authorization_key,
+    signature_matches,
+)
 from .pr_studio import PullRequestAnalyzer, PullRequestAssessmentEngine
-from .state_io import atomic_write as _atomic_write
+from .state_io import atomic_write as _atomic_write, state_lock
 
 
 class ChangeSafetyError(RuntimeError):
@@ -109,6 +114,15 @@ class ReleaseBinding:
 
 
 @dataclass(frozen=True)
+class ImageRegistration:
+    repository: str
+    service: str
+    source_revision: str
+    image: str
+    oci_revision: str
+
+
+@dataclass(frozen=True)
 class RolloutBundle:
     manifest: dict[str, Any]
     decision_sha256: str
@@ -150,14 +164,38 @@ class ChangeSafety:
         analyzer_factory: AnalyzerFactory,
         check_publisher: CheckPublisher | None = None,
         clock: Clock | None = None,
+        authorization_key: bytes | None = None,
     ) -> None:
         self._host = host
         self._state_dir = state_dir.resolve()
         self._analyzer_factory = analyzer_factory
         self._check_publisher = check_publisher
         self._clock = clock or _utc_now
+        self._authorization_key = authorization_key or process_authorization_key()
+
+    @property
+    def authorization_key(self) -> bytes:
+        return self._authorization_key
+
+    def check_projection(self, change: PullRequestRef) -> dict[str, Any]:
+        if self._check_publisher is None:
+            return {"status": "not_configured"}
+        path = self._directory(change.repository, change.number) / "github-check.json"
+        try:
+            value = load_json_bytes(path.read_bytes())
+        except (OSError, ArtifactError):
+            return {"status": "pending"}
+        if not isinstance(value, dict) or value.get("status") not in {
+            "published", "unavailable"
+        }:
+            return {"status": "unavailable", "error": "invalid projection record"}
+        return copy.deepcopy(value)
 
     def assess(self, change: PullRequestRef) -> AssessmentOutcome:
+        with state_lock(self._directory(change.repository, change.number)):
+            return self._assess_unlocked(change)
+
+    def _assess_unlocked(self, change: PullRequestRef) -> AssessmentOutcome:
         snapshot = self._host.get_pull_request(change)
         self._validate_snapshot(change, snapshot)
         policy_bytes = self._read_base_policy(snapshot)
@@ -169,9 +207,12 @@ class ChangeSafety:
         cached = self._cached(snapshot, policy_bytes, catalog_bytes, diff)
         if cached is not None:
             current = self._host.get_pull_request(change)
-            if current.head_sha != snapshot.head_sha:
+            if (
+                current.head_sha != snapshot.head_sha
+                or current.base_sha != snapshot.base_sha
+            ):
                 raise ChangeMoved(
-                    f"pull request moved from {snapshot.head_sha} to {current.head_sha}"
+                    "pull request base or head moved while assessment was running"
                 )
             self._publish_check(cached.assessment)
             return cached
@@ -185,9 +226,12 @@ class ChangeSafety:
         rollout_catalog = evaluator.profile_catalog()
 
         current = self._host.get_pull_request(change)
-        if current.head_sha != snapshot.head_sha:
+        if (
+            current.head_sha != snapshot.head_sha
+            or current.base_sha != snapshot.base_sha
+        ):
             raise ChangeMoved(
-                f"pull request moved from {snapshot.head_sha} to {current.head_sha}"
+                "pull request base or head moved while assessment was running"
             )
 
         assessment = self._assessment(
@@ -202,7 +246,9 @@ class ChangeSafety:
                 "resolved_at": assessment["assessed_at"],
             }
             assessment["review"] = {"status": "approved", "resolution": resolution}
-            decision = rollout_decision_for_assessment(assessment)
+            decision = rollout_decision_for_assessment(
+                assessment, self._authorization_key
+            )
         validate_artifact("change-assessment-v1", assessment)
         if decision is not None:
             validate_artifact("rollout-decision-v1", decision)
@@ -273,6 +319,12 @@ class ChangeSafety:
 
     def resolve(self, command: ResolutionCommand) -> ResolutionOutcome:
         assessment_path = self._assessment_path(command.handle)
+        with state_lock(assessment_path.parent):
+            return self._resolve_unlocked(command, assessment_path)
+
+    def _resolve_unlocked(
+        self, command: ResolutionCommand, assessment_path: Path
+    ) -> ResolutionOutcome:
         try:
             assessment = load_json_bytes(assessment_path.read_bytes())
             validate_artifact("change-assessment-v1", assessment)
@@ -342,7 +394,7 @@ class ChangeSafety:
             "resolution": resolution,
         }
         decision = (
-            rollout_decision_for_assessment(resolved)
+            rollout_decision_for_assessment(resolved, self._authorization_key)
             if selected_profile is not None
             else None
         )
@@ -352,17 +404,23 @@ class ChangeSafety:
         decision_path = assessment_path.with_name("decision.json")
         if decision is None:
             _remove_if_exists(decision_path)
-        _atomic_write(assessment_path, canonical_json_bytes(resolved))
         if decision is not None:
             _atomic_write(
                 decision_path,
                 canonical_json_bytes(decision),
             )
+        _atomic_write(assessment_path, canonical_json_bytes(resolved))
         self._publish_check(resolved)
         return ResolutionOutcome(assessment=resolved, decision=decision)
 
     def compile(self, binding: ReleaseBinding) -> RolloutBundle:
         assessment_path = self._assessment_path(binding.handle)
+        with state_lock(assessment_path.parent):
+            return self._compile_unlocked(binding, assessment_path)
+
+    def _compile_unlocked(
+        self, binding: ReleaseBinding, assessment_path: Path
+    ) -> RolloutBundle:
         try:
             assessment = load_json_bytes(assessment_path.read_bytes())
             validate_artifact("change-assessment-v1", assessment)
@@ -384,7 +442,9 @@ class ChangeSafety:
         resolution = review.get("resolution")
         if review.get("status") != "approved" or not isinstance(resolution, dict):
             raise AssessmentStale("release requires an approved assessment")
-        expected_decision = rollout_decision_for_assessment(assessment)
+        expected_decision = rollout_decision_for_assessment(
+            assessment, self._authorization_key
+        )
         if decision != expected_decision:
             raise AssessmentStale("rollout decision does not match the approved assessment")
         if not re.fullmatch(r".+@sha256:[0-9a-f]{64}", binding.image):
@@ -415,11 +475,17 @@ class ChangeSafety:
         )
         if selected_probe != expected_probe:
             raise AssessmentStale("trusted probe selection does not match base policy")
+        image_catalog = self._validate_release_image(assessment, binding.image)
+        image_catalog_hash = sha256(image_catalog)
 
         decision_hash = sha256(decision)
         try:
             manifest = argo_rollout_for_decision(
-                assessment, decision, binding.image
+                assessment,
+                decision,
+                binding.image,
+                self._authorization_key,
+                image_catalog_sha256=image_catalog_hash,
             )
         except ValueError as exc:
             raise AssessmentStale(str(exc)) from exc
@@ -427,11 +493,106 @@ class ChangeSafety:
         release_directory = assessment_path.parent / "release"
         release_directory.mkdir(exist_ok=True)
         path = release_directory / "rollout.yaml"
+        _atomic_write(
+            release_directory / "image-catalog.json",
+            canonical_json_bytes(image_catalog),
+        )
         raw = yaml.safe_dump(
             manifest, sort_keys=False, allow_unicode=True
         ).encode("utf-8")
         _atomic_write(path, raw)
         return RolloutBundle(manifest=manifest, decision_sha256=decision_hash, path=path)
+
+    def register_image(self, registration: ImageRegistration) -> Path:
+        if not re.fullmatch(r"[^/]+/[^/]+", registration.repository):
+            raise ChangeSafetyError("registered image repository is invalid")
+        if registration.source_revision != registration.oci_revision:
+            raise ChangeSafetyError("OCI revision must match the source revision")
+        if not re.fullmatch(r".+@sha256:[0-9a-f]{64}", registration.image):
+            raise ChangeSafetyError("registered image must use an immutable sha256 digest")
+        path = self._image_catalog_path(registration.repository)
+        with state_lock(path.parent):
+            catalog = {
+                "schema_version": "repository-image-catalog-v1",
+                "catalog_version": 1,
+                "application_images": [],
+            }
+            if path.exists():
+                existing = load_json_bytes(path.read_bytes())
+                self._validate_image_catalog(existing)
+                catalog = {
+                    key: copy.deepcopy(value)
+                    for key, value in existing.items()
+                    if key != "authorization_signature"
+                }
+                catalog["catalog_version"] += 1
+            identity = (
+                registration.repository,
+                registration.service,
+                registration.source_revision,
+            )
+            catalog["application_images"] = [
+                item for item in catalog["application_images"]
+                if (item["repository"], item["service"], item["source_revision"])
+                != identity
+            ]
+            catalog["application_images"].append({
+                "repository": registration.repository,
+                "service": registration.service,
+                "source_revision": registration.source_revision,
+                "image": registration.image,
+                "oci_revision": registration.oci_revision,
+            })
+            catalog["application_images"].sort(key=lambda item: (
+                item["repository"], item["service"], item["source_revision"]
+            ))
+            catalog["authorization_signature"] = authorization_signature(
+                catalog, self._authorization_key
+            )
+            validate_artifact("repository-image-catalog-v1", catalog)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            _atomic_write(path, canonical_json_bytes(catalog))
+            return path
+
+    def _image_catalog_path(self, repository: str) -> Path:
+        return self._state_dir / repository.replace("/", "--") / "image-catalog.json"
+
+    def _validate_image_catalog(self, catalog: Any) -> None:
+        validate_artifact("repository-image-catalog-v1", catalog)
+        unsigned = copy.deepcopy(catalog)
+        signature = unsigned.pop("authorization_signature")
+        if not signature_matches(unsigned, signature, self._authorization_key):
+            raise ChangeSafetyError("image catalog authorization signature is invalid")
+        identities: set[tuple[str, str, str]] = set()
+        for item in catalog["application_images"]:
+            identity = (item["repository"], item["service"], item["source_revision"])
+            if identity in identities or item["source_revision"] != item["oci_revision"]:
+                raise ChangeSafetyError("image catalog provenance is invalid")
+            identities.add(identity)
+
+    def _validate_release_image(
+        self, assessment: dict[str, Any], image: str
+    ) -> dict[str, Any]:
+        path = self._image_catalog_path(assessment["change"]["repository"])
+        try:
+            catalog = load_json_bytes(path.read_bytes())
+            self._validate_image_catalog(catalog)
+        except (OSError, ArtifactError, ChangeSafetyError) as exc:
+            raise ChangeSafetyError(
+                "a signed repository image catalog is required before compilation"
+            ) from exc
+        expected = {
+            "repository": assessment["change"]["repository"],
+            "service": assessment["service"]["name"],
+            "source_revision": assessment["change"]["head_sha"],
+            "image": image,
+            "oci_revision": assessment["change"]["head_sha"],
+        }
+        if expected not in catalog["application_images"]:
+            raise ChangeSafetyError(
+                "release image is not catalog-bound to this service and PR head"
+            )
+        return catalog
 
     def _read_base_policy(self, snapshot: PullRequestSnapshot) -> bytes:
         try:
@@ -550,11 +711,11 @@ class ChangeSafety:
         directory = self._directory(snapshot.repository, snapshot.number)
         directory.mkdir(parents=True, exist_ok=True)
         _remove_if_exists(directory / "decision.json")
-        _atomic_write(directory / "assessment.json", canonical_json_bytes(assessment))
+        _remove_if_exists(directory / "release" / "rollout.yaml")
+        _remove_if_exists(directory / "release" / "image-catalog.json")
         if decision is not None:
             _atomic_write(directory / "decision.json", canonical_json_bytes(decision))
-        else:
-            _remove_if_exists(directory / "decision.json")
+        _atomic_write(directory / "assessment.json", canonical_json_bytes(assessment))
 
     def _assessment_path(self, handle: AssessmentHandle) -> Path:
         try:
@@ -651,6 +812,8 @@ class ChangeSafety:
                 "error": str(exc),
                 "key": key,
             }
+            if check_run_id is not None:
+                record["id"] = check_run_id
         if remaining_invalidations:
             record["pending_invalidations"] = remaining_invalidations
         _atomic_write(projection_path, canonical_json_bytes(record))
@@ -682,7 +845,7 @@ def _snapshot_dict(snapshot: PullRequestSnapshot) -> dict[str, Any]:
 
 
 def rollout_decision_for_assessment(
-    assessment: dict[str, Any],
+    assessment: dict[str, Any], authorization_key: bytes,
 ) -> dict[str, Any]:
     """Derive the only rollout decision authorized by a resolved assessment."""
     resolution = assessment["review"]["resolution"]
@@ -698,7 +861,7 @@ def rollout_decision_for_assessment(
         )
     except StopIteration as exc:
         raise ValueError("approved profile is not an assessment option") from exc
-    return {
+    decision = {
         "schema_version": "rollout-decision-v1",
         "assessment_id": assessment["assessment_id"],
         "assessment_input_sha256": assessment["assessment_input_sha256"],
@@ -717,15 +880,22 @@ def rollout_decision_for_assessment(
         "trusted_probe": copy.deepcopy(assessment["selected_trusted_probe"]),
         "resolution": copy.deepcopy(resolution),
     }
+    decision["authorization_signature"] = authorization_signature(
+        decision, authorization_key
+    )
+    return decision
 
 
 def argo_rollout_for_decision(
     assessment: dict[str, Any],
     decision: dict[str, Any],
     image: str,
+    authorization_key: bytes,
+    *,
+    image_catalog_sha256: str,
 ) -> dict[str, Any]:
     """Materialize the deterministic Argo Rollout bound by an exact decision."""
-    if decision != rollout_decision_for_assessment(assessment):
+    if decision != rollout_decision_for_assessment(assessment, authorization_key):
         raise ValueError("rollout decision does not match the approved assessment")
     deployment = assessment["service"]["deployment"]
     labels = {"app.kubernetes.io/name": deployment["workload_label"]}
@@ -757,6 +927,7 @@ def argo_rollout_for_decision(
                 "safelane.dev/decision-sha256": sha256(decision),
                 "safelane.dev/head-sha": assessment["change"]["head_sha"],
                 "safelane.dev/policy-sha256": assessment["policy"]["sha256"],
+                "safelane.dev/image-catalog-sha256": image_catalog_sha256,
             },
         },
         "spec": {
@@ -795,6 +966,18 @@ def _validate_policy_semantics(policy: dict[str, Any]) -> None:
             raise ValueError(f"{name} must finish at 100% and all replicas")
         if any(stage["exposure_pods"] > replicas for stage in stages):
             raise ValueError(f"{name} exposure exceeds configured replicas")
+        if any(
+            right["set_weight"] <= left["set_weight"]
+            or right["exposure_pods"] < left["exposure_pods"]
+            for left, right in zip(stages, stages[1:])
+        ):
+            raise ValueError(f"{name} stages must increase exposure")
+        if name == "Fast" and any(stage["analysis"] for stage in stages):
+            raise ValueError("Fast cannot add a trusted analysis checkpoint")
+        if name in {"Guarded", "Strict"} and not any(
+            stage["analysis"] for stage in stages[:-1]
+        ):
+            raise ValueError(f"{name} requires a pre-terminal analysis checkpoint")
 
 
 def _validate_catalog_bindings(

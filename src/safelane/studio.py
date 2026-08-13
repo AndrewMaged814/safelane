@@ -261,6 +261,15 @@ class _StudioHandler(BaseHTTPRequestHandler):
                     self._json(200, {
                         "assessment": assessment,
                         "approval_token": self.studio_service.approval_token,
+                        "github_check": (
+                            self.studio_service.check_projection(
+                                int(assessment_match.group(1))
+                            )
+                            if isinstance(
+                                self.studio_service, RepositoryStudioService
+                            )
+                            else None
+                        ),
                     })
                 except PullRequestStudioError:
                     self._json(404, {"error": "pull_request_not_found"})

@@ -23,4 +23,5 @@ assessment is published.
 - GitHub Checks are a read-only projection of the current assessment. They do not become an
   authority for release.
 - Rollout compilation consumes only a valid exact-head rollout decision plus an explicit immutable
-  release binding.
+  release binding verified against a signed server-owned image catalog. Human authorization is
+  HMAC-protected with a repository-specific key stored outside the mutable assessment directory.

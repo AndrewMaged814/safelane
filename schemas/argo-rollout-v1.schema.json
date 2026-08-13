@@ -22,14 +22,16 @@
             "safelane.dev/assessment-result-sha256",
             "safelane.dev/decision-sha256",
             "safelane.dev/head-sha",
-            "safelane.dev/policy-sha256"
+            "safelane.dev/policy-sha256",
+            "safelane.dev/image-catalog-sha256"
           ],
           "properties": {
             "safelane.dev/assessment-id": {"type": "string", "minLength": 1},
             "safelane.dev/assessment-result-sha256": {"$ref": "#/$defs/hash"},
             "safelane.dev/decision-sha256": {"$ref": "#/$defs/hash"},
             "safelane.dev/head-sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
-            "safelane.dev/policy-sha256": {"$ref": "#/$defs/hash"}
+            "safelane.dev/policy-sha256": {"$ref": "#/$defs/hash"},
+            "safelane.dev/image-catalog-sha256": {"$ref": "#/$defs/hash"}
           }
         }
       }

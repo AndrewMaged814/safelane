@@ -36,7 +36,7 @@ The design is deliberately conservative:
 - local AI may identify code-backed dangers, but it cannot choose the rollout;
 - fixed, versioned rules apply every safety floor;
 - missing or invalid evidence prevents the Fast profile; and
-- a missing, stale, or invalid rollout decision fails closed to Strict.
+- a missing, stale, or invalid rollout decision rejects release compilation.
 
 ## How it works
 
@@ -81,7 +81,12 @@ SafeLane separates review evidence from the deployment handoff:
 - **`change-assessment-v1`** contains the full SHA-bound assessment, base-owned policy and trusted-probe provenance, verified AI safety case, backend rule IDs, rollout options, and review state. Studio and the CLI read the same bytes.
 - **`rollout-decision-v1`** is emitted only after the assessment resolves automatically or receives approval. It contains the resolved profile and trusted analysis identity consumed by the compiler.
 
-A new push invalidates the previous approval. The canonical field and lifecycle specification lives in [`contract.md`](contract.md).
+A new push invalidates the previous approval. The repository-aware lifecycle is specified in
+[`docs/safelane-studio.md`](docs/safelane-studio.md) and
+[`ADR 0005`](docs/adr/0005-base-owned-repository-safety-contract.md); its closed-world wire shapes
+are [`change-assessment-v1`](schemas/change-assessment-v1.schema.json) and
+[`rollout-decision-v1`](schemas/rollout-decision-v1.schema.json). `contract.md` remains the frozen
+pre-final decision-spine contract.
 
 ## Safety model
 
@@ -92,7 +97,7 @@ SafeLane does not claim to calculate a precise probability of failure.
 | Failure propensity | A coarse `low`, `medium`, or `high` band derived from deterministic change facts |
 | AI risk finding | A bounded warning tied to exact changed code; never rollout authority |
 | Safety floor | A rule that can keep or raise rollout care, never reduce it |
-| Confidence | Whether every policy-required input was available and understood—not model certainty |
+| Evidence confidence | Whether every policy-required input was available and understood—not model certainty |
 | Risk tier | The final `safe`, `guarded`, or `risky` result after every floor |
 
 Fast-lane eligibility requires positive proof. The absence of an AI warning is not enough.
@@ -123,7 +128,19 @@ uv run safelane studio --repository owner/repository
 Open <http://127.0.0.1:4173>. Studio uses the authenticated GitHub CLI, stores SHA-bound assessments
 under `.safelane/studio`, and invalidates an earlier assessment when a PR receives a new push.
 Approval records a SHA-bound decision. A reviewer can then bind an immutable image digest and compile
-a validated Argo Rollout YAML; SafeLane still does not merge the PR or apply the manifest to a cluster.
+a validated Argo Rollout YAML. Compilation requires a signed local image-catalog entry proving the
+image repository/service and OCI revision match the assessed PR head; a digest alone is rejected.
+Register that CI-verified identity before compilation:
+
+```powershell
+uv run safelane register-image `
+  --repository . `
+  --service safelane `
+  --source-revision <full-pr-head-sha> `
+  --image ghcr.io/owner/service@sha256:<64-hex-digest>
+```
+
+SafeLane still does not merge the PR or apply the manifest to a cluster.
 Use the repository chip in Studio's top bar to connect another local path, GitHub URL, or
 `owner/repository` without restarting the server.
 The interaction contract lives in [`docs/safelane-studio.md`](docs/safelane-studio.md).

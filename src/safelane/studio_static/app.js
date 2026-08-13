@@ -205,10 +205,14 @@ function findingCards(assessment) {
 
 function approvalPanel(assessment, token) {
   if (assessment.review.status !== "unresolved") {
-    const automatic = assessment.review.resolution.type === "automatic";
+    const resolution = assessment.review.resolution;
+    const automatic = resolution.type === "automatic";
     const rejected = assessment.review.status === "rejected";
-    const compiler = rejected ? "" : `<div class="release-compiler"><label for="release-image">Immutable release image</label><input id="release-image" placeholder="ghcr.io/acme/service@sha256:…"><button class="button primary" id="compile">Compile Argo rollout</button></div>`;
-    return `<section class="card approval"><div><div class="${rejected ? "rejected" : "approved"}">${rejected ? "✕ Rejected by reviewer" : `✓ ${automatic ? "Resolved automatically" : "Approved by reviewer"}`}</div>${compiler}<p id="approval-message" class="action-message"></p></div><div class="buttons"><a class="button" href="/changes" data-nav>Return to Changes</a></div></section>`;
+    const provenance = automatic
+      ? `Backend policy automatically authorized ${escapeHtml(resolution.selected_profile)} at ${escapeHtml(resolution.resolved_at)}.`
+      : `${escapeHtml(resolution.actor)} ${rejected ? "rejected this revision" : `authorized ${escapeHtml(resolution.selected_profile)}`} at ${escapeHtml(resolution.resolved_at)}.`;
+    const compiler = rejected ? "" : `<div class="release-compiler"><label for="release-image">CI-verified immutable release image</label><input id="release-image" placeholder="ghcr.io/acme/service@sha256:…"><small>Register the image against ${escapeHtml(assessment.change.head_sha)} with <code>safelane register-image</code> before compiling.</small><button class="button primary" id="compile">Compile Argo rollout</button></div>`;
+    return `<section class="card approval"><div><div class="${rejected ? "rejected" : "approved"}">${rejected ? "✕ Rejected by reviewer" : `✓ ${automatic ? "Resolved automatically" : "Approved by reviewer"}`}</div><p>${provenance}</p>${compiler}<p id="approval-message" class="action-message"></p></div><div class="buttons"><a class="button" href="/changes" data-nav>Return to Changes</a></div></section>`;
   }
   const options = assessment.rollout_options.map((profile) => `<option value="${escapeHtml(profile.name)}">${escapeHtml(profile.name)}</option>`).join("");
   const only = assessment.rollout_options.length === 1 ? assessment.rollout_options[0].name : null;
@@ -227,7 +231,16 @@ async function renderAssessment(number) {
   const assessment = snapshot.assessment;
   const change = assessment.change;
   const risk = assessment.risk;
-  const profile = assessment.rollout_options[0];
+  const resolvedProfile = assessment.review.resolution?.selected_profile;
+  const profile = assessment.rollout_options.find((item) => item.name === resolvedProfile) || assessment.rollout_options[0];
+  const probe = assessment.selected_trusted_probe;
+  const probeProvenance = probe
+    ? `<code>Trusted probe ${escapeHtml(probe.id)} · ${escapeHtml(probe.selection_source)} · ${escapeHtml(probe.catalog_entry_sha256)}</code>`
+    : `<code>Trusted probe not required for Fast rollout</code>`;
+  const check = snapshot.github_check;
+  const checkNotice = check?.status === "published"
+    ? `<div class="update">✓ GitHub Check published for this exact head.</div>`
+    : `<div class="update warning">GitHub Check ${escapeHtml(check?.status || "pending")}: ${escapeHtml(check?.error || "publication requires a GitHub App token with Checks write permission")}</div>`;
   if (!state.dashboard) {
     state.dashboard = {
       repository: change.repository,
@@ -240,9 +253,10 @@ async function renderAssessment(number) {
   app.innerHTML = shell(`<nav class="breadcrumb"><a href="/changes" data-nav>Changes</a><span>›</span><span>${escapeHtml(state.dashboard?.repository || change.repository)} · PR #${number}</span></nav>
     <header class="assessment-head"><div><div class="eyebrow">Exact open PR revision</div><h1>${escapeHtml(change.title)}</h1><p>${escapeHtml(change.repository)} · ${escapeHtml(change.head_ref)} · ${escapeHtml(change.head_sha)}</p></div><div class="assessment-tags">${tierBadge(risk.tier)}</div></header>
     <div class="update">✓ This assessment covers ${fresh === false ? "the selected" : "the latest detected"} PR head. A new push requires a fresh assessment.</div>
+    ${checkNotice}
     <section class="card decision"><div class="decision-value"><span>Backend proposal</span><strong>${escapeHtml(risk.minimum_profile)}</strong></div><div><h2>${assessment.review.status !== "unresolved" ? "This PR review is complete" : "Review required before this PR can be authorized"}</h2><p>${escapeHtml(risk.reason)}</p></div></section>
     ${findingCards(assessment)}
-    <section class="card policy-note"><strong>Why the backend proposed this lane</strong><p>${escapeHtml(risk.reason)}</p><code>Policy ${escapeHtml(assessment.policy.version)} from base ${escapeHtml(assessment.policy.source_revision)}</code><code> · diff ${escapeHtml(assessment.evidence.git_diff_sha256)}</code></section>
+    <section class="card policy-note"><strong>Why the backend proposed this lane</strong><p>${escapeHtml(risk.reason)}</p><code>Rules ${assessment.policy_rule_ids.map(escapeHtml).join(" · ")}</code><code>Policy ${escapeHtml(assessment.policy.version)} · ${escapeHtml(assessment.policy.sha256)} · base ${escapeHtml(assessment.policy.source_revision)}</code><code>Trusted-probe catalog ${escapeHtml(assessment.trusted_probe_catalog.version)} · ${escapeHtml(assessment.trusted_probe_catalog.sha256)}</code>${probeProvenance}<code>Diff ${escapeHtml(assessment.evidence.git_diff_sha256)}</code></section>
     ${rolloutPreview(profile, assessment.evidence, risk.evidence_confidence)}
     ${approvalPanel(assessment, snapshot.approval_token)}`, "changes", true);
   const selector = document.querySelector("#selected-profile");

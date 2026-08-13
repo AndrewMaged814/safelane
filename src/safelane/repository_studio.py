@@ -49,7 +49,10 @@ class RepositoryStudioService:
         self._provider_factory = provider_factory or GitHubPullRequestProvider
         self._open: dict[int, dict[str, Any]] = {}
         self.reviewer = reviewer
-        self._outcome_ledger = OutcomeLedger(state_dir=self.state_root)
+        self._outcome_ledger = OutcomeLedger(
+            state_dir=self.state_root,
+            authorization_key=workflow.authorization_key,
+        )
 
     def dashboard(self) -> dict[str, Any]:
         rows: list[dict[str, Any]] = []
@@ -62,7 +65,11 @@ class RepositoryStudioService:
                 ))
                 assessment = outcome.assessment
                 current[pull_request["number"]] = assessment
-                rows.append(_row(assessment))
+                row = _row(assessment)
+                row["github_check"] = self.workflow.check_projection(
+                    PullRequestRef(self.provider.repository, pull_request["number"])
+                )
+                rows.append(row)
         except (ChangeSafetyError, OSError, KeyError, TypeError) as exc:
             raise PullRequestStudioError(str(exc)) from exc
         self._open = current
@@ -91,6 +98,11 @@ class RepositoryStudioService:
             return self._open[number]
         except KeyError as exc:
             raise PullRequestStudioError("open pull request was not found") from exc
+
+    def check_projection(self, number: int) -> dict[str, Any]:
+        return self.workflow.check_projection(PullRequestRef(
+            self.provider.repository, number
+        ))
 
     def profiles(self) -> dict[str, Any]:
         self.dashboard()
@@ -232,7 +244,7 @@ class RepositoryStudioService:
 
     def outcomes(self) -> dict[str, Any]:
         try:
-            return self._outcome_ledger.summary()
+            return self._outcome_ledger.summary(repository=self.provider.repository)
         except OutcomeError as exc:
             raise PullRequestStudioError(str(exc)) from exc
 
@@ -263,7 +275,10 @@ class RepositoryStudioService:
         self.workspace = self.state_root / provider.repository.replace("/", "--")
         self.workspace.mkdir(parents=True, exist_ok=True)
         self.workflow = self._workflow_factory(provider, self.state_root)
-        self._outcome_ledger = OutcomeLedger(state_dir=self.state_root)
+        self._outcome_ledger = OutcomeLedger(
+            state_dir=self.state_root,
+            authorization_key=self.workflow.authorization_key,
+        )
         self._open = {}
         return self.dashboard()
 

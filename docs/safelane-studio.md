@@ -50,14 +50,19 @@ Fast resolves automatically. Guarded and Risky support:
 - **Reject** — records rejection and emits no rollout decision.
 - **Decide later** — performs no mutation and returns to the inbox.
 
-An approved reviewer can submit an immutable image digest. The server revalidates the assessment,
-decision, current PR head, base policy, trusted-probe catalog, and image identity before writing a
-schema-valid Argo Rollout. Missing, stale, rejected, or mismatched authorization emits no manifest.
+An approved reviewer can submit an immutable image digest only after trusted CI registers it in the
+signed local repository image catalog. The catalog entry binds repository, service, full source
+revision, digest, and OCI revision. The server revalidates the assessment, signed decision, current
+PR head, base policy, trusted-probe catalog, signed image identity, and exact derived manifest before
+writing a schema-valid Argo Rollout. Missing, stale, rejected, or mismatched authorization emits no
+manifest. A new assessment removes any compiled manifest for the older authorization.
 
 When GitHub App credentials have Checks write permission, SafeLane creates an exact-head Check Run.
 Unresolved reviews are `action_required`, approvals are `success`, rejections are `failure`, and a
 new head cancels the earlier run before creating the replacement. Check delivery is a projection;
-it never becomes release authority.
+it never becomes release authority. Studio visibly reports unavailable delivery; authenticated-user
+and OAuth tokens cannot create Check Runs, so demos that need this projection must use GitHub App
+credentials.
 
 Outcome ingestion accepts only observations whose stages match the compiled profile. The resulting
 receipt binds assessment, decision, manifest, image, probe, rule IDs, finding IDs, and exact Git

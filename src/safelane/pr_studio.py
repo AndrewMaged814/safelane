@@ -546,8 +546,12 @@ class PullRequestAssessmentEngine:
         if any(span not in allowed for span in cited):
             return None
         title, rationale = _FINDING_COPY[candidate["category"]]
+        identity = sha256({
+            "category": candidate["category"],
+            "spans": candidate["spans"],
+        }).removeprefix("sha256:")[:16]
         finding = {
-            "id": f"finding-{index:03d}",
+            "id": f"finding-{identity}",
             "title": title,
             "category": candidate["category"],
             "rationale": rationale,

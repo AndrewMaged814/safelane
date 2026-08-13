@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://safelane.dev/schemas/repository-image-catalog-v1.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "catalog_version", "application_images", "authorization_signature"],
+  "properties": {
+    "schema_version": {"const": "repository-image-catalog-v1"},
+    "catalog_version": {"type": "integer", "minimum": 1},
+    "application_images": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["repository", "service", "source_revision", "image", "oci_revision"],
+        "properties": {
+          "repository": {"type": "string", "pattern": "^[^/]+/[^/]+$"},
+          "service": {"type": "string", "minLength": 1},
+          "source_revision": {"$ref": "#/$defs/git_sha"},
+          "image": {"type": "string", "pattern": "^.+@sha256:[0-9a-f]{64}$"},
+          "oci_revision": {"$ref": "#/$defs/git_sha"}
+        }
+      }
+    },
+    "authorization_signature": {"type": "string", "pattern": "^hmac-sha256:[0-9a-f]{64}$"}
+  },
+  "$defs": {
+    "git_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"}
+  }
+}

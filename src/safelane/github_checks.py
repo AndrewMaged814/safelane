@@ -93,9 +93,9 @@ class GitHubCheckPublisher:
 def _conclusion(assessment: dict[str, Any]) -> tuple[str, str]:
     status = assessment["review"]["status"]
     tier = assessment["risk"]["tier"]
-    profile = assessment["risk"]["minimum_profile"]
     if status == "rejected":
         return "failure", "Rollout rejected"
     if status == "approved":
-        return "success", f"{profile} rollout authorized"
+        selected = assessment["review"]["resolution"]["selected_profile"]
+        return "success", f"{selected} rollout authorized"
     return "action_required", f"{tier.title()} rollout review required"

@@ -6,7 +6,7 @@
   "required": [
     "schema_version", "recorded_at", "repository", "pull_request",
     "assessment_id", "assessment_result_sha256", "decision_sha256",
-    "rollout_manifest_sha256", "base_sha", "head_sha", "policy_sha256",
+    "rollout_manifest_sha256", "base_sha", "head_sha", "policy_sha256", "image_catalog_sha256",
     "tier", "profile", "trusted_probe_id", "trusted_probe_entry_sha256", "policy_rule_ids", "finding_ids", "image", "rollout_uid", "result", "stages",
     "incident_within_24h"
   ],
@@ -22,6 +22,7 @@
     "base_sha": {"$ref": "#/$defs/git_sha"},
     "head_sha": {"$ref": "#/$defs/git_sha"},
     "policy_sha256": {"$ref": "#/$defs/hash"},
+    "image_catalog_sha256": {"$ref": "#/$defs/hash"},
     "tier": {"enum": ["safe", "guarded", "risky"]},
     "profile": {"enum": ["Fast", "Guarded", "Strict"]},
     "trusted_probe_id": {"type": ["string", "null"]},

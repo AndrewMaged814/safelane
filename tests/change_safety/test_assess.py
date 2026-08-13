@@ -3,8 +3,13 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
+import pytest
+
 from safelane.change_safety import (
+    ChangeMoved,
     ChangeSafety,
+    ImageRegistration,
+    PolicyInvalid,
     PullRequestRef,
     PullRequestSnapshot,
 )
@@ -12,6 +17,17 @@ from safelane.change_safety import (
 
 BASE_SHA = "a" * 40
 HEAD_SHA = "b" * 40
+TEST_IMAGE = "ghcr.io/acme/payments@sha256:" + "c" * 64
+
+
+def register_test_image(safety: ChangeSafety, *, image: str = TEST_IMAGE) -> None:
+    safety.register_image(ImageRegistration(
+        repository="acme/payments",
+        service="payments-api",
+        source_revision=HEAD_SHA,
+        image=image,
+        oci_revision=HEAD_SHA,
+    ))
 
 
 def _policy(version: str, *, small_max_files: int) -> bytes:
@@ -231,3 +247,50 @@ def test_backend_policy_not_ai_maps_verified_category_to_tier(tmp_path: Path) ->
     assert outcome.assessment["risk"]["minimum_profile"] == "Strict"
     assert outcome.assessment["selected_trusted_probe"]["id"] == "payments-api-contract"
     assert outcome.assessment["selected_trusted_probe"]["selection_source"] == "ai_safety_case"
+
+
+def test_assessment_does_not_publish_when_base_moves_during_analysis(
+    tmp_path: Path,
+) -> None:
+    host = FakePullRequestHost()
+
+    class MovingAnalyzer(NoFindingAnalyzer):
+        def analyze(self, raw_diff: bytes, authorized_spans: list[dict]) -> dict:
+            result = super().analyze(raw_diff, authorized_spans)
+            host.snapshot = replace(host.snapshot, base_sha="d" * 40)
+            return result
+
+    safety = ChangeSafety(
+        host=host,
+        state_dir=tmp_path,
+        analyzer_factory=lambda policy: MovingAnalyzer(),
+        clock=lambda: "2026-08-12T09:00:00Z",
+    )
+
+    with pytest.raises(ChangeMoved, match="base or head moved"):
+        safety.assess(PullRequestRef("acme/payments", 42))
+
+    assert not (tmp_path / "acme--payments" / "pr-42" / "assessment.json").exists()
+
+
+def test_non_fast_profiles_require_a_pre_terminal_analysis_checkpoint(
+    tmp_path: Path,
+) -> None:
+    host = FakePullRequestHost()
+    weakened = _policy("payments-weak", small_max_files=2).decode().replace(
+        "      - {set_weight: 40, exposure_pods: 2, analysis: true}\n",
+        "",
+    ).replace(
+        "      - {set_weight: 20, exposure_pods: 1, analysis: true}\n"
+        "      - {set_weight: 40, exposure_pods: 2, analysis: true}\n"
+        "      - {set_weight: 60, exposure_pods: 3, analysis: true}\n",
+        "",
+    )
+    host.files[(BASE_SHA, ".safelane/policy.yaml")] = weakened.encode()
+
+    with pytest.raises(PolicyInvalid, match="analysis checkpoint"):
+        ChangeSafety(
+            host=host,
+            state_dir=tmp_path,
+            analyzer_factory=lambda policy: NoFindingAnalyzer(),
+        ).assess(PullRequestRef("acme/payments", 42))

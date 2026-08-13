@@ -330,6 +330,8 @@ button:focus-visible, a:focus-visible, select:focus-visible { outline: 2px solid
 .assessment-tags { display: flex; gap: 7px; flex-wrap: wrap; justify-content: flex-end; }
 .tag { display: inline-flex; padding: 5px 8px; border-radius: 999px; font-size: 9px; font-weight: 800; text-transform: uppercase; }
 .update { display: flex; gap: 8px; margin-bottom: 14px; padding: 10px 12px; border: 1px solid #cfe6dd; border-radius: 10px; color: #276951; background: #f2faf7; font-size: 11px; }
+.update.warning { border-color: #eed5aa; color: #8a5208; background: #fff8eb; }
+.release-compiler small { display: block; max-width: 620px; margin: 6px 0 10px; color: var(--muted); }
 .decision { display: grid; grid-template-columns: 145px 1fr; gap: 20px; align-items: center; padding: 18px; }
 .decision-value { padding: 16px; border-radius: 11px; color: #fff; background: #191c23; }
 .decision-value span { display: block; color: #99a2b3; font: 600 9px/1 var(--mono); text-transform: uppercase; }

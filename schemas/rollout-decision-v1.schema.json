@@ -3,7 +3,7 @@
   "$id": "https://safelane.dev/schemas/rollout-decision-v1.schema.json",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "assessment_id", "assessment_input_sha256", "assessment_result_sha256", "repository", "pull_request", "base_sha", "head_sha", "policy", "trusted_probe_catalog", "service", "tier", "profile", "trusted_probe", "resolution"],
+  "required": ["schema_version", "assessment_id", "assessment_input_sha256", "assessment_result_sha256", "repository", "pull_request", "base_sha", "head_sha", "policy", "trusted_probe_catalog", "service", "tier", "profile", "trusted_probe", "resolution", "authorization_signature"],
   "properties": {
     "schema_version": {"const": "rollout-decision-v1"},
     "assessment_id": {"type": "string", "minLength": 1},
@@ -19,7 +19,8 @@
     "tier": {"enum": ["safe", "guarded", "risky"]},
     "profile": {"$ref": "#/$defs/profile"},
     "trusted_probe": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/probe"}]},
-    "resolution": {"$ref": "#/$defs/resolution"}
+    "resolution": {"$ref": "#/$defs/resolution"},
+    "authorization_signature": {"type": "string", "pattern": "^hmac-sha256:[0-9a-f]{64}$"}
   },
   "$defs": {
     "hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},

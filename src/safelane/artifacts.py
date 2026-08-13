@@ -103,6 +103,7 @@ _DECLARED_ORDERS = (
     ("status", "resolution"),
     ("type", "selected_profile", "resolved_at", "assessment_id", "head_sha", "assessment_input_sha256", "assessment_result_sha256"),
     ("schema_version", "assessment_id", "assessment_input_sha256", "assessment_result_sha256", "repository", "pull_request", "base_sha", "head_sha", "service", "policy_version", "tier", "primary_reason", "profile", "analysis", "resolution"),
+    ("schema_version", "assessment_id", "assessment_input_sha256", "assessment_result_sha256", "repository", "pull_request", "base_sha", "head_sha", "policy", "trusted_probe_catalog", "service", "tier", "profile", "trusted_probe", "resolution", "authorization_signature"),
     ("name", "source", "traffic_router", "replicas", "max_surge", "max_unavailable", "stages"),
     ("set_weight", "exposure_pods", "analysis"),
     ("kind", "probe_id", "catalog_entry_sha256", "selection_source", "attempts", "interval_seconds", "failure_allowance", "request_timeout_seconds", "active_deadline_seconds"),

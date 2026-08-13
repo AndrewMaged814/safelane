@@ -4,16 +4,18 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+import safelane.change_safety as change_safety_module
 
 from safelane.change_safety import (
     AssessmentHandle,
     AssessmentStale,
     ChangeSafety,
     PullRequestRef,
+    ReleaseBinding,
     ResolutionCommand,
 )
 
-from .test_assess import FakePullRequestHost
+from .test_assess import FakePullRequestHost, TEST_IMAGE, register_test_image
 
 
 class NoFindingAnalyzer:
@@ -130,13 +132,21 @@ def test_new_head_removes_prior_authorizing_decision(tmp_path: Path) -> None:
         actor="andrew",
     ))
     decision_path = tmp_path / "acme--payments" / "pr-42" / "decision.json"
+    release_path = tmp_path / "acme--payments" / "pr-42" / "release" / "rollout.yaml"
     assert decision_path.exists()
+    register_test_image(safety)
+    safety.compile(ReleaseBinding(
+        handle=first.handle,
+        image=TEST_IMAGE,
+    ))
+    assert release_path.exists()
 
     host.snapshot = replace(host.snapshot, head_sha="c" * 40)
     second = safety.assess(PullRequestRef("acme/payments", 42))
 
     assert second.assessment["change"]["head_sha"] == "c" * 40
     assert not decision_path.exists()
+    assert not release_path.exists()
 
 
 def test_base_revision_move_invalidates_review_even_when_policy_bytes_match(
@@ -166,3 +176,37 @@ def test_base_revision_move_invalidates_review_even_when_policy_bytes_match(
             selected_profile="Guarded",
             actor="andrew",
         ))
+
+
+def test_interrupted_approval_never_leaves_a_compilable_authorization(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    safety = ChangeSafety(
+        host=GuardedHost(),
+        state_dir=tmp_path,
+        analyzer_factory=lambda policy: NoFindingAnalyzer(),
+        clock=iter([
+            "2026-08-12T09:00:00Z",
+            "2026-08-12T09:05:00Z",
+        ]).__next__,
+    )
+    assessed = safety.assess(PullRequestRef("acme/payments", 42))
+    register_test_image(safety)
+    real_write = change_safety_module._atomic_write
+
+    def interrupted_write(path: Path, data: bytes) -> None:
+        if path.name == "assessment.json" and b'"status": "approved"' in data:
+            raise OSError("simulated assessment publication failure")
+        real_write(path, data)
+
+    monkeypatch.setattr(change_safety_module, "_atomic_write", interrupted_write)
+    with pytest.raises(OSError, match="publication failure"):
+        safety.resolve(ResolutionCommand(
+            handle=assessed.handle,
+            action="approve",
+            selected_profile="Guarded",
+            actor="andrew",
+        ))
+
+    with pytest.raises(AssessmentStale, match="requires an approved assessment"):
+        safety.compile(ReleaseBinding(handle=assessed.handle, image=TEST_IMAGE))

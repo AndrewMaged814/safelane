@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from safelane.artifacts import canonical_json_bytes
 from safelane.change_safety import ChangeSafety
+from safelane.cli import _repository_state_root
 from safelane.repository_studio import RepositoryStudioService
 
-from .test_assess import PullRequestRef
+from .test_assess import PullRequestRef, TEST_IMAGE, register_test_image
 from .test_resolve import GuardedHost, NoFindingAnalyzer
 
 
@@ -26,6 +28,43 @@ class OpenPullRequests(GuardedHost):
             "updated_at": snapshot.updated_at,
             "is_draft": snapshot.is_draft,
         }]
+
+
+def test_cli_assessment_is_the_same_bytes_studio_reads_by_default(
+    tmp_path: Path,
+) -> None:
+    host = OpenPullRequests()
+    host.local_path = tmp_path
+    state_root = _repository_state_root(host, None)
+    cli_workflow = ChangeSafety(
+        host=host,
+        state_dir=state_root,
+        analyzer_factory=lambda policy: NoFindingAnalyzer(),
+        clock=lambda: "2026-08-12T09:00:00Z",
+    )
+    cli_outcome = cli_workflow.assess(PullRequestRef("acme/payments", 42))
+    assessment_path = state_root / "acme--payments" / "pr-42" / "assessment.json"
+    cli_bytes = assessment_path.read_bytes()
+
+    def unexpected_analyzer(policy):
+        raise AssertionError("Studio should reuse the CLI assessment")
+
+    studio_workflow = ChangeSafety(
+        host=host,
+        state_dir=state_root,
+        analyzer_factory=unexpected_analyzer,
+        clock=lambda: (_ for _ in ()).throw(
+            AssertionError("Studio should not timestamp a duplicate assessment")
+        ),
+    )
+    studio = RepositoryStudioService(
+        provider=host,
+        workflow=studio_workflow,
+        state_root=state_root,
+    )
+
+    assert studio.assessment(42) == cli_outcome.assessment
+    assert assessment_path.read_bytes() == cli_bytes
 
 
 def test_studio_projects_canonical_assessment_and_resolution(tmp_path: Path) -> None:
@@ -59,9 +98,10 @@ def test_studio_projects_canonical_assessment_and_resolution(tmp_path: Path) -> 
     assert detail["schema_version"] == "change-assessment-v1"
     assert resolved["review"]["status"] == "approved"
     assert resolved["decision"]["schema_version"] == "rollout-decision-v1"
+    register_test_image(workflow)
 
     release = studio.compile(42, {
-        "image": "ghcr.io/acme/payments@sha256:" + "c" * 64,
+        "image": TEST_IMAGE,
     }, approval_token=studio.approval_token)
 
     assert release["manifest"]["kind"] == "Rollout"
@@ -78,4 +118,19 @@ def test_studio_projects_canonical_assessment_and_resolution(tmp_path: Path) -> 
     }, approval_token=studio.approval_token)
 
     assert receipt["profile"] == "Guarded"
+    assert studio.outcomes()["total"] == 1
+
+    other = {
+        **receipt,
+        "repository": "acme/catalog",
+        "pull_request": 7,
+        "assessment_id": "acme/catalog#7@" + "d" * 40 + ":catalog-1",
+        "rollout_uid": "catalog-rollout-1",
+    }
+    other_path = (
+        tmp_path / "acme--catalog" / "pr-7" / "outcomes" / "catalog-rollout-1.json"
+    )
+    other_path.parent.mkdir(parents=True)
+    other_path.write_bytes(canonical_json_bytes(other))
+
     assert studio.outcomes()["total"] == 1
