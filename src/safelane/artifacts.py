@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 from pathlib import Path
@@ -61,6 +62,14 @@ def sha256(value: Any) -> str:
     return "sha256:" + hashlib.sha256(raw).hexdigest()
 
 
+def change_assessment_result_sha256(assessment: dict[str, Any]) -> str:
+    """Hash immutable reviewed content while excluding mutable review state."""
+    content = copy.deepcopy(assessment)
+    content.pop("assessment_result_sha256", None)
+    content.pop("review", None)
+    return sha256(content)
+
+
 _DECLARED_ORDERS = (
     ("schema_version", "repository", "pull_request", "base_sha", "head_sha"),
     ("schema_version", "request", "policy_sha256", "git_diff_sha256", "git_diff_byte_length", "incident_history", "trusted_probe_catalog_sha256", "ai_configuration"),
@@ -94,6 +103,7 @@ _DECLARED_ORDERS = (
     ("status", "resolution"),
     ("type", "selected_profile", "resolved_at", "assessment_id", "head_sha", "assessment_input_sha256", "assessment_result_sha256"),
     ("schema_version", "assessment_id", "assessment_input_sha256", "assessment_result_sha256", "repository", "pull_request", "base_sha", "head_sha", "service", "policy_version", "tier", "primary_reason", "profile", "analysis", "resolution"),
+    ("schema_version", "assessment_id", "assessment_input_sha256", "assessment_result_sha256", "repository", "pull_request", "base_sha", "head_sha", "policy", "trusted_probe_catalog", "service", "tier", "profile", "trusted_probe", "resolution", "authorization_signature"),
     ("name", "source", "traffic_router", "replicas", "max_surge", "max_unavailable", "stages"),
     ("set_weight", "exposure_pods", "analysis"),
     ("kind", "probe_id", "catalog_entry_sha256", "selection_source", "attempts", "interval_seconds", "failure_allowance", "request_timeout_seconds", "active_deadline_seconds"),
@@ -181,6 +191,10 @@ def _validate_semantics(schema_name: str, value: Any) -> None:
         _validate_image_catalog(value)
     elif schema_name == "probe-result-v1":
         _validate_probe_result(value)
+    elif schema_name == "change-assessment-v1":
+        _validate_change_assessment(value)
+    elif schema_name == "rollout-decision-v1":
+        _validate_rollout_decision(value)
 
 
 def _validate_decision(decision: dict[str, Any]) -> None:
@@ -253,3 +267,50 @@ def _validate_probe_result(result: dict[str, Any]) -> None:
     expected_result = "failed" if failures > result["failure_allowance"] else "passed"
     if result["failures"] != failures or result["result"] != expected_result:
         raise ArtifactError("probe result is internally inconsistent")
+
+
+def _validate_change_assessment(assessment: dict[str, Any]) -> None:
+    if assessment["assessment_result_sha256"] != change_assessment_result_sha256(
+        assessment
+    ):
+        raise ArtifactError("change assessment result hash does not match its content")
+    base_sha = assessment["change"]["base_sha"]
+    if (
+        assessment["policy"]["source_revision"] != base_sha
+        or assessment["trusted_probe_catalog"]["source_revision"] != base_sha
+    ):
+        raise ArtifactError("change assessment provenance must come from the base SHA")
+    tier = assessment["risk"]["tier"]
+    minimum = assessment["risk"]["minimum_profile"]
+    if minimum != {"safe": "Fast", "guarded": "Guarded", "risky": "Strict"}[tier]:
+        raise ArtifactError("change assessment tier and minimum profile disagree")
+    catalog_names = [profile["name"] for profile in assessment["rollout_catalog"]]
+    if catalog_names != ["Fast", "Guarded", "Strict"]:
+        raise ArtifactError("change assessment rollout catalog is not canonical")
+    allowed = {
+        "safe": ["Fast"],
+        "guarded": ["Guarded", "Strict"],
+        "risky": ["Strict"],
+    }[tier]
+    if [profile["name"] for profile in assessment["rollout_options"]] != allowed:
+        raise ArtifactError("change assessment rollout options violate the tier floor")
+    if (tier == "safe") != (assessment["selected_trusted_probe"] is None):
+        raise ArtifactError("trusted probe selection disagrees with the risk tier")
+
+
+def _validate_rollout_decision(decision: dict[str, Any]) -> None:
+    if (
+        decision["policy"]["source_revision"] != decision["base_sha"]
+        or decision["trusted_probe_catalog"]["source_revision"] != decision["base_sha"]
+    ):
+        raise ArtifactError("rollout decision provenance must come from the base SHA")
+    tier = decision["tier"]
+    profile = decision["profile"]["name"]
+    if profile not in {
+        "safe": {"Fast"},
+        "guarded": {"Guarded", "Strict"},
+        "risky": {"Strict"},
+    }[tier]:
+        raise ArtifactError("rollout decision profile violates the tier floor")
+    if (profile == "Fast") != (decision["trusted_probe"] is None):
+        raise ArtifactError("rollout decision trusted probe disagrees with its profile")

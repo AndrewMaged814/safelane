@@ -1,0 +1,196 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://safelane.dev/schemas/repository-policy-v1.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "policy_version",
+    "release_service",
+    "scope",
+    "ai",
+    "safety_case",
+    "image_provenance",
+    "trusted_probe_catalog",
+    "rollout",
+    "profiles"
+  ],
+  "properties": {
+    "schema_version": {"const": "1"},
+    "policy_version": {"type": "string", "minLength": 1, "maxLength": 128},
+    "release_service": {"$ref": "#/$defs/release_service"},
+    "scope": {"$ref": "#/$defs/scope"},
+    "ai": {"$ref": "#/$defs/ai"},
+    "safety_case": {"$ref": "#/$defs/safety_case"},
+    "image_provenance": {"$ref": "#/$defs/image_provenance"},
+    "trusted_probe_catalog": {"$ref": "#/$defs/trusted_probe_catalog"},
+    "rollout": {"$ref": "#/$defs/rollout"},
+    "profiles": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["Fast", "Guarded", "Strict"],
+      "properties": {
+        "Fast": {"$ref": "#/$defs/profile"},
+        "Guarded": {"$ref": "#/$defs/profile"},
+        "Strict": {"$ref": "#/$defs/profile"}
+      }
+    }
+  },
+  "$defs": {
+    "release_service": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "replicas", "critical", "downstream_dependents", "path_prefixes", "deployment"],
+      "properties": {
+        "name": {"type": "string", "pattern": "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$"},
+        "replicas": {"type": "integer", "minimum": 1, "maximum": 1000},
+        "critical": {"type": "boolean"},
+        "downstream_dependents": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1, "maxLength": 128}
+        },
+        "path_prefixes": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1, "maxLength": 512}
+        },
+        "deployment": {"$ref": "#/$defs/deployment"}
+      }
+    },
+    "deployment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["namespace", "rollout_name", "container_name", "workload_label"],
+      "properties": {
+        "namespace": {"$ref": "#/$defs/dns_label"},
+        "rollout_name": {"$ref": "#/$defs/dns_label"},
+        "container_name": {"$ref": "#/$defs/dns_label"},
+        "workload_label": {"$ref": "#/$defs/dns_label"}
+      }
+    },
+    "dns_label": {
+      "type": "string",
+      "pattern": "^[a-z0-9](?:[-a-z0-9]{0,61}[a-z0-9])?$"
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["small_max_files", "small_max_lines", "large_min_files", "large_min_lines"],
+      "properties": {
+        "small_max_files": {"type": "integer", "minimum": 1},
+        "small_max_lines": {"type": "integer", "minimum": 1},
+        "large_min_files": {"type": "integer", "minimum": 2},
+        "large_min_lines": {"type": "integer", "minimum": 2}
+      }
+    },
+    "ai": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "model", "max_diff_bytes", "timeout_seconds", "attempts", "temperature", "seed", "num_ctx", "num_predict"],
+      "properties": {
+        "provider": {"const": "ollama"},
+        "model": {"type": "string", "minLength": 1, "maxLength": 256},
+        "max_diff_bytes": {"type": "integer", "minimum": 1, "maximum": 1048576},
+        "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 600},
+        "attempts": {"const": 1},
+        "temperature": {"const": 0},
+        "seed": {"type": "integer"},
+        "num_ctx": {"type": "integer", "minimum": 1024},
+        "num_predict": {"type": "integer", "minimum": 64}
+      }
+    },
+    "safety_case": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["accepted_categories", "minimum_tier"],
+      "properties": {
+        "accepted_categories": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"enum": ["availability", "compatibility", "data", "security", "operability"]}
+        },
+        "minimum_tier": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["availability", "compatibility", "data", "security", "operability"],
+          "properties": {
+            "availability": {"enum": ["guarded", "risky"]},
+            "compatibility": {"enum": ["guarded", "risky"]},
+            "data": {"enum": ["guarded", "risky"]},
+            "security": {"enum": ["guarded", "risky"]},
+            "operability": {"enum": ["guarded", "risky"]}
+          }
+        }
+      }
+    },
+    "trusted_probe_catalog": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "non_fast_fallback_probe_id", "category_bindings"],
+      "properties": {
+        "path": {"type": "string", "pattern": "^\\.safelane/[A-Za-z0-9._/-]+\\.ya?ml$"},
+        "non_fast_fallback_probe_id": {"$ref": "#/$defs/dns_label"},
+        "category_bindings": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["availability", "compatibility", "data", "security", "operability"],
+          "properties": {
+            "availability": {"$ref": "#/$defs/dns_label"},
+            "compatibility": {"$ref": "#/$defs/dns_label"},
+            "data": {"$ref": "#/$defs/dns_label"},
+            "security": {"$ref": "#/$defs/dns_label"},
+            "operability": {"$ref": "#/$defs/dns_label"}
+          }
+        }
+      }
+    },
+    "image_provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "signer_workflow"],
+      "properties": {
+        "provider": {"const": "github_artifact_attestation"},
+        "signer_workflow": {
+          "type": "string",
+          "pattern": "^[^/]+/[^/]+/\\.github/workflows/[A-Za-z0-9._/-]+\\.ya?ml$"
+        }
+      }
+    },
+    "rollout": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["traffic_router", "max_surge", "max_unavailable"],
+      "properties": {
+        "traffic_router": {"enum": ["none"]},
+        "max_surge": {"type": "integer", "minimum": 0},
+        "max_unavailable": {"type": "integer", "minimum": 0}
+      }
+    },
+    "profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["stages"],
+      "properties": {
+        "stages": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 10,
+          "items": {"$ref": "#/$defs/stage"}
+        }
+      }
+    },
+    "stage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["set_weight", "exposure_pods", "analysis"],
+      "properties": {
+        "set_weight": {"type": "integer", "minimum": 1, "maximum": 100},
+        "exposure_pods": {"type": "integer", "minimum": 1, "maximum": 1000},
+        "analysis": {"type": "boolean"}
+      }
+    }
+  }
+}

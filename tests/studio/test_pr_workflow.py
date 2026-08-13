@@ -128,7 +128,7 @@ def test_remote_github_repository_is_normalized_and_open_prs_are_mapped() -> Non
         (
             "pr", "list", "--repo", "acme/payments", "--state", "open",
             "--limit", "100", "--json",
-            "number,title,url,author,headRefName,baseRefName,headRefOid,baseRefOid,updatedAt,isDraft",
+            "number,title,url,author,headRefName,baseRefName,headRefOid,baseRefOid,updatedAt,isDraft,state",
         ),
         (
             "api", f"repos/acme/payments/compare/{'a' * 40}...{'b' * 40}",

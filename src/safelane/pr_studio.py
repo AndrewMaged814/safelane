@@ -39,7 +39,7 @@ class GitHubPullRequestProvider:
 
     _FIELDS = (
         "number,title,url,author,headRefName,baseRefName,headRefOid,baseRefOid,"
-        "updatedAt,isDraft"
+        "updatedAt,isDraft,state"
     )
 
     def __init__(
@@ -75,24 +75,52 @@ class GitHubPullRequestProvider:
             raise PullRequestStudioError("GitHub returned invalid pull-request data")
         pull_requests: list[dict[str, Any]] = []
         for value in values:
-            try:
-                author = value["author"]["login"]
-                item = {
-                    "number": value["number"],
-                    "title": value["title"],
-                    "url": value["url"],
-                    "author": author,
-                    "head_ref": value["headRefName"],
-                    "base_ref": value["baseRefName"],
-                    "head_sha": value["headRefOid"],
-                    "base_sha": value["baseRefOid"],
-                    "updated_at": value["updatedAt"],
-                    "is_draft": value["isDraft"],
-                }
-            except (KeyError, TypeError) as exc:
-                raise PullRequestStudioError("GitHub returned an incomplete pull request") from exc
-            pull_requests.append(item)
+            pull_requests.append(_pull_request_dict(value))
         return pull_requests
+
+    def get_pull_request(self, change: Any) -> Any:
+        from .change_safety import PullRequestSnapshot
+
+        if change.repository != self.repository:
+            raise PullRequestStudioError("pull request belongs to another repository")
+        raw = self._runner(
+            (
+                "pr", "view", str(change.number), "--repo", self.repository,
+                "--json", self._FIELDS,
+            ),
+            None,
+        )
+        try:
+            value = json.loads(raw)
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise PullRequestStudioError("GitHub returned invalid pull-request data") from exc
+        if value.get("state") != "OPEN":
+            raise PullRequestStudioError("pull request is not open")
+        item = _pull_request_dict(value)
+        return PullRequestSnapshot(repository=self.repository, **item)
+
+    def read_file(self, repository: str, revision: str, path: str) -> bytes:
+        if repository != self.repository:
+            raise PullRequestStudioError("repository does not match this GitHub adapter")
+        normalized = path.lstrip("/")
+        return self._runner(
+            (
+                "api", f"repos/{repository}/contents/{normalized}?ref={revision}",
+                "--header", "Accept: application/vnd.github.raw+json",
+            ),
+            None,
+        )
+
+    def diff(self, snapshot: Any) -> bytes:
+        if snapshot.repository != self.repository:
+            raise PullRequestStudioError("pull request belongs to another repository")
+        return self.pull_request_diff(
+            snapshot.number, snapshot.base_sha, snapshot.head_sha
+        )
+
+    @property
+    def command_runner(self) -> CommandRunner:
+        return self._runner
 
     def pull_request_diff(self, number: int, base_sha: str, head_sha: str) -> bytes:
         del number
@@ -112,6 +140,27 @@ class PullRequestProvider(Protocol):
     def list_open_pull_requests(self) -> list[dict[str, Any]]: ...
 
     def pull_request_diff(self, number: int, base_sha: str, head_sha: str) -> bytes: ...
+
+
+def _pull_request_dict(value: Any) -> dict[str, Any]:
+    try:
+        author = value["author"]["login"]
+        return {
+            "number": value["number"],
+            "title": value["title"],
+            "url": value["url"],
+            "author": author,
+            "head_ref": value["headRefName"],
+            "base_ref": value["baseRefName"],
+            "head_sha": value["headRefOid"],
+            "base_sha": value["baseRefOid"],
+            "updated_at": value["updatedAt"],
+            "is_draft": value["isDraft"],
+        }
+    except (KeyError, TypeError) as exc:
+        raise PullRequestStudioError(
+            "GitHub returned an incomplete pull request"
+        ) from exc
 
 
 class PullRequestAssessor(Protocol):
@@ -139,7 +188,6 @@ _ANALYSIS_SCHEMA: dict[str, Any] = {
                 "additionalProperties": False,
                 "required": [
                     "category",
-                    "severity",
                     "hypothesis_kind",
                     "verification_intent_kind",
                     "approval_question_kind",
@@ -153,7 +201,6 @@ _ANALYSIS_SCHEMA: dict[str, Any] = {
                             "operability",
                         ]
                     },
-                    "severity": {"enum": ["low", "medium", "high"]},
                     "hypothesis_kind": {
                         "const": "changed_behavior_may_violate_contract"
                     },
@@ -250,7 +297,7 @@ class OllamaPullRequestAnalyzer:
             "Review this exact pull-request diff for concrete release risks. Return only JSON "
             "matching the schema. Every finding must cite one or more tuples copied exactly from "
             "AUTHORIZED SPANS. Do not invent incidents, runtime facts, files, or line numbers. "
-            "Choose only a category and severity; SafeLane renders all explanatory prose. "
+            "Choose only a safety-case category; backend policy maps it to rollout care. "
             "Use an empty findings array when the diff does not support a concrete claim.\n\n"
             f"AUTHORIZED SPANS\n{canonical_json_bytes(authorized_spans).decode().rstrip()}\n\n"
             f"DIFF\n{raw_diff.decode('utf-8')}"
@@ -291,14 +338,25 @@ class PullRequestAssessmentEngine:
 
     _TIER_RANK = {"safe": 0, "guarded": 1, "risky": 2}
 
-    def __init__(self, *, policy_path: Path, analyzer: PullRequestAnalyzer) -> None:
-        self.policy = load_yaml_bytes(policy_path.read_bytes())
+    def __init__(
+        self,
+        *,
+        analyzer: PullRequestAnalyzer,
+        policy_path: Path | None = None,
+        policy: dict[str, Any] | None = None,
+    ) -> None:
+        if (policy_path is None) == (policy is None):
+            raise ValueError("provide exactly one of policy_path or policy")
+        self.policy = (
+            load_yaml_bytes(policy_path.read_bytes())
+            if policy_path is not None
+            else copy.deepcopy(policy)
+        )
         self.analyzer = analyzer
 
     def assess(
         self, repository: str, pull_request: dict[str, Any], diff: bytes
     ) -> dict[str, Any]:
-        del repository, pull_request
         metadata_files, binary_patch = parse_diff_metadata(diff)
         valid_utf8 = True
         try:
@@ -346,6 +404,13 @@ class PullRequestAssessmentEngine:
             if finding is None:
                 invalid_finding = True
             else:
+                identity = sha256({
+                    "repository": repository,
+                    "head_sha": pull_request.get("head_sha"),
+                    "category": finding["category"],
+                    "spans": finding["spans"],
+                }).removeprefix("sha256:")[:16]
+                finding["id"] = f"finding-{identity}"
                 findings.append(finding)
         if invalid_finding and ai_status == "complete":
             ai_status = "partial"
@@ -364,13 +429,21 @@ class PullRequestAssessmentEngine:
         else:
             tier = "guarded"
             reason = "This PR is outside the bounded Fast scope."
+        scope_tier = tier
 
-        high = next((item for item in findings if item["severity"] == "high"), None)
-        medium = next((item for item in findings if item["severity"] == "medium"), None)
-        if high is not None:
-            tier, reason = "risky", high["title"]
-        elif medium is not None and self._TIER_RANK[tier] < self._TIER_RANK["guarded"]:
-            tier, reason = "guarded", medium["title"]
+        if "safety_case" in self.policy:
+            for finding in findings:
+                floor = self.policy["safety_case"]["minimum_tier"][finding["category"]]
+                finding["policy_floor"] = floor
+                if self._TIER_RANK[floor] > self._TIER_RANK[tier]:
+                    tier, reason = floor, finding["title"]
+        else:
+            high = next((item for item in findings if item["severity"] == "high"), None)
+            medium = next((item for item in findings if item["severity"] == "medium"), None)
+            if high is not None:
+                tier, reason = "risky", high["title"]
+            elif medium is not None and self._TIER_RANK[tier] < self._TIER_RANK["guarded"]:
+                tier, reason = "guarded", medium["title"]
         if ai_status != "complete" and tier == "safe":
             tier = "guarded"
             reason = "AI evidence is incomplete, so SafeLane will not infer Fast eligibility."
@@ -384,13 +457,24 @@ class PullRequestAssessmentEngine:
             "guarded": ["Guarded", "Strict"],
             "risky": ["Strict"],
         }[tier]
+        policy_rules = [f"scope.{scope_tier}"]
+        policy_rules.extend(
+            f"safety_case.{finding['category']}" for finding in findings
+        )
+        if ai_status != "complete":
+            policy_rules.append("evidence.ai_incomplete")
+        if not all_paths_recognized:
+            policy_rules.append("evidence.path_unrecognized")
+        if binary_patch:
+            policy_rules.append("evidence.binary_patch")
         return {
             "tier": tier,
             "profile": profile,
             "reason": reason,
             "confidence": "high" if ai_status == "complete" else "low",
             "findings": findings,
-            "rollout_options": [_profile(name) for name in option_names],
+            "policy_rules": policy_rules,
+            "rollout_options": [self._profile(name) for name in option_names],
             "evidence": {
                 "ai_status": ai_status,
                 "files_changed": len(files),
@@ -401,28 +485,51 @@ class PullRequestAssessmentEngine:
             },
         }
 
-    @staticmethod
+    def _profile(self, name: str) -> dict[str, Any]:
+        configured = self.policy["profiles"][name]
+        rollout = self.policy.get(
+            "rollout",
+            {"traffic_router": "none", "max_surge": 1, "max_unavailable": 0},
+        )
+        return {
+            "name": name,
+            "source": "repository_policy",
+            "traffic_router": rollout["traffic_router"],
+            "replicas": self.policy["release_service"]["replicas"],
+            "max_surge": rollout["max_surge"],
+            "max_unavailable": rollout["max_unavailable"],
+            "stages": copy.deepcopy(configured["stages"]),
+        }
+
+    def profile_catalog(self) -> list[dict[str, Any]]:
+        return [self._profile(name) for name in ("Fast", "Guarded", "Strict")]
+
     def _verified_finding(
-        candidate: Any, allowed: set[DiffSpan], index: int
+        self, candidate: Any, allowed: set[DiffSpan], index: int
     ) -> dict[str, Any] | None:
         if not isinstance(candidate, dict):
             return None
         required = {
             "category",
-            "severity",
             "hypothesis_kind",
             "verification_intent_kind",
             "approval_question_kind",
             "remediation_kind",
             "spans",
         }
+        repository_policy = "safety_case" in self.policy
+        if not repository_policy:
+            required.add("severity")
         if set(candidate) != required:
             return None
-        if candidate["severity"] not in {"low", "medium", "high"}:
+        if not repository_policy and candidate["severity"] not in {"low", "medium", "high"}:
             return None
-        if candidate["category"] not in {
-            "availability", "compatibility", "data", "security", "operability"
-        }:
+        accepted = (
+            set(self.policy["safety_case"]["accepted_categories"])
+            if repository_policy
+            else {"availability", "compatibility", "data", "security", "operability"}
+        )
+        if candidate["category"] not in accepted:
             return None
         expected_kinds = {
             "hypothesis_kind": "changed_behavior_may_violate_contract",
@@ -445,16 +552,18 @@ class PullRequestAssessmentEngine:
         if any(span not in allowed for span in cited):
             return None
         title, rationale = _FINDING_COPY[candidate["category"]]
-        return {
+        finding = {
             "id": f"finding-{index:03d}",
             "title": title,
             "category": candidate["category"],
-            "severity": candidate["severity"],
             "rationale": rationale,
             "spans": candidate["spans"],
             "safety_case": expected_kinds,
             "source_references_verified": True,
         }
+        if not repository_policy:
+            finding["severity"] = candidate["severity"]
+        return finding
 
 
 class PullRequestStudioService:

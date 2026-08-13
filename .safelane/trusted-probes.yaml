@@ -1,0 +1,9 @@
+schema_version: "1"
+catalog_version: "safelane-probes-2026.08.1"
+probes:
+  - id: safelane-health
+    analysis_template: safelane-health
+    description: Verify the approved service health contract during staged exposure.
+  - id: safelane-contract
+    analysis_template: safelane-contract
+    description: Verify the repository-approved changed contract during staged exposure.

@@ -1,0 +1,139 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://safelane.dev/schemas/change-assessment-v1.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "assessment_id", "assessed_at", "assessment_input_sha256", "assessment_result_sha256", "policy", "trusted_probe_catalog", "change", "service", "image_provenance", "risk", "evidence", "findings", "policy_rule_ids", "selected_trusted_probe", "rollout_options", "rollout_catalog", "review"],
+  "properties": {
+    "schema_version": {"const": "change-assessment-v1"},
+    "assessment_id": {"type": "string", "minLength": 1},
+    "assessed_at": {"type": "string", "minLength": 20},
+    "assessment_input_sha256": {"$ref": "#/$defs/hash"},
+    "assessment_result_sha256": {"$ref": "#/$defs/hash"},
+    "policy": {"$ref": "#/$defs/provenance"},
+    "trusted_probe_catalog": {"$ref": "#/$defs/provenance"},
+    "change": {"$ref": "#/$defs/change"},
+    "service": {"$ref": "#/$defs/service"},
+    "image_provenance": {"$ref": "#/$defs/image_provenance"},
+    "risk": {"$ref": "#/$defs/risk"},
+    "evidence": {"$ref": "#/$defs/evidence"},
+    "findings": {"type": "array", "maxItems": 1, "items": {"$ref": "#/$defs/finding"}},
+    "policy_rule_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+    "selected_trusted_probe": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/probe"}]},
+    "rollout_options": {"type": "array", "minItems": 1, "maxItems": 2, "items": {"$ref": "#/$defs/profile"}},
+    "rollout_catalog": {"type": "array", "minItems": 3, "maxItems": 3, "items": {"$ref": "#/$defs/profile"}},
+    "review": {"$ref": "#/$defs/review"}
+  },
+  "$defs": {
+    "hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "git_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "provenance": {
+      "type": "object", "additionalProperties": false,
+      "required": ["version", "source_revision", "sha256"],
+      "properties": {"version": {"type": "string", "minLength": 1}, "source_revision": {"$ref": "#/$defs/git_sha"}, "sha256": {"$ref": "#/$defs/hash"}}
+    },
+    "change": {
+      "type": "object", "additionalProperties": false,
+      "required": ["repository", "number", "title", "url", "author", "base_ref", "head_ref", "base_sha", "head_sha", "updated_at", "is_draft"],
+      "properties": {
+        "repository": {"type": "string", "pattern": "^[^/]+/[^/]+$"}, "number": {"type": "integer", "minimum": 1},
+        "title": {"type": "string"}, "url": {"type": "string"}, "author": {"type": "string", "minLength": 1},
+        "base_ref": {"type": "string", "minLength": 1}, "head_ref": {"type": "string", "minLength": 1},
+        "base_sha": {"$ref": "#/$defs/git_sha"}, "head_sha": {"$ref": "#/$defs/git_sha"},
+        "updated_at": {"type": "string", "minLength": 1}, "is_draft": {"type": "boolean"}
+      }
+    },
+    "service": {
+      "type": "object", "additionalProperties": false,
+      "required": ["name", "replicas", "critical", "downstream_dependents", "path_prefixes", "deployment"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1}, "replicas": {"type": "integer", "minimum": 1}, "critical": {"type": "boolean"},
+        "downstream_dependents": {"type": "array", "items": {"type": "string"}}, "path_prefixes": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+        "deployment": {
+          "type": "object", "additionalProperties": false,
+          "required": ["namespace", "rollout_name", "container_name", "workload_label"],
+          "properties": {"namespace": {"type": "string"}, "rollout_name": {"type": "string"}, "container_name": {"type": "string"}, "workload_label": {"type": "string"}}
+        }
+      }
+    },
+    "image_provenance": {
+      "type": "object", "additionalProperties": false,
+      "required": ["provider", "signer_workflow"],
+      "properties": {
+        "provider": {"const": "github_artifact_attestation"},
+        "signer_workflow": {"type": "string", "minLength": 1}
+      }
+    },
+    "risk": {
+      "type": "object", "additionalProperties": false,
+      "required": ["tier", "minimum_profile", "reason", "evidence_confidence"],
+      "properties": {"tier": {"enum": ["safe", "guarded", "risky"]}, "minimum_profile": {"enum": ["Fast", "Guarded", "Strict"]}, "reason": {"type": "string", "minLength": 1}, "evidence_confidence": {"enum": ["high", "low"]}}
+    },
+    "evidence": {
+      "type": "object", "additionalProperties": false,
+      "required": ["git_diff_sha256", "ai_status", "files_changed", "lines_changed", "valid_utf8", "binary_patch", "all_paths_recognized"],
+      "properties": {
+        "git_diff_sha256": {"$ref": "#/$defs/hash"},
+        "ai_status": {"enum": ["complete", "partial", "invalid", "unavailable", "skipped_invalid_diff", "skipped_binary_diff", "skipped_over_budget"]},
+        "files_changed": {"type": "integer", "minimum": 0}, "lines_changed": {"type": "integer", "minimum": 0},
+        "valid_utf8": {"type": "boolean"}, "binary_patch": {"type": "boolean"}, "all_paths_recognized": {"type": "boolean"}
+      }
+    },
+    "finding": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "title", "category", "rationale", "spans", "safety_case", "source_references_verified", "policy_floor"],
+      "properties": {
+        "id": {"type": "string"}, "title": {"type": "string"}, "category": {"enum": ["availability", "compatibility", "data", "security", "operability"]},
+        "rationale": {"type": "string"}, "spans": {"type": "array", "minItems": 1, "maxItems": 4, "items": {"$ref": "#/$defs/span"}},
+        "safety_case": {"$ref": "#/$defs/safety_case"}, "source_references_verified": {"const": true}, "policy_floor": {"enum": ["guarded", "risky"]}
+      }
+    },
+    "span": {
+      "type": "object", "additionalProperties": false, "required": ["file", "side", "line", "text"],
+      "properties": {"file": {"type": "string"}, "side": {"enum": ["added", "removed"]}, "line": {"type": "integer", "minimum": 1}, "text": {"type": "string"}}
+    },
+    "safety_case": {
+      "type": "object", "additionalProperties": false,
+      "required": ["hypothesis_kind", "verification_intent_kind", "approval_question_kind", "remediation_kind"],
+      "properties": {
+        "hypothesis_kind": {"const": "changed_behavior_may_violate_contract"}, "verification_intent_kind": {"const": "verify_changed_contract_during_rollout"},
+        "approval_question_kind": {"const": "confirm_contract_is_preserved"}, "remediation_kind": {"const": "preserve_previous_contract_or_add_compatibility"}
+      }
+    },
+    "probe": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "catalog_entry_sha256", "analysis_template", "selection_source"],
+      "properties": {"id": {"type": "string"}, "catalog_entry_sha256": {"$ref": "#/$defs/hash"}, "analysis_template": {"type": "string"}, "selection_source": {"enum": ["ai_safety_case", "policy_fallback"]}}
+    },
+    "profile": {
+      "type": "object", "additionalProperties": false,
+      "required": ["name", "source", "traffic_router", "replicas", "max_surge", "max_unavailable", "stages"],
+      "properties": {
+        "name": {"enum": ["Fast", "Guarded", "Strict"]}, "source": {"const": "repository_policy"}, "traffic_router": {"const": "none"},
+        "replicas": {"type": "integer", "minimum": 1}, "max_surge": {"type": "integer", "minimum": 0}, "max_unavailable": {"type": "integer", "minimum": 0},
+        "stages": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/stage"}}
+      }
+    },
+    "stage": {
+      "type": "object", "additionalProperties": false, "required": ["set_weight", "exposure_pods", "analysis"],
+      "properties": {"set_weight": {"type": "integer", "minimum": 1, "maximum": 100}, "exposure_pods": {"type": "integer", "minimum": 1}, "analysis": {"type": "boolean"}}
+    },
+    "review": {
+      "oneOf": [
+        {"type": "object", "additionalProperties": false, "required": ["status", "resolution"], "properties": {"status": {"const": "unresolved"}, "resolution": {"type": "null"}}},
+        {"type": "object", "additionalProperties": false, "required": ["status", "resolution"], "properties": {"status": {"const": "approved"}, "resolution": {"$ref": "#/$defs/approval"}}},
+        {"type": "object", "additionalProperties": false, "required": ["status", "resolution"], "properties": {"status": {"const": "rejected"}, "resolution": {"$ref": "#/$defs/rejection"}}}
+      ]
+    },
+    "approval": {
+      "oneOf": [
+        {"type": "object", "additionalProperties": false, "required": ["type", "selected_profile", "resolved_at"], "properties": {"type": {"const": "automatic"}, "selected_profile": {"const": "Fast"}, "resolved_at": {"type": "string"}}},
+        {"type": "object", "additionalProperties": false, "required": ["type", "action", "actor", "selected_profile", "resolved_at"], "properties": {"type": {"const": "human"}, "action": {"const": "approve"}, "actor": {"type": "string", "minLength": 1}, "selected_profile": {"enum": ["Guarded", "Strict"]}, "resolved_at": {"type": "string"}}}
+      ]
+    },
+    "rejection": {
+      "type": "object", "additionalProperties": false, "required": ["type", "action", "actor", "selected_profile", "resolved_at"],
+      "properties": {"type": {"const": "human"}, "action": {"const": "reject"}, "actor": {"type": "string", "minLength": 1}, "selected_profile": {"type": "null"}, "resolved_at": {"type": "string"}}
+    }
+  }
+}

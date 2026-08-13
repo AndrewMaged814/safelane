@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://safelane.dev/schemas/rollout-outcome-v1.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "recorded_at", "repository", "pull_request",
+    "assessment_id", "assessment_result_sha256", "decision_sha256",
+    "rollout_manifest_sha256", "base_sha", "head_sha", "policy_sha256", "image_catalog_sha256",
+    "tier", "profile", "trusted_probe_id", "trusted_probe_entry_sha256", "policy_rule_ids", "finding_ids", "image", "rollout_uid", "result", "stages",
+    "incident_within_24h"
+  ],
+  "properties": {
+    "schema_version": {"const": "rollout-outcome-v1"},
+    "recorded_at": {"type": "string", "format": "date-time"},
+    "repository": {"type": "string", "pattern": "^[^/]+/[^/]+$"},
+    "pull_request": {"type": "integer", "minimum": 1},
+    "assessment_id": {"type": "string", "minLength": 1},
+    "assessment_result_sha256": {"$ref": "#/$defs/hash"},
+    "decision_sha256": {"$ref": "#/$defs/hash"},
+    "rollout_manifest_sha256": {"$ref": "#/$defs/hash"},
+    "base_sha": {"$ref": "#/$defs/git_sha"},
+    "head_sha": {"$ref": "#/$defs/git_sha"},
+    "policy_sha256": {"$ref": "#/$defs/hash"},
+    "image_catalog_sha256": {"$ref": "#/$defs/hash"},
+    "tier": {"enum": ["safe", "guarded", "risky"]},
+    "profile": {"enum": ["Fast", "Guarded", "Strict"]},
+    "trusted_probe_id": {"type": ["string", "null"]},
+    "trusted_probe_entry_sha256": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/hash"}]},
+    "policy_rule_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+    "finding_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+    "image": {"type": "string", "pattern": "^.+@sha256:[0-9a-f]{64}$"},
+    "rollout_uid": {"type": "string", "pattern": "^[A-Za-z0-9._-]{1,128}$"},
+    "result": {"enum": ["succeeded", "failed", "aborted", "inconclusive"]},
+    "stages": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["index", "set_weight", "outcome", "analysis_outcome"],
+        "properties": {
+          "index": {"type": "integer", "minimum": 1},
+          "set_weight": {"type": "integer", "minimum": 1, "maximum": 100},
+          "outcome": {"enum": ["succeeded", "failed", "skipped"]},
+          "analysis_outcome": {"enum": ["passed", "failed", "not_run"]}
+        }
+      }
+    },
+    "incident_within_24h": {"type": ["boolean", "null"]}
+  },
+  "$defs": {
+    "hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "git_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"}
+  }
+}
