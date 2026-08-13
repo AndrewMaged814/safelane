@@ -15,6 +15,7 @@ from .artifacts import (
     validate_artifact,
 )
 from .state_io import atomic_write as _atomic_write
+from .change_safety import argo_rollout_for_decision, rollout_decision_for_assessment
 
 
 class OutcomeError(RuntimeError):
@@ -71,6 +72,17 @@ class OutcomeLedger:
             raise OutcomeError("outcome does not match the compiled pull request")
         annotations = manifest["metadata"]["annotations"]
         decision_hash = sha256(decision)
+        try:
+            expected_decision = rollout_decision_for_assessment(assessment)
+            expected_manifest = argo_rollout_for_decision(
+                assessment,
+                decision,
+                manifest["spec"]["template"]["spec"]["containers"][0]["image"],
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise OutcomeError("compiled rollout authorization is inconsistent") from exc
+        if decision != expected_decision or manifest != expected_manifest:
+            raise OutcomeError("compiled rollout authorization is inconsistent")
         if (
             annotations["safelane.dev/assessment-id"] != assessment["assessment_id"]
             or annotations["safelane.dev/assessment-result-sha256"]

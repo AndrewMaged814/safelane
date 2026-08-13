@@ -3,8 +3,15 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+import yaml
 
-from safelane.artifacts import canonical_json_bytes, load_json_bytes, validate_artifact
+from safelane.artifacts import (
+    canonical_json_bytes,
+    load_json_bytes,
+    load_yaml_bytes,
+    sha256,
+    validate_artifact,
+)
 from safelane.change_safety import (
     ChangeSafety,
     PullRequestRef,
@@ -118,6 +125,57 @@ def test_outcome_rejects_assessment_content_changed_after_compilation(
             repository="acme/payments",
             pull_request=42,
             rollout_uid="rollout-uid-forged",
+            result="succeeded",
+            stages=(
+                StageObservation(40, "succeeded", "passed"),
+                StageObservation(100, "succeeded", "not_run"),
+            ),
+            incident_within_24h=False,
+        ))
+
+
+def test_outcome_rejects_decision_not_exactly_derived_from_assessment(
+    tmp_path: Path,
+) -> None:
+    safety = ChangeSafety(
+        host=GuardedHost(),
+        state_dir=tmp_path,
+        analyzer_factory=lambda policy: NoFindingAnalyzer(),
+        clock=iter([
+            "2026-08-12T09:00:00Z",
+            "2026-08-12T09:05:00Z",
+        ]).__next__,
+    )
+    assessed = safety.assess(PullRequestRef("acme/payments", 42))
+    safety.resolve(ResolutionCommand(
+        handle=assessed.handle,
+        action="approve",
+        selected_profile="Guarded",
+        actor="andrew",
+    ))
+    safety.compile(ReleaseBinding(
+        handle=assessed.handle,
+        image="ghcr.io/acme/payments@sha256:" + "c" * 64,
+    ))
+    directory = tmp_path / "acme--payments" / "pr-42"
+    decision_path = directory / "decision.json"
+    manifest_path = directory / "release" / "rollout.yaml"
+    decision = load_json_bytes(decision_path.read_bytes())
+    decision["resolution"]["actor"] = "forged-reviewer"
+    manifest = load_yaml_bytes(manifest_path.read_bytes())
+    manifest["metadata"]["annotations"]["safelane.dev/decision-sha256"] = sha256(
+        decision
+    )
+    decision_path.write_bytes(canonical_json_bytes(decision))
+    manifest_path.write_bytes(
+        yaml.safe_dump(manifest, sort_keys=False).encode("utf-8")
+    )
+
+    with pytest.raises(OutcomeError, match="authorization is inconsistent"):
+        OutcomeLedger(state_dir=tmp_path).record(OutcomeObservation(
+            repository="acme/payments",
+            pull_request=42,
+            rollout_uid="rollout-uid-forged-decision",
             result="succeeded",
             stages=(
                 StageObservation(40, "succeeded", "passed"),

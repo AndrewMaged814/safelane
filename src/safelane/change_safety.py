@@ -202,7 +202,7 @@ class ChangeSafety:
                 "resolved_at": assessment["assessed_at"],
             }
             assessment["review"] = {"status": "approved", "resolution": resolution}
-            decision = self._decision(assessment, "Fast", resolution)
+            decision = rollout_decision_for_assessment(assessment)
         validate_artifact("change-assessment-v1", assessment)
         if decision is not None:
             validate_artifact("rollout-decision-v1", decision)
@@ -342,7 +342,7 @@ class ChangeSafety:
             "resolution": resolution,
         }
         decision = (
-            self._decision(resolved, selected_profile, resolution)
+            rollout_decision_for_assessment(resolved)
             if selected_profile is not None
             else None
         )
@@ -384,10 +384,7 @@ class ChangeSafety:
         resolution = review.get("resolution")
         if review.get("status") != "approved" or not isinstance(resolution, dict):
             raise AssessmentStale("release requires an approved assessment")
-        selected_profile = resolution.get("selected_profile")
-        expected_decision = self._decision(
-            assessment, selected_profile, resolution
-        )
+        expected_decision = rollout_decision_for_assessment(assessment)
         if decision != expected_decision:
             raise AssessmentStale("rollout decision does not match the approved assessment")
         if not re.fullmatch(r".+@sha256:[0-9a-f]{64}", binding.image):
@@ -420,60 +417,12 @@ class ChangeSafety:
             raise AssessmentStale("trusted probe selection does not match base policy")
 
         decision_hash = sha256(decision)
-        deployment = policy["release_service"]["deployment"]
-        labels = {"app.kubernetes.io/name": deployment["workload_label"]}
-        steps: list[dict[str, Any]] = []
-        for stage in decision["profile"]["stages"]:
-            steps.append({"setWeight": stage["set_weight"]})
-            if stage["analysis"]:
-                if selected_probe is None:
-                    raise AssessmentStale(
-                        "analysis stage has no assessment-bound trusted probe"
-                    )
-                steps.append({
-                    "analysis": {
-                        "templates": [{
-                            "templateName": selected_probe["analysis_template"]
-                        }]
-                    }
-                })
-        manifest = {
-            "apiVersion": "argoproj.io/v1alpha1",
-            "kind": "Rollout",
-            "metadata": {
-                "name": deployment["rollout_name"],
-                "namespace": deployment["namespace"],
-                "annotations": {
-                    "safelane.dev/assessment-id": assessment["assessment_id"],
-                    "safelane.dev/assessment-result-sha256": assessment[
-                        "assessment_result_sha256"
-                    ],
-                    "safelane.dev/decision-sha256": decision_hash,
-                    "safelane.dev/head-sha": assessment["change"]["head_sha"],
-                    "safelane.dev/policy-sha256": assessment["policy"]["sha256"],
-                },
-            },
-            "spec": {
-                "replicas": policy["release_service"]["replicas"],
-                "selector": {"matchLabels": dict(labels)},
-                "template": {
-                    "metadata": {"labels": dict(labels)},
-                    "spec": {
-                        "containers": [{
-                            "name": deployment["container_name"],
-                            "image": binding.image,
-                        }]
-                    },
-                },
-                "strategy": {
-                    "canary": {
-                        "maxSurge": policy["rollout"]["max_surge"],
-                        "maxUnavailable": policy["rollout"]["max_unavailable"],
-                        "steps": steps,
-                    }
-                },
-            },
-        }
+        try:
+            manifest = argo_rollout_for_decision(
+                assessment, decision, binding.image
+            )
+        except ValueError as exc:
+            raise AssessmentStale(str(exc)) from exc
         validate_artifact("argo-rollout-v1", manifest)
         release_directory = assessment_path.parent / "release"
         release_directory.mkdir(exist_ok=True)
@@ -592,36 +541,6 @@ class ChangeSafety:
         )
         return assessment
 
-    @staticmethod
-    def _decision(
-        assessment: dict[str, Any], selected_profile: str, resolution: dict[str, Any]
-    ) -> dict[str, Any]:
-        profile = next(
-            item for item in assessment["rollout_options"]
-            if item["name"] == selected_profile
-        )
-        return {
-            "schema_version": "rollout-decision-v1",
-            "assessment_id": assessment["assessment_id"],
-            "assessment_input_sha256": assessment["assessment_input_sha256"],
-            "assessment_result_sha256": assessment["assessment_result_sha256"],
-            "repository": assessment["change"]["repository"],
-            "pull_request": assessment["change"]["number"],
-            "base_sha": assessment["change"]["base_sha"],
-            "head_sha": assessment["change"]["head_sha"],
-            "policy": copy.deepcopy(assessment["policy"]),
-            "trusted_probe_catalog": copy.deepcopy(
-                assessment["trusted_probe_catalog"]
-            ),
-            "service": assessment["service"]["name"],
-            "tier": assessment["risk"]["tier"],
-            "profile": copy.deepcopy(profile),
-            "trusted_probe": copy.deepcopy(
-                assessment["selected_trusted_probe"]
-            ),
-            "resolution": copy.deepcopy(resolution),
-        }
-
     def _write(
         self,
         snapshot: PullRequestSnapshot,
@@ -672,26 +591,43 @@ class ChangeSafety:
                 existing = candidate
         except (OSError, ArtifactError):
             pass
-        if (
-            existing is not None
-            and existing.get("key") == key
-            and existing.get("status") == "published"
-        ):
-            return
+        pending_invalidations = _pending_check_invalidations(existing)
         if (
             existing is not None
             and existing.get("status") == "published"
             and existing.get("key", {}).get("head_sha") != key["head_sha"]
             and isinstance(existing.get("id"), int)
         ):
+            invalidation = {
+                "repository": assessment["change"]["repository"],
+                "id": existing["id"],
+                "superseded_by_head": key["head_sha"],
+            }
+            if invalidation not in pending_invalidations:
+                pending_invalidations.append(invalidation)
+        remaining_invalidations: list[dict[str, Any]] = []
+        for invalidation in pending_invalidations:
             try:
                 self._check_publisher.invalidate(
-                    assessment["change"]["repository"],
-                    existing["id"],
-                    superseded_by_head=key["head_sha"],
+                    invalidation["repository"],
+                    invalidation["id"],
+                    superseded_by_head=invalidation["superseded_by_head"],
                 )
             except (OSError, RuntimeError, ValueError):
-                pass
+                remaining_invalidations.append(invalidation)
+        if (
+            existing is not None
+            and existing.get("key") == key
+            and existing.get("status") == "published"
+        ):
+            record = copy.deepcopy(existing)
+            if remaining_invalidations:
+                record["pending_invalidations"] = remaining_invalidations
+            else:
+                record.pop("pending_invalidations", None)
+            if record != existing:
+                _atomic_write(projection_path, canonical_json_bytes(record))
+            return
         check_run_id = None
         if (
             existing is not None
@@ -715,6 +651,8 @@ class ChangeSafety:
                 "error": str(exc),
                 "key": key,
             }
+        if remaining_invalidations:
+            record["pending_invalidations"] = remaining_invalidations
         _atomic_write(projection_path, canonical_json_bytes(record))
 
     @staticmethod
@@ -740,6 +678,107 @@ def _snapshot_dict(snapshot: PullRequestSnapshot) -> dict[str, Any]:
         "head_sha": snapshot.head_sha,
         "updated_at": snapshot.updated_at,
         "is_draft": snapshot.is_draft,
+    }
+
+
+def rollout_decision_for_assessment(
+    assessment: dict[str, Any],
+) -> dict[str, Any]:
+    """Derive the only rollout decision authorized by a resolved assessment."""
+    resolution = assessment["review"]["resolution"]
+    if assessment["review"]["status"] != "approved" or not isinstance(
+        resolution, dict
+    ):
+        raise ValueError("assessment is not approved")
+    selected_profile = resolution["selected_profile"]
+    try:
+        profile = next(
+            item for item in assessment["rollout_options"]
+            if item["name"] == selected_profile
+        )
+    except StopIteration as exc:
+        raise ValueError("approved profile is not an assessment option") from exc
+    return {
+        "schema_version": "rollout-decision-v1",
+        "assessment_id": assessment["assessment_id"],
+        "assessment_input_sha256": assessment["assessment_input_sha256"],
+        "assessment_result_sha256": assessment["assessment_result_sha256"],
+        "repository": assessment["change"]["repository"],
+        "pull_request": assessment["change"]["number"],
+        "base_sha": assessment["change"]["base_sha"],
+        "head_sha": assessment["change"]["head_sha"],
+        "policy": copy.deepcopy(assessment["policy"]),
+        "trusted_probe_catalog": copy.deepcopy(
+            assessment["trusted_probe_catalog"]
+        ),
+        "service": assessment["service"]["name"],
+        "tier": assessment["risk"]["tier"],
+        "profile": copy.deepcopy(profile),
+        "trusted_probe": copy.deepcopy(assessment["selected_trusted_probe"]),
+        "resolution": copy.deepcopy(resolution),
+    }
+
+
+def argo_rollout_for_decision(
+    assessment: dict[str, Any],
+    decision: dict[str, Any],
+    image: str,
+) -> dict[str, Any]:
+    """Materialize the deterministic Argo Rollout bound by an exact decision."""
+    if decision != rollout_decision_for_assessment(assessment):
+        raise ValueError("rollout decision does not match the approved assessment")
+    deployment = assessment["service"]["deployment"]
+    labels = {"app.kubernetes.io/name": deployment["workload_label"]}
+    selected_probe = decision["trusted_probe"]
+    steps: list[dict[str, Any]] = []
+    for stage in decision["profile"]["stages"]:
+        steps.append({"setWeight": stage["set_weight"]})
+        if stage["analysis"]:
+            if selected_probe is None:
+                raise ValueError("analysis stage has no assessment-bound trusted probe")
+            steps.append({
+                "analysis": {
+                    "templates": [{
+                        "templateName": selected_probe["analysis_template"]
+                    }]
+                }
+            })
+    return {
+        "apiVersion": "argoproj.io/v1alpha1",
+        "kind": "Rollout",
+        "metadata": {
+            "name": deployment["rollout_name"],
+            "namespace": deployment["namespace"],
+            "annotations": {
+                "safelane.dev/assessment-id": assessment["assessment_id"],
+                "safelane.dev/assessment-result-sha256": assessment[
+                    "assessment_result_sha256"
+                ],
+                "safelane.dev/decision-sha256": sha256(decision),
+                "safelane.dev/head-sha": assessment["change"]["head_sha"],
+                "safelane.dev/policy-sha256": assessment["policy"]["sha256"],
+            },
+        },
+        "spec": {
+            "replicas": decision["profile"]["replicas"],
+            "selector": {"matchLabels": dict(labels)},
+            "template": {
+                "metadata": {"labels": dict(labels)},
+                "spec": {
+                    "containers": [{
+                        "name": deployment["container_name"],
+                        "image": image,
+                    }]
+                },
+            },
+            "strategy": {
+                "canary": {
+                    "maxSurge": decision["profile"]["max_surge"],
+                    "maxUnavailable": decision["profile"]["max_unavailable"],
+                    "steps": steps,
+                }
+            },
+        },
     }
 
 
@@ -806,6 +845,24 @@ def _remove_if_exists(path: Path) -> None:
         path.unlink()
     except FileNotFoundError:
         pass
+
+
+def _pending_check_invalidations(
+    record: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    if record is None or not isinstance(record.get("pending_invalidations"), list):
+        return []
+    valid: list[dict[str, Any]] = []
+    for item in record["pending_invalidations"]:
+        if (
+            isinstance(item, dict)
+            and set(item) == {"repository", "id", "superseded_by_head"}
+            and isinstance(item["repository"], str)
+            and isinstance(item["id"], int)
+            and isinstance(item["superseded_by_head"], str)
+        ):
+            valid.append(copy.deepcopy(item))
+    return valid
 
 
 def _utc_now() -> str:
