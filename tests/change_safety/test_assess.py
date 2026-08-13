@@ -13,6 +13,7 @@ from safelane.change_safety import (
     PullRequestRef,
     PullRequestSnapshot,
 )
+from safelane.image_provenance import VerifiedImageProvenance
 
 
 BASE_SHA = "a" * 40
@@ -21,6 +22,15 @@ TEST_IMAGE = "ghcr.io/acme/payments@sha256:" + "c" * 64
 
 
 def register_test_image(safety: ChangeSafety, *, image: str = TEST_IMAGE) -> None:
+    class Verified:
+        def verify(self, *, repository, source_revision, image):
+            return VerifiedImageProvenance(
+                provider="github_artifact_attestation",
+                source_revision=source_revision,
+                verification_sha256="sha256:" + "e" * 64,
+            )
+
+    safety._image_provenance_verifier = Verified()
     safety.register_image(ImageRegistration(
         repository="acme/payments",
         service="payments-api",

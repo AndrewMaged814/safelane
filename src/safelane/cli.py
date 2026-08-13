@@ -8,7 +8,7 @@ from pathlib import Path
 from jsonschema import Draft202012Validator
 
 from .artifacts import canonical_json_bytes, load_json_bytes, load_yaml_bytes, validate_artifact
-from .authorization import load_or_create_authorization_key
+from .authorization import _load_or_create_authorization_key
 from .change_safety import (
     ChangeSafety,
     ChangeSafetyError,
@@ -18,6 +18,7 @@ from .change_safety import (
 from .demo_repository import create_demo_repository
 from .evaluation import run_ollama_evaluation
 from .github_checks import GitHubCheckPublisher
+from .image_provenance import GitHubAttestationVerifier
 from .pr_studio import (
     GitHubPullRequestProvider,
     OllamaPullRequestAnalyzer,
@@ -225,7 +226,10 @@ def _build_workflow(provider, state_dir: Path, base_url: str) -> ChangeSafety:
         check_publisher=GitHubCheckPublisher(
             command_runner=provider.command_runner
         ),
-        authorization_key=load_or_create_authorization_key(provider.repository),
+        authorization_key=_load_or_create_authorization_key(provider.repository),
+        image_provenance_verifier=GitHubAttestationVerifier(
+            command_runner=provider.command_runner
+        ),
     )
 
 

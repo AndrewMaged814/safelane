@@ -128,9 +128,9 @@ uv run safelane studio --repository owner/repository
 Open <http://127.0.0.1:4173>. Studio uses the authenticated GitHub CLI, stores SHA-bound assessments
 under `.safelane/studio`, and invalidates an earlier assessment when a PR receives a new push.
 Approval records a SHA-bound decision. A reviewer can then bind an immutable image digest and compile
-a validated Argo Rollout YAML. Compilation requires a signed local image-catalog entry proving the
-image repository/service and OCI revision match the assessed PR head; a digest alone is rejected.
-Register that CI-verified identity before compilation:
+a validated Argo Rollout YAML. Compilation requires GitHub to verify a signed artifact attestation
+for the image, repository, and assessed source revision before SafeLane records a signed local
+catalog entry; a digest alone is rejected. Register that CI-produced identity before compilation:
 
 ```powershell
 uv run safelane register-image `
@@ -176,18 +176,22 @@ The project is being built for the **DevOpsDays Cairo 2026 DevOps Hackathon**, T
 
 | Path | Purpose |
 |---|---|
-| [`contract.md`](contract.md) | canonical assessment, decision, validation, and handoff contract |
+| [`docs/safelane-studio.md`](docs/safelane-studio.md) | repository-aware lifecycle and interaction authority |
+| [`docs/adr/0005-base-owned-repository-safety-contract.md`](docs/adr/0005-base-owned-repository-safety-contract.md) | repository-workflow architecture authority |
+| [`schemas/`](schemas) | closed-world wire contracts for both delivered workflow generations |
+| [`contract.md`](contract.md) | frozen pre-final decision-spine v2/v3 contract; not the repository workflow |
 | [`CONTEXT.md`](CONTEXT.md) | canonical SafeLane vocabulary |
 | [`docs/input-contracts.md`](docs/input-contracts.md) | exact request, policy, incident, profile-draft, and evaluation-fixture inputs |
 | [`docs/risk-signals.md`](docs/risk-signals.md) | failure-propensity and safety-floor policy |
 | [`docs/rollout-profiles.md`](docs/rollout-profiles.md) | built-in profiles and custom-profile validation |
-| [`docs/safelane-studio.md`](docs/safelane-studio.md) | Studio lifecycle and interaction specification |
 | [`docs/golden-scenarios.md`](docs/golden-scenarios.md) | Gate 2 scenarios and acceptance thresholds |
 | [`research/risk-engine-evaluation.md`](research/risk-engine-evaluation.md) | evidence behind the evaluation boundary |
 | [`research/phase1-reuse-boundary.md`](research/phase1-reuse-boundary.md) | explicit build, adapt, and reject decisions |
 | [`prototypes/safelane-studio`](prototypes/safelane-studio) | throwaway interactive Studio prototype |
 
-Research files explain how decisions were reached. When wording differs, the canonical contract and `docs/` specifications win.
+Research files explain how decisions were reached. For the repository-aware workflow, ADR 0005,
+`docs/safelane-studio.md`, and the corresponding JSON Schemas win. `contract.md` governs only the
+frozen pre-final v2/v3 decision-spine artifacts it names.
 
 ## Scope
 

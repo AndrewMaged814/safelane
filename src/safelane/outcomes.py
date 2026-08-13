@@ -15,7 +15,7 @@ from .artifacts import (
     sha256,
     validate_artifact,
 )
-from .authorization import process_authorization_key
+from .authorization import _process_authorization_key
 from .authorization import signature_matches
 from .state_io import atomic_write as _atomic_write, state_lock
 from .change_safety import argo_rollout_for_decision, rollout_decision_for_assessment
@@ -54,7 +54,7 @@ class OutcomeLedger:
     ) -> None:
         self._state_dir = state_dir.resolve()
         self._clock = clock or _utc_now
-        self._authorization_key = authorization_key or process_authorization_key()
+        self._authorization_key = authorization_key or _process_authorization_key()
 
     def record(self, observation: OutcomeObservation) -> dict[str, Any]:
         if not re.fullmatch(r"[A-Za-z0-9._-]{1,128}", observation.rollout_uid):

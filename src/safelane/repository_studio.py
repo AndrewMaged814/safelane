@@ -49,10 +49,7 @@ class RepositoryStudioService:
         self._provider_factory = provider_factory or GitHubPullRequestProvider
         self._open: dict[int, dict[str, Any]] = {}
         self.reviewer = reviewer
-        self._outcome_ledger = OutcomeLedger(
-            state_dir=self.state_root,
-            authorization_key=workflow.authorization_key,
-        )
+        self._outcome_ledger = workflow.outcome_ledger()
 
     def dashboard(self) -> dict[str, Any]:
         rows: list[dict[str, Any]] = []
@@ -275,10 +272,7 @@ class RepositoryStudioService:
         self.workspace = self.state_root / provider.repository.replace("/", "--")
         self.workspace.mkdir(parents=True, exist_ok=True)
         self.workflow = self._workflow_factory(provider, self.state_root)
-        self._outcome_ledger = OutcomeLedger(
-            state_dir=self.state_root,
-            authorization_key=self.workflow.authorization_key,
-        )
+        self._outcome_ledger = self.workflow.outcome_ledger()
         self._open = {}
         return self.dashboard()
 

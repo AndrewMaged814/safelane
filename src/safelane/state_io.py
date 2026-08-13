@@ -15,7 +15,7 @@ _LOCAL = threading.local()
 
 @contextmanager
 def state_lock(directory: Path):
-    key = directory.resolve()
+    key = Path(os.path.normcase(os.path.abspath(str(directory))))
     with _LOCKS_GUARD:
         lock = _LOCKS.setdefault(key, threading.RLock())
     with lock:

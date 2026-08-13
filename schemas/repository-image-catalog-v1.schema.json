@@ -13,13 +13,23 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["repository", "service", "source_revision", "image", "oci_revision"],
+        "required": ["repository", "service", "source_revision", "image", "oci_revision", "provenance"],
         "properties": {
           "repository": {"type": "string", "pattern": "^[^/]+/[^/]+$"},
           "service": {"type": "string", "minLength": 1},
           "source_revision": {"$ref": "#/$defs/git_sha"},
           "image": {"type": "string", "pattern": "^.+@sha256:[0-9a-f]{64}$"},
-          "oci_revision": {"$ref": "#/$defs/git_sha"}
+          "oci_revision": {"$ref": "#/$defs/git_sha"},
+          "provenance": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["provider", "source_revision", "verification_sha256"],
+            "properties": {
+              "provider": {"const": "github_artifact_attestation"},
+              "source_revision": {"$ref": "#/$defs/git_sha"},
+              "verification_sha256": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+            }
+          }
         }
       }
     },

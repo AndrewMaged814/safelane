@@ -14,7 +14,7 @@ from .state_io import atomic_write, state_lock
 _PROCESS_KEY = secrets.token_bytes(32)
 
 
-def process_authorization_key() -> bytes:
+def _process_authorization_key() -> bytes:
     return _PROCESS_KEY
 
 
@@ -33,7 +33,7 @@ def signature_matches(value: Any, signature: str, key: bytes) -> bool:
     return hmac.compare_digest(expected, signature)
 
 
-def load_or_create_authorization_key(repository: str) -> bytes:
+def _load_or_create_authorization_key(repository: str) -> bytes:
     root = Path(
         os.environ.get("LOCALAPPDATA")
         or os.environ.get("XDG_DATA_HOME")

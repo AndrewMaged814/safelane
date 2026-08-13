@@ -19,10 +19,11 @@ from .artifacts import (
     validate_artifact,
 )
 from .authorization import (
+    _process_authorization_key,
     authorization_signature,
-    process_authorization_key,
     signature_matches,
 )
+from .image_provenance import ImageProvenanceError, VerifiedImageProvenance
 from .pr_studio import PullRequestAnalyzer, PullRequestAssessmentEngine
 from .state_io import atomic_write as _atomic_write, state_lock
 
@@ -147,6 +148,12 @@ class CheckPublisher(Protocol):
     ) -> None: ...
 
 
+class ImageProvenanceVerifier(Protocol):
+    def verify(
+        self, *, repository: str, source_revision: str, image: str
+    ) -> VerifiedImageProvenance: ...
+
+
 AnalyzerFactory = Callable[[dict[str, Any]], PullRequestAnalyzer]
 Clock = Callable[[], str]
 
@@ -165,17 +172,23 @@ class ChangeSafety:
         check_publisher: CheckPublisher | None = None,
         clock: Clock | None = None,
         authorization_key: bytes | None = None,
+        image_provenance_verifier: ImageProvenanceVerifier | None = None,
     ) -> None:
         self._host = host
         self._state_dir = state_dir.resolve()
         self._analyzer_factory = analyzer_factory
         self._check_publisher = check_publisher
         self._clock = clock or _utc_now
-        self._authorization_key = authorization_key or process_authorization_key()
+        self._authorization_key = authorization_key or _process_authorization_key()
+        self._image_provenance_verifier = image_provenance_verifier
 
-    @property
-    def authorization_key(self) -> bytes:
-        return self._authorization_key
+    def outcome_ledger(self):
+        from .outcomes import OutcomeLedger
+
+        return OutcomeLedger(
+            state_dir=self._state_dir,
+            authorization_key=self._authorization_key,
+        )
 
     def check_projection(self, change: PullRequestRef) -> dict[str, Any]:
         if self._check_publisher is None:
@@ -511,6 +524,20 @@ class ChangeSafety:
             raise ChangeSafetyError("OCI revision must match the source revision")
         if not re.fullmatch(r".+@sha256:[0-9a-f]{64}", registration.image):
             raise ChangeSafetyError("registered image must use an immutable sha256 digest")
+        if self._image_provenance_verifier is None:
+            raise ChangeSafetyError(
+                "image registration requires a configured provenance verifier"
+            )
+        try:
+            provenance = self._image_provenance_verifier.verify(
+                repository=registration.repository,
+                source_revision=registration.source_revision,
+                image=registration.image,
+            )
+        except ImageProvenanceError as exc:
+            raise ChangeSafetyError(str(exc)) from exc
+        if provenance.source_revision != registration.source_revision:
+            raise ChangeSafetyError("verified provenance revision does not match")
         path = self._image_catalog_path(registration.repository)
         with state_lock(path.parent):
             catalog = {
@@ -543,6 +570,11 @@ class ChangeSafety:
                 "source_revision": registration.source_revision,
                 "image": registration.image,
                 "oci_revision": registration.oci_revision,
+                "provenance": {
+                    "provider": provenance.provider,
+                    "source_revision": provenance.source_revision,
+                    "verification_sha256": provenance.verification_sha256,
+                },
             })
             catalog["application_images"].sort(key=lambda item: (
                 item["repository"], item["service"], item["source_revision"]
@@ -567,7 +599,11 @@ class ChangeSafety:
         identities: set[tuple[str, str, str]] = set()
         for item in catalog["application_images"]:
             identity = (item["repository"], item["service"], item["source_revision"])
-            if identity in identities or item["source_revision"] != item["oci_revision"]:
+            if (
+                identity in identities
+                or item["source_revision"] != item["oci_revision"]
+                or item["source_revision"] != item["provenance"]["source_revision"]
+            ):
                 raise ChangeSafetyError("image catalog provenance is invalid")
             identities.add(identity)
 
@@ -589,7 +625,11 @@ class ChangeSafety:
             "image": image,
             "oci_revision": assessment["change"]["head_sha"],
         }
-        if expected not in catalog["application_images"]:
+        matching = [
+            item for item in catalog["application_images"]
+            if all(item.get(key) == value for key, value in expected.items())
+        ]
+        if len(matching) != 1:
             raise ChangeSafetyError(
                 "release image is not catalog-bound to this service and PR head"
             )
