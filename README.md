@@ -111,7 +111,9 @@ Studio connects to a local checkout or remote GitHub repository containing a bas
 and assesses each exact base/head diff. The Changes inbox shows the selected lane and review state;
 the PR dossier explains the evidence and records approval for a repository-owned rollout profile. It never
 shows uncommitted working-tree changes or deploys software. It can publish exact-head GitHub Check
-Runs when the authenticated GitHub App has Checks write permission.
+Runs when the authenticated GitHub App has Checks write permission. The checked-in
+`pull_request_target` workflow supplies that installation token while executing only the trusted
+base-branch SafeLane implementation; local OAuth-user sessions surface Check delivery as unavailable.
 
 Run it against the current checkout's GitHub origin:
 

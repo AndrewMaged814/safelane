@@ -1,0 +1,42 @@
+name: SafeLane
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize]
+
+permissions:
+  contents: read
+  pull-requests: read
+  checks: write
+
+jobs:
+  assess:
+    name: Assess exact PR head
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out trusted base implementation
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        run: python -m pip install uv
+
+      - name: Assess pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPOSITORY: ${{ github.repository }}
+          RUNNER_TEMP_DIR: ${{ runner.temp }}
+        run: >-
+          uv run safelane assess-pr
+          --repository "$REPOSITORY"
+          --number "$PR_NUMBER"
+          --state-dir "$RUNNER_TEMP_DIR/safelane"
+          --base-url http://127.0.0.1:9
