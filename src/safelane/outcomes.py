@@ -59,6 +59,8 @@ class OutcomeLedger:
             assessment = load_json_bytes((directory / "assessment.json").read_bytes())
             decision = load_json_bytes((directory / "decision.json").read_bytes())
             manifest = load_yaml_bytes((directory / "release" / "rollout.yaml").read_bytes())
+            validate_artifact("change-assessment-v1", assessment)
+            validate_artifact("rollout-decision-v1", decision)
             validate_artifact("argo-rollout-v1", manifest)
         except (OSError, ArtifactError) as exc:
             raise OutcomeError("compiled release evidence is missing or invalid") from exc

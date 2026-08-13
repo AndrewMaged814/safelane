@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 from pathlib import Path
@@ -59,6 +60,14 @@ def canonical_json_bytes(value: Any) -> bytes:
 def sha256(value: Any) -> str:
     raw = value if isinstance(value, bytes) else canonical_json_bytes(value)
     return "sha256:" + hashlib.sha256(raw).hexdigest()
+
+
+def change_assessment_result_sha256(assessment: dict[str, Any]) -> str:
+    """Hash immutable reviewed content while excluding mutable review state."""
+    content = copy.deepcopy(assessment)
+    content.pop("assessment_result_sha256", None)
+    content.pop("review", None)
+    return sha256(content)
 
 
 _DECLARED_ORDERS = (
@@ -260,6 +269,10 @@ def _validate_probe_result(result: dict[str, Any]) -> None:
 
 
 def _validate_change_assessment(assessment: dict[str, Any]) -> None:
+    if assessment["assessment_result_sha256"] != change_assessment_result_sha256(
+        assessment
+    ):
+        raise ArtifactError("change assessment result hash does not match its content")
     base_sha = assessment["change"]["base_sha"]
     if (
         assessment["policy"]["source_revision"] != base_sha

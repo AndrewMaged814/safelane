@@ -3,8 +3,11 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
+import pytest
+
 from safelane.change_safety import (
     AssessmentHandle,
+    AssessmentStale,
     ChangeSafety,
     PullRequestRef,
     ResolutionCommand,
@@ -134,3 +137,32 @@ def test_new_head_removes_prior_authorizing_decision(tmp_path: Path) -> None:
 
     assert second.assessment["change"]["head_sha"] == "c" * 40
     assert not decision_path.exists()
+
+
+def test_base_revision_move_invalidates_review_even_when_policy_bytes_match(
+    tmp_path: Path,
+) -> None:
+    host = GuardedHost()
+    safety = ChangeSafety(
+        host=host,
+        state_dir=tmp_path,
+        analyzer_factory=lambda policy: NoFindingAnalyzer(),
+        clock=lambda: "2026-08-12T09:00:00Z",
+    )
+    assessed = safety.assess(PullRequestRef("acme/payments", 42))
+    moved_base = "d" * 40
+    host.files[(moved_base, ".safelane/policy.yaml")] = host.files[
+        ("a" * 40, ".safelane/policy.yaml")
+    ]
+    host.files[(moved_base, ".safelane/trusted-probes.yaml")] = host.files[
+        ("a" * 40, ".safelane/trusted-probes.yaml")
+    ]
+    host.snapshot = replace(host.snapshot, base_sha=moved_base)
+
+    with pytest.raises(AssessmentStale, match="base revision"):
+        safety.resolve(ResolutionCommand(
+            handle=assessed.handle,
+            action="approve",
+            selected_profile="Guarded",
+            actor="andrew",
+        ))

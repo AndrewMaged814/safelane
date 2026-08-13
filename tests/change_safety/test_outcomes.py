@@ -2,14 +2,21 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from safelane.artifacts import validate_artifact
+import pytest
+
+from safelane.artifacts import canonical_json_bytes, load_json_bytes, validate_artifact
 from safelane.change_safety import (
     ChangeSafety,
     PullRequestRef,
     ReleaseBinding,
     ResolutionCommand,
 )
-from safelane.outcomes import OutcomeLedger, OutcomeObservation, StageObservation
+from safelane.outcomes import (
+    OutcomeError,
+    OutcomeLedger,
+    OutcomeObservation,
+    StageObservation,
+)
 
 from .test_resolve import GuardedHost, NoFindingAnalyzer
 
@@ -76,3 +83,45 @@ def test_rollout_outcome_receipt_binds_release_and_feeds_calibration(tmp_path: P
         },
         "by_finding": {},
     }
+
+
+def test_outcome_rejects_assessment_content_changed_after_compilation(
+    tmp_path: Path,
+) -> None:
+    safety = ChangeSafety(
+        host=GuardedHost(),
+        state_dir=tmp_path,
+        analyzer_factory=lambda policy: NoFindingAnalyzer(),
+        clock=iter([
+            "2026-08-12T09:00:00Z",
+            "2026-08-12T09:05:00Z",
+        ]).__next__,
+    )
+    assessed = safety.assess(PullRequestRef("acme/payments", 42))
+    safety.resolve(ResolutionCommand(
+        handle=assessed.handle,
+        action="approve",
+        selected_profile="Guarded",
+        actor="andrew",
+    ))
+    safety.compile(ReleaseBinding(
+        handle=assessed.handle,
+        image="ghcr.io/acme/payments@sha256:" + "c" * 64,
+    ))
+    assessment_path = tmp_path / "acme--payments" / "pr-42" / "assessment.json"
+    assessment = load_json_bytes(assessment_path.read_bytes())
+    assessment["policy_rule_ids"] = ["scope.safe"]
+    assessment_path.write_bytes(canonical_json_bytes(assessment))
+
+    with pytest.raises(OutcomeError, match="missing or invalid"):
+        OutcomeLedger(state_dir=tmp_path).record(OutcomeObservation(
+            repository="acme/payments",
+            pull_request=42,
+            rollout_uid="rollout-uid-forged",
+            result="succeeded",
+            stages=(
+                StageObservation(40, "succeeded", "passed"),
+                StageObservation(100, "succeeded", "not_run"),
+            ),
+            incident_within_24h=False,
+        ))

@@ -12,6 +12,7 @@ import yaml
 from .artifacts import (
     ArtifactError,
     canonical_json_bytes,
+    change_assessment_result_sha256,
     load_json_bytes,
     load_yaml_bytes,
     sha256,
@@ -248,7 +249,7 @@ class ChangeSafety:
         if assessment.get("evidence", {}).get("git_diff_sha256") != sha256(diff):
             return None
         result_hash = assessment.get("assessment_result_sha256")
-        if result_hash != _assessment_result_hash(assessment):
+        if result_hash != change_assessment_result_sha256(assessment):
             return None
         decision = None
         resolution = assessment.get("review", {}).get("resolution")
@@ -282,7 +283,7 @@ class ChangeSafety:
         if (
             assessment.get("assessment_result_sha256")
             != command.handle.assessment_result_sha256
-            or _assessment_result_hash(assessment)
+            or change_assessment_result_sha256(assessment)
             != command.handle.assessment_result_sha256
         ):
             raise AssessmentStale("assessment content does not match the reviewed handle")
@@ -299,6 +300,8 @@ class ChangeSafety:
         current = self._host.get_pull_request(change)
         if current.head_sha != assessment["change"]["head_sha"]:
             raise AssessmentStale("pull request has a newer head revision")
+        if current.base_sha != assessment["change"]["base_sha"]:
+            raise AssessmentStale("pull request has a newer base revision")
         policy_bytes = self._read_base_policy(current)
         if sha256(policy_bytes) != assessment["policy"]["sha256"]:
             raise AssessmentStale("base policy no longer matches the assessment")
@@ -373,7 +376,7 @@ class ChangeSafety:
             assessment.get("assessment_id") != binding.handle.assessment_id
             or assessment.get("assessment_result_sha256")
             != binding.handle.assessment_result_sha256
-            or _assessment_result_hash(assessment)
+            or change_assessment_result_sha256(assessment)
             != binding.handle.assessment_result_sha256
         ):
             raise AssessmentStale("release binding does not match the assessment")
@@ -396,6 +399,8 @@ class ChangeSafety:
         current = self._host.get_pull_request(change)
         if current.head_sha != assessment["change"]["head_sha"]:
             raise AssessmentStale("pull request has a newer head revision")
+        if current.base_sha != assessment["change"]["base_sha"]:
+            raise AssessmentStale("pull request has a newer base revision")
         policy_bytes = self._read_base_policy(current)
         if sha256(policy_bytes) != assessment["policy"]["sha256"]:
             raise AssessmentStale("base policy no longer matches the assessment")
@@ -582,7 +587,9 @@ class ChangeSafety:
             "rollout_catalog": copy.deepcopy(rollout_catalog),
             "review": {"status": "unresolved", "resolution": None},
         }
-        assessment["assessment_result_sha256"] = _assessment_result_hash(assessment)
+        assessment["assessment_result_sha256"] = change_assessment_result_sha256(
+            assessment
+        )
         return assessment
 
     @staticmethod
@@ -734,13 +741,6 @@ def _snapshot_dict(snapshot: PullRequestSnapshot) -> dict[str, Any]:
         "updated_at": snapshot.updated_at,
         "is_draft": snapshot.is_draft,
     }
-
-
-def _assessment_result_hash(assessment: dict[str, Any]) -> str:
-    content = copy.deepcopy(assessment)
-    content.pop("assessment_result_sha256", None)
-    content.pop("review", None)
-    return sha256(content)
 
 
 def _validate_policy_semantics(policy: dict[str, Any]) -> None:
