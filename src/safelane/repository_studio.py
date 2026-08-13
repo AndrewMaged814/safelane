@@ -10,6 +10,7 @@ from .change_safety import (
     ChangeSafetyError,
     PullRequestRef,
     ReleaseBinding,
+    RepositoryNotConfigured,
     ResolutionCommand,
 )
 from .pr_studio import GitHubPullRequestProvider, PullRequestStudioError
@@ -53,13 +54,22 @@ class RepositoryStudioService:
 
     def dashboard(self) -> dict[str, Any]:
         rows: list[dict[str, Any]] = []
+        unavailable: list[dict[str, Any]] = []
         current: dict[int, dict[str, Any]] = {}
         try:
             pull_requests = self.provider.list_open_pull_requests()
             for pull_request in pull_requests:
-                outcome = self.workflow.assess(PullRequestRef(
-                    self.provider.repository, pull_request["number"]
-                ))
+                try:
+                    outcome = self.workflow.assess(PullRequestRef(
+                        self.provider.repository, pull_request["number"]
+                    ))
+                except RepositoryNotConfigured as exc:
+                    unavailable.append({
+                        "number": pull_request["number"],
+                        "title": pull_request["title"],
+                        "reason": str(exc),
+                    })
+                    continue
                 assessment = outcome.assessment
                 current[pull_request["number"]] = assessment
                 row = _row(assessment)
@@ -87,6 +97,7 @@ class RepositoryStudioService:
                 ),
             },
             "changes": rows,
+            "unavailable": unavailable,
         }
 
     def assessment(self, number: int) -> dict[str, Any]:
