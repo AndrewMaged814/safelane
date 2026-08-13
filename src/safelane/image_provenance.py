@@ -29,7 +29,12 @@ class GitHubAttestationVerifier:
         self._runner = command_runner
 
     def verify(
-        self, *, repository: str, source_revision: str, image: str
+        self,
+        *,
+        repository: str,
+        source_revision: str,
+        image: str,
+        signer_workflow: str,
     ) -> VerifiedImageProvenance:
         arguments = (
             "attestation",
@@ -39,6 +44,8 @@ class GitHubAttestationVerifier:
             repository,
             "--source-digest",
             source_revision,
+            "--signer-workflow",
+            signer_workflow,
             "--deny-self-hosted-runners",
             "--format",
             "json",

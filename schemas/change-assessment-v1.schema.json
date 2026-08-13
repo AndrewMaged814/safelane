@@ -3,7 +3,7 @@
   "$id": "https://safelane.dev/schemas/change-assessment-v1.schema.json",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "assessment_id", "assessed_at", "assessment_input_sha256", "assessment_result_sha256", "policy", "trusted_probe_catalog", "change", "service", "risk", "evidence", "findings", "policy_rule_ids", "selected_trusted_probe", "rollout_options", "rollout_catalog", "review"],
+  "required": ["schema_version", "assessment_id", "assessed_at", "assessment_input_sha256", "assessment_result_sha256", "policy", "trusted_probe_catalog", "change", "service", "image_provenance", "risk", "evidence", "findings", "policy_rule_ids", "selected_trusted_probe", "rollout_options", "rollout_catalog", "review"],
   "properties": {
     "schema_version": {"const": "change-assessment-v1"},
     "assessment_id": {"type": "string", "minLength": 1},
@@ -14,6 +14,7 @@
     "trusted_probe_catalog": {"$ref": "#/$defs/provenance"},
     "change": {"$ref": "#/$defs/change"},
     "service": {"$ref": "#/$defs/service"},
+    "image_provenance": {"$ref": "#/$defs/image_provenance"},
     "risk": {"$ref": "#/$defs/risk"},
     "evidence": {"$ref": "#/$defs/evidence"},
     "findings": {"type": "array", "maxItems": 1, "items": {"$ref": "#/$defs/finding"}},
@@ -53,6 +54,14 @@
           "required": ["namespace", "rollout_name", "container_name", "workload_label"],
           "properties": {"namespace": {"type": "string"}, "rollout_name": {"type": "string"}, "container_name": {"type": "string"}, "workload_label": {"type": "string"}}
         }
+      }
+    },
+    "image_provenance": {
+      "type": "object", "additionalProperties": false,
+      "required": ["provider", "signer_workflow"],
+      "properties": {
+        "provider": {"const": "github_artifact_attestation"},
+        "signer_workflow": {"type": "string", "minLength": 1}
       }
     },
     "risk": {

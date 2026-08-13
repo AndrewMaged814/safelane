@@ -135,10 +135,9 @@ def main(argv: list[str] | None = None) -> int:
         help="register a CI-verified immutable image for one repository revision",
     )
     register_image.add_argument("--repository", required=True)
+    register_image.add_argument("--number", required=True, type=int)
     register_image.add_argument("--service", required=True)
-    register_image.add_argument("--source-revision", required=True)
     register_image.add_argument("--image", required=True)
-    register_image.add_argument("--oci-revision")
     register_image.add_argument("--state-dir", type=Path)
     args = parser.parse_args(argv)
     if args.command == "validate-fixtures":
@@ -195,10 +194,9 @@ def main(argv: list[str] | None = None) -> int:
             )
             path = workflow.register_image(ImageRegistration(
                 repository=provider.repository,
+                pull_request=args.number,
                 service=args.service,
-                source_revision=args.source_revision,
                 image=args.image,
-                oci_revision=args.oci_revision or args.source_revision,
             ))
         except (ChangeSafetyError, PullRequestStudioError, OSError, ValueError) as exc:
             parser.error(str(exc))

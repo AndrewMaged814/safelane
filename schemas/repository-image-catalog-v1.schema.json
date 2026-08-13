@@ -23,11 +23,12 @@
           "provenance": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["provider", "source_revision", "verification_sha256"],
+            "required": ["provider", "source_revision", "verification_sha256", "signer_workflow"],
             "properties": {
               "provider": {"const": "github_artifact_attestation"},
               "source_revision": {"$ref": "#/$defs/git_sha"},
-              "verification_sha256": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+              "verification_sha256": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+              "signer_workflow": {"type": "string", "minLength": 1}
             }
           }
         }

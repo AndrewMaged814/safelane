@@ -51,8 +51,10 @@ Fast resolves automatically. Guarded and Risky support:
 - **Decide later** — performs no mutation and returns to the inbox.
 
 An approved reviewer can submit an immutable image digest only after `gh attestation verify`
-cryptographically verifies its GitHub artifact attestation against the connected repository and
-exact source revision. SafeLane then records a signed local catalog entry binding repository,
+cryptographically verifies its GitHub artifact attestation against the connected repository, exact
+source revision, and signer workflow pinned by base-owned policy. The registration command takes a
+PR number and derives all three identities; callers cannot override the source or signer. SafeLane
+then records a signed local catalog entry binding repository,
 service, full source revision, digest, OCI revision, and verification result hash. The server
 revalidates the assessment, signed decision, current
 PR head, base policy, trusted-probe catalog, signed image identity, and exact derived manifest before

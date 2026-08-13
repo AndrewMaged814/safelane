@@ -10,6 +10,7 @@
     "scope",
     "ai",
     "safety_case",
+    "image_provenance",
     "trusted_probe_catalog",
     "rollout",
     "profiles"
@@ -21,6 +22,7 @@
     "scope": {"$ref": "#/$defs/scope"},
     "ai": {"$ref": "#/$defs/ai"},
     "safety_case": {"$ref": "#/$defs/safety_case"},
+    "image_provenance": {"$ref": "#/$defs/image_provenance"},
     "trusted_probe_catalog": {"$ref": "#/$defs/trusted_probe_catalog"},
     "rollout": {"$ref": "#/$defs/rollout"},
     "profiles": {
@@ -142,6 +144,18 @@
             "security": {"$ref": "#/$defs/dns_label"},
             "operability": {"$ref": "#/$defs/dns_label"}
           }
+        }
+      }
+    },
+    "image_provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "signer_workflow"],
+      "properties": {
+        "provider": {"const": "github_artifact_attestation"},
+        "signer_workflow": {
+          "type": "string",
+          "pattern": "^[^/]+/[^/]+/\\.github/workflows/[A-Za-z0-9._/-]+\\.ya?ml$"
         }
       }
     },

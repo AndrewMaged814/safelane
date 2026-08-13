@@ -23,7 +23,12 @@ TEST_IMAGE = "ghcr.io/acme/payments@sha256:" + "c" * 64
 
 def register_test_image(safety: ChangeSafety, *, image: str = TEST_IMAGE) -> None:
     class Verified:
-        def verify(self, *, repository, source_revision, image):
+        def verify(
+            self, *, repository, source_revision, image, signer_workflow
+        ):
+            assert signer_workflow == (
+                "acme/payments/.github/workflows/build-and-attest.yml"
+            )
             return VerifiedImageProvenance(
                 provider="github_artifact_attestation",
                 source_revision=source_revision,
@@ -33,10 +38,9 @@ def register_test_image(safety: ChangeSafety, *, image: str = TEST_IMAGE) -> Non
     safety._image_provenance_verifier = Verified()
     safety.register_image(ImageRegistration(
         repository="acme/payments",
+        pull_request=42,
         service="payments-api",
-        source_revision=HEAD_SHA,
         image=image,
-        oci_revision=HEAD_SHA,
     ))
 
 
@@ -77,6 +81,9 @@ safety_case:
     data: risky
     security: risky
     operability: guarded
+image_provenance:
+  provider: github_artifact_attestation
+  signer_workflow: acme/payments/.github/workflows/build-and-attest.yml
 trusted_probe_catalog:
   path: .safelane/trusted-probes.yaml
   non_fast_fallback_probe_id: payments-health

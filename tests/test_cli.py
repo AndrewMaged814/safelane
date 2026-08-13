@@ -83,6 +83,6 @@ def test_register_image_command_requires_revision_and_immutable_image() -> None:
     assert result.returncode == 0
     assert "--repository" in result.stdout
     assert "--service" in result.stdout
-    assert "--source-revision" in result.stdout
+    assert "--number" in result.stdout
     assert "--image" in result.stdout
-    assert "--oci-revision" in result.stdout
+    assert "--source-revision" not in result.stdout

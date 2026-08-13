@@ -117,10 +117,9 @@ class ReleaseBinding:
 @dataclass(frozen=True)
 class ImageRegistration:
     repository: str
+    pull_request: int
     service: str
-    source_revision: str
     image: str
-    oci_revision: str
 
 
 @dataclass(frozen=True)
@@ -150,7 +149,12 @@ class CheckPublisher(Protocol):
 
 class ImageProvenanceVerifier(Protocol):
     def verify(
-        self, *, repository: str, source_revision: str, image: str
+        self,
+        *,
+        repository: str,
+        source_revision: str,
+        image: str,
+        signer_workflow: str,
     ) -> VerifiedImageProvenance: ...
 
 
@@ -520,24 +524,36 @@ class ChangeSafety:
     def register_image(self, registration: ImageRegistration) -> Path:
         if not re.fullmatch(r"[^/]+/[^/]+", registration.repository):
             raise ChangeSafetyError("registered image repository is invalid")
-        if registration.source_revision != registration.oci_revision:
-            raise ChangeSafetyError("OCI revision must match the source revision")
+        if registration.pull_request < 1:
+            raise ChangeSafetyError("registered image pull request is invalid")
         if not re.fullmatch(r".+@sha256:[0-9a-f]{64}", registration.image):
             raise ChangeSafetyError("registered image must use an immutable sha256 digest")
         if self._image_provenance_verifier is None:
             raise ChangeSafetyError(
                 "image registration requires a configured provenance verifier"
             )
+        change = PullRequestRef(registration.repository, registration.pull_request)
+        snapshot = self._host.get_pull_request(change)
+        self._validate_snapshot(change, snapshot)
+        policy_bytes = self._read_base_policy(snapshot)
+        policy = self._load_policy(policy_bytes, snapshot.base_sha)
+        if registration.service != policy["release_service"]["name"]:
+            raise ChangeSafetyError("image service does not match base-owned policy")
+        signer_workflow = policy["image_provenance"]["signer_workflow"]
         try:
             provenance = self._image_provenance_verifier.verify(
                 repository=registration.repository,
-                source_revision=registration.source_revision,
+                source_revision=snapshot.head_sha,
                 image=registration.image,
+                signer_workflow=signer_workflow,
             )
         except ImageProvenanceError as exc:
             raise ChangeSafetyError(str(exc)) from exc
-        if provenance.source_revision != registration.source_revision:
+        if provenance.source_revision != snapshot.head_sha:
             raise ChangeSafetyError("verified provenance revision does not match")
+        current = self._host.get_pull_request(change)
+        if current.base_sha != snapshot.base_sha or current.head_sha != snapshot.head_sha:
+            raise ChangeMoved("pull request base or head moved during image verification")
         path = self._image_catalog_path(registration.repository)
         with state_lock(path.parent):
             catalog = {
@@ -557,7 +573,7 @@ class ChangeSafety:
             identity = (
                 registration.repository,
                 registration.service,
-                registration.source_revision,
+                snapshot.head_sha,
             )
             catalog["application_images"] = [
                 item for item in catalog["application_images"]
@@ -567,13 +583,14 @@ class ChangeSafety:
             catalog["application_images"].append({
                 "repository": registration.repository,
                 "service": registration.service,
-                "source_revision": registration.source_revision,
+                "source_revision": snapshot.head_sha,
                 "image": registration.image,
-                "oci_revision": registration.oci_revision,
+                "oci_revision": snapshot.head_sha,
                 "provenance": {
                     "provider": provenance.provider,
                     "source_revision": provenance.source_revision,
                     "verification_sha256": provenance.verification_sha256,
+                    "signer_workflow": signer_workflow,
                 },
             })
             catalog["application_images"].sort(key=lambda item: (
@@ -626,8 +643,13 @@ class ChangeSafety:
             "oci_revision": assessment["change"]["head_sha"],
         }
         matching = [
-            item for item in catalog["application_images"]
+            item
+            for item in catalog["application_images"]
             if all(item.get(key) == value for key, value in expected.items())
+            and item["provenance"]["provider"]
+            == assessment["image_provenance"]["provider"]
+            and item["provenance"]["signer_workflow"]
+            == assessment["image_provenance"]["signer_workflow"]
         ]
         if len(matching) != 1:
             raise ChangeSafetyError(
@@ -721,6 +743,7 @@ class ChangeSafety:
             },
             "change": _snapshot_dict(snapshot),
             "service": copy.deepcopy(policy["release_service"]),
+            "image_provenance": copy.deepcopy(policy["image_provenance"]),
             "risk": {
                 "tier": result["tier"],
                 "minimum_profile": result["profile"],

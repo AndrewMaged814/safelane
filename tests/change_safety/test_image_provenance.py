@@ -20,6 +20,7 @@ def test_github_attestation_verifier_binds_image_to_repository_and_source() -> N
         repository="acme/payments",
         source_revision="b" * 40,
         image="ghcr.io/acme/payments@sha256:" + "c" * 64,
+        signer_workflow="acme/payments/.github/workflows/build-and-attest.yml",
     )
 
     assert calls == [(
@@ -27,6 +28,7 @@ def test_github_attestation_verifier_binds_image_to_repository_and_source() -> N
         "oci://ghcr.io/acme/payments@sha256:" + "c" * 64,
         "--repo", "acme/payments",
         "--source-digest", "b" * 40,
+        "--signer-workflow", "acme/payments/.github/workflows/build-and-attest.yml",
         "--deny-self-hosted-runners",
         "--format", "json",
     )]
@@ -44,4 +46,5 @@ def test_github_attestation_verifier_rejects_empty_verification() -> None:
             repository="acme/payments",
             source_revision="b" * 40,
             image="ghcr.io/acme/payments@sha256:" + "c" * 64,
+            signer_workflow="acme/payments/.github/workflows/build-and-attest.yml",
         )

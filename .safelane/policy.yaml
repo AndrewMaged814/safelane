@@ -34,6 +34,9 @@ safety_case:
     data: risky
     security: risky
     operability: guarded
+image_provenance:
+  provider: github_artifact_attestation
+  signer_workflow: AndrewMaged814/safelane/.github/workflows/build-and-attest.yml
 trusted_probe_catalog:
   path: .safelane/trusted-probes.yaml
   non_fast_fallback_probe_id: safelane-health

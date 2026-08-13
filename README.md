@@ -137,10 +137,14 @@ catalog entry; a digest alone is rejected. Register that CI-produced identity be
 ```powershell
 uv run safelane register-image `
   --repository . `
+  --number <pull-request-number> `
   --service safelane `
-  --source-revision <full-pr-head-sha> `
   --image ghcr.io/owner/service@sha256:<64-hex-digest>
 ```
+
+The checked-in `build-and-attest.yml` workflow builds the exact PR head, labels the OCI image with
+that full revision, pushes its immutable digest to GHCR, and signs GitHub artifact provenance. The
+base-owned policy pins that workflow as the only accepted signer.
 
 SafeLane still does not merge the PR or apply the manifest to a cluster.
 Use the repository chip in Studio's top bar to connect another local path, GitHub URL, or
