@@ -493,6 +493,7 @@ class ChangeSafety:
         release_directory = assessment_path.parent / "release"
         release_directory.mkdir(exist_ok=True)
         path = release_directory / "rollout.yaml"
+        _remove_if_exists(path)
         _atomic_write(
             release_directory / "image-catalog.json",
             canonical_json_bytes(image_catalog),
