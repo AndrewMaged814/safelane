@@ -126,7 +126,12 @@ async function renderChanges() {
   const empty = status === "unresolved"
     ? "No open pull requests need review."
     : "No open pull requests are resolved yet.";
+  const unavailable = state.dashboard.unavailable || [];
+  const unavailableNotice = unavailable.length
+    ? `<section class="card assessment-unavailable"><strong>${unavailable.length} legacy PR${unavailable.length === 1 ? " is" : "s are"} not assessable</strong><p>Their base revision predates the repository's SafeLane contract. Current configured PRs remain available.</p></section>`
+    : "";
   app.innerHTML = shell(`<header class="page-head"><div><div class="eyebrow">Change review</div><h1>${title}</h1><p>${copy}</p></div><span class="version">LIVE GITHUB DATA</span></header>
+    ${unavailableNotice}
     <div class="tabs">
       <button class="tab ${status === "unresolved" ? "active" : ""}" data-filter="needs_review">Needs review · ${needs}</button>
       <button class="tab ${status === "resolved" ? "active" : ""}" data-filter="resolved">Resolved · ${resolved}</button>

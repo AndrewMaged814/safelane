@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 from safelane.artifacts import canonical_json_bytes
@@ -28,6 +29,70 @@ class OpenPullRequests(GuardedHost):
             "updated_at": snapshot.updated_at,
             "is_draft": snapshot.is_draft,
         }]
+
+
+class MixedContractPullRequests(OpenPullRequests):
+    def __init__(self) -> None:
+        super().__init__()
+        self.legacy = replace(
+            self.snapshot,
+            number=41,
+            title="Legacy pull request",
+            base_sha="0" * 40,
+            head_sha="1" * 40,
+        )
+
+    def list_open_pull_requests(self):
+        current = super().list_open_pull_requests()[0]
+        return [
+            {
+                **current,
+                "number": self.legacy.number,
+                "title": self.legacy.title,
+                "base_sha": self.legacy.base_sha,
+                "head_sha": self.legacy.head_sha,
+            },
+            current,
+        ]
+
+    def get_pull_request(self, change: PullRequestRef):
+        if change.number == self.legacy.number:
+            return self.legacy
+        return super().get_pull_request(change)
+
+    def diff(self, snapshot):
+        if snapshot is self.legacy:
+            raise AssertionError("an unconfigured PR must not reach diff acquisition")
+        return super().diff(snapshot)
+
+
+def test_unconfigured_legacy_pr_does_not_hide_configured_pr(
+    tmp_path: Path,
+) -> None:
+    host = MixedContractPullRequests()
+    workflow = ChangeSafety(
+        host=host,
+        state_dir=tmp_path,
+        analyzer_factory=lambda policy: NoFindingAnalyzer(),
+        clock=lambda: "2026-08-12T09:00:00Z",
+    )
+    studio = RepositoryStudioService(
+        provider=host,
+        workflow=workflow,
+        state_root=tmp_path,
+    )
+
+    dashboard = studio.dashboard()
+
+    assert [change["number"] for change in dashboard["changes"]] == [42]
+    assert dashboard["unavailable"] == [{
+        "number": 41,
+        "title": "Legacy pull request",
+        "reason": (
+            "acme/payments@" + "0" * 40
+            + " has no .safelane/policy.yaml"
+        ),
+    }]
 
 
 def test_cli_assessment_is_the_same_bytes_studio_reads_by_default(
