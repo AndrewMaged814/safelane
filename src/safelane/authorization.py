@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from .artifacts import canonical_json_bytes
-from .state_io import atomic_write
+from .state_io import atomic_write, state_lock
 
 
 _PROCESS_KEY = secrets.token_bytes(32)
@@ -41,16 +41,16 @@ def load_or_create_authorization_key(repository: str) -> bytes:
     )
     identifier = hashlib.sha256(repository.encode("utf-8")).hexdigest()
     path = root / "SafeLane" / "authorization-keys" / f"{identifier}.key"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        key = path.read_bytes()
-    except FileNotFoundError:
-        key = secrets.token_bytes(32)
-        atomic_write(path, key)
+    with state_lock(path.parent):
         try:
-            path.chmod(0o600)
-        except OSError:
-            pass
+            key = path.read_bytes()
+        except FileNotFoundError:
+            key = secrets.token_bytes(32)
+            atomic_write(path, key)
+            try:
+                path.chmod(0o600)
+            except OSError:
+                pass
     if len(key) != 32:
         raise ValueError(f"invalid SafeLane authorization key: {path}")
     return key

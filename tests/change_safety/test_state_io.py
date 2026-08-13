@@ -4,6 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from safelane.state_io import atomic_write, state_lock
+from safelane.authorization import load_or_create_authorization_key
 
 
 def test_same_process_writers_use_unique_temporary_files(tmp_path: Path) -> None:
@@ -29,3 +30,15 @@ def test_state_lock_serializes_one_repository_pr_directory(tmp_path: Path) -> No
         list(pool.map(append, range(20)))
 
     assert sorted(order) == list(range(20))
+
+
+def test_repository_authorization_key_is_stable_across_loads(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+
+    first = load_or_create_authorization_key("acme/payments")
+    second = load_or_create_authorization_key("acme/payments")
+
+    assert first == second
+    assert len(first) == 32
