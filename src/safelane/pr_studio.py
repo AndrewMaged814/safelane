@@ -357,7 +357,6 @@ class PullRequestAssessmentEngine:
     def assess(
         self, repository: str, pull_request: dict[str, Any], diff: bytes
     ) -> dict[str, Any]:
-        del repository, pull_request
         metadata_files, binary_patch = parse_diff_metadata(diff)
         valid_utf8 = True
         try:
@@ -405,6 +404,13 @@ class PullRequestAssessmentEngine:
             if finding is None:
                 invalid_finding = True
             else:
+                identity = sha256({
+                    "repository": repository,
+                    "head_sha": pull_request.get("head_sha"),
+                    "category": finding["category"],
+                    "spans": finding["spans"],
+                }).removeprefix("sha256:")[:16]
+                finding["id"] = f"finding-{identity}"
                 findings.append(finding)
         if invalid_finding and ai_status == "complete":
             ai_status = "partial"
@@ -546,12 +552,8 @@ class PullRequestAssessmentEngine:
         if any(span not in allowed for span in cited):
             return None
         title, rationale = _FINDING_COPY[candidate["category"]]
-        identity = sha256({
-            "category": candidate["category"],
-            "spans": candidate["spans"],
-        }).removeprefix("sha256:")[:16]
         finding = {
-            "id": f"finding-{identity}",
+            "id": f"finding-{index:03d}",
             "title": title,
             "category": candidate["category"],
             "rationale": rationale,
