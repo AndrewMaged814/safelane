@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+# Node
+node_modules/
+dist/
+.vite/
+
+# Local cluster and secrets
+kubeconfig
+*.kubeconfig
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Local leftover from the archived product
+.safelane/
+demo/repository/
+outcomes.jsonl
+decision.json
+rendered/
+safelane-brief.local.html
+
+# Editors and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
