@@ -35,3 +35,7 @@ safelane-brief.local.html
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Local agent tool config: mirrors .agents/skills via symlink, regenerated
+# per machine (e.g. by the setup-matt-pocock-skills skill). Not source.
+.claude/
