@@ -118,6 +118,32 @@ func (f Facts) approvedBy() []string {
 	return out
 }
 
+// IndependentApprover returns the first APPROVED review from someone other
+// than the pull request author, matching the rule [Evaluate] enforces.
+// Wiring code that has already seen StatusVerified uses this to build the
+// verified approval it records; it is meaningless before that, since
+// Evaluate is what proves an independent approver exists at all.
+func (f Facts) IndependentApprover() (Approval, bool) {
+	for _, a := range f.Approvals {
+		if a.State != "APPROVED" || a.Reviewer == f.AuthorLogin {
+			continue
+		}
+		return a, true
+	}
+	return Approval{}, false
+}
+
+// CheckRun returns the check run matching name, if any were reported for
+// this Facts' merge commit SHA.
+func (f Facts) CheckRun(name string) (CheckRun, bool) {
+	for _, c := range f.CheckRuns {
+		if c.Name == name {
+			return c, true
+		}
+	}
+	return CheckRun{}, false
+}
+
 // approvalFor returns the given reviewer's latest review, if any.
 func (f Facts) approvalFor(reviewer string) (Approval, bool) {
 	for _, a := range f.Approvals {

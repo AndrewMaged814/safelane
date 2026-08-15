@@ -127,6 +127,37 @@ func TestEvaluate_NoRequiredCheckConfigured_IsUnknownNotPassing(t *testing.T) {
 	}
 }
 
+func TestFacts_IndependentApprover_SkipsAuthorsOwnApproval(t *testing.T) {
+	facts := baseFacts()
+	facts.Approvals = []Approval{
+		{Reviewer: "andrew", State: "APPROVED", ApprovedAt: time.Date(2026, 8, 10, 9, 0, 0, 0, time.UTC)}, // author's own
+		{Reviewer: "ahmed", State: "APPROVED", ApprovedAt: time.Date(2026, 8, 10, 10, 0, 0, 0, time.UTC)},
+	}
+	got, ok := facts.IndependentApprover()
+	if !ok || got.Reviewer != "ahmed" {
+		t.Fatalf("want ahmed as the independent approver, got %+v (ok=%v)", got, ok)
+	}
+}
+
+func TestFacts_IndependentApprover_NoneWhenOnlyAuthorApproved(t *testing.T) {
+	facts := baseFacts()
+	facts.Approvals = []Approval{{Reviewer: "andrew", State: "APPROVED"}}
+	if _, ok := facts.IndependentApprover(); ok {
+		t.Fatal("want no independent approver when only the author approved")
+	}
+}
+
+func TestFacts_CheckRun_FindsByName(t *testing.T) {
+	facts := baseFacts()
+	got, ok := facts.CheckRun("publish")
+	if !ok || got.Conclusion != "success" {
+		t.Fatalf("want the publish check run, got %+v (ok=%v)", got, ok)
+	}
+	if _, ok := facts.CheckRun("does-not-exist"); ok {
+		t.Fatal("want no match for an unknown check name")
+	}
+}
+
 func assertRejected(t *testing.T, got Result, reason ReasonCode) {
 	t.Helper()
 	if got.Status != StatusRejected {
