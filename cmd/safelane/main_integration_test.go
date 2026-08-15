@@ -42,4 +42,13 @@ func TestRelease_RealFixture_AgainstRealGitHubAndGHCR(t *testing.T) {
 	if !strings.Contains(out, "evidence: unknown") {
 		t.Fatalf("want the placeholder PR/digest to land as unknown, not a pass, got %q", out)
 	}
+	if !strings.Contains(out, "eligibility: indeterminate") {
+		t.Fatalf("want placeholder evidence to be indeterminate, got %q", out)
+	}
+	if !strings.Contains(out, "retryable: true") {
+		t.Fatalf("want indeterminate to be retryable, got %q", out)
+	}
+	if strings.Contains(out, "rollout_envelope:") {
+		t.Fatalf("indeterminate must not attach an envelope, got %q", out)
+	}
 }

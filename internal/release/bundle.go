@@ -88,9 +88,8 @@ func (r ResourceRef) Validate() error {
 // value whose hash describes anything other than its own bytes.
 //
 // [RenderedResource.Bytes] returns a copy, so the bytes cannot be mutated after
-// hashing either. That copy is the reason this type is safe to hand to a risk
-// provider, to proof rendering, and to execution: all three see the same bytes the
-// hash covers.
+// hashing either. That copy is the reason this type is safe to hand to proof
+// rendering and to execution: both see the same bytes the hash covers.
 type RenderedResource struct {
 	ref   ResourceRef
 	bytes []byte
@@ -185,8 +184,7 @@ func (r *RenderedResource) UnmarshalJSON(data []byte) error {
 // renders, re-renders, or mutates anything: no Rerender, no template reference beyond
 // an identity struct, no renderer handle, no exported field. The value a caller holds
 // is the only bundle in play, and it is the value whose hashes are recorded on the
-// Release, whose bytes are handed to the risk provider, and whose bytes execution
-// later applies.
+// Release and whose bytes execution later applies.
 //
 // # What it binds
 //
@@ -318,8 +316,8 @@ func (b RenderedBundle) Hashes() []ResourceHash {
 // Manifest returns the rendered resources concatenated as one multi-document YAML
 // stream, in bundle order.
 //
-// This is a *view* for handing the bundle to an external risk provider or writing it
-// to disk. It concatenates the same stored bytes the per-resource hashes cover; it
+// This is a *view* for writing the bundle to disk or applying it.
+// It concatenates the same stored bytes the per-resource hashes cover; it
 // does not re-render or re-serialize anything.
 func (b RenderedBundle) Manifest() []byte {
 	var sb strings.Builder

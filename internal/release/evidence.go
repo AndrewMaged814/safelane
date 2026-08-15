@@ -25,10 +25,9 @@ type VerifiedPullRequest struct {
 //
 // There is no "approver is not the author" boolean here on purpose. A boolean can be
 // set to true by whoever builds the struct. Instead [NewReleaseEvidence] refuses to
-// construct evidence whose reviewer equals the pull request author, so an independent
-// approval is a precondition of the value existing at all. [ReleaseEvidence.Approval]
-// and [ReleaseEvidence.PullRequest] both expose the logins, so proof can show the
-// comparison rather than assert it.
+// construct evidence whose reviewer equals the pull request author. An independent
+// approval is required only when the Release Policy configures it; the evidence
+// value may omit approval when that check is off.
 type VerifiedApproval struct {
 	Reviewer   string    `json:"reviewer"`
 	ApprovedAt time.Time `json:"approved_at"`
@@ -89,10 +88,10 @@ type EvidenceInput struct {
 //
 // # Invariants guaranteed by construction
 //
-//   - repository, pull request, approval, merge commit, required check and artifact
+//   - repository, pull request, merge commit, required check and artifact
 //     are all present;
 //   - the merge commit SHA is a full 40-hex object id;
-//   - the approving reviewer is not the pull request author;
+//   - if an approving reviewer is recorded, they are not the pull request author;
 //   - the required check ran against the merge commit SHA, not the pull request head;
 //   - the required check concluded "success";
 //   - the artifact reference is an immutable sha256 digest, and the digest the
@@ -129,10 +128,6 @@ func NewReleaseEvidence(in EvidenceInput) (ReleaseEvidence, error) {
 	if in.PullRequest.MergedAt.IsZero() {
 		errs = append(errs, FailedEvidenceError("pull_request_not_merged", "evidence.pull_request.merged_at",
 			"the pull request is not merged", "Merge the pull request. An unmerged change is not a reviewed change."))
-	}
-	if in.Approval.Reviewer == "" {
-		errs = append(errs, MissingEvidenceError("missing_review_approval", "evidence.approval.reviewer",
-			"no approving review", "Obtain an approving review from someone other than the pull request author."))
 	}
 	if in.Approval.Reviewer != "" && in.PullRequest.Author != "" &&
 		strings.EqualFold(in.Approval.Reviewer, in.PullRequest.Author) {
@@ -226,11 +221,10 @@ func (e ReleaseEvidence) ArtifactDigest() string { return e.artifact.Reference.D
 // VerifiedAt returns when verification completed.
 func (e ReleaseEvidence) VerifiedAt() time.Time { return e.verifiedAt }
 
-// IndependentApproval reports whether the approving reviewer differs from the pull
-// request author. It is always true for a constructed value; it exists so proof can
-// display the check rather than claim it.
+// IndependentApproval reports whether a recorded approving reviewer differs from
+// the pull request author. It is false when no approval was recorded.
 func (e ReleaseEvidence) IndependentApproval() bool {
-	return e.validated && !strings.EqualFold(e.approval.Reviewer, e.pullRequest.Author)
+	return e.validated && e.approval.Reviewer != "" && !strings.EqualFold(e.approval.Reviewer, e.pullRequest.Author)
 }
 
 // IsZero reports whether this is the unset zero value rather than verified evidence.

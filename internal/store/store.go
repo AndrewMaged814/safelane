@@ -1,6 +1,6 @@
 // Package store persists Release records to disk, one JSON file per
 // release, so a release ID survives process restarts and later commands
-// (`safelane proof`, #50's decision step) can load it back.
+// (`safelane proof`) can load it back.
 package store
 
 import (

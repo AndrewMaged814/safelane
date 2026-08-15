@@ -2,8 +2,7 @@
 // described in #47/#48: it validates a Release Request, verifies GitHub
 // and GHCR evidence against the real world rather than the caller's
 // claims, renders the operator-owned bundle exactly once when evidence
-// verifies, and persists the Release record with a stable ID before any
-// risk assessment or policy decision (#50) runs.
+// verifies, records Release Eligibility, and persists the Release.
 //
 // This is the one orchestration path every transport uses. The CLI calls
 // SubmitRelease directly; a later HTTP API or MCP adapter must call the
@@ -19,6 +18,7 @@ import (
 	"time"
 
 	"github.com/AndrewMaged814/safelane/internal/intake"
+	"github.com/AndrewMaged814/safelane/internal/policy"
 	"github.com/AndrewMaged814/safelane/internal/release"
 	"github.com/AndrewMaged814/safelane/internal/render"
 	"github.com/AndrewMaged814/safelane/internal/verify/ghcr"
@@ -40,12 +40,22 @@ type Deps struct {
 	GHCR     ghcr.Resolver
 	Template render.Template
 	Store    Store
+	// Policy is the operator-owned Release Policy. The zero value uses
+	// [policy.Default], the compiled phase-one policy.
+	Policy policy.Policy
 
 	// Now and NewID default to time.Now and release.MintReleaseID. Tests
 	// override them for deterministic output; production wiring leaves
 	// them unset.
 	Now   func() time.Time
 	NewID func() (release.ReleaseID, error)
+}
+
+func (d Deps) policy() policy.Policy {
+	if d.Policy.Version == "" {
+		return policy.Default()
+	}
+	return d.Policy
 }
 
 func (d Deps) now() time.Time {
@@ -75,7 +85,7 @@ func (d Deps) newID() (release.ReleaseID, error) {
 //
 // Everything past intake produces a persisted Release, including evidence
 // that is missing, failed, or unknown. A withheld or denied release still
-// needs a stable identity so a later decision (#50) and proof (#52) have
+// needs a stable identity so eligibility (#50) and proof (#52) have
 // something to attach to. Only a verified release additionally carries a
 // RenderedBundle: rendering happens exactly once, against the verified
 // digest, and the resulting bundle is what SubmitRelease persists,
@@ -108,12 +118,18 @@ func SubmitRelease(ctx context.Context, raw []byte, d Deps) (*release.Release, e
 		return nil, err
 	}
 
+	elig, err := policy.Evaluate(d.policy(), evidenceResult)
+	if err != nil {
+		return nil, err
+	}
+
 	r, err := release.NewRelease(release.ReleaseParams{
-		ID:        id,
-		Request:   req,
-		Evidence:  evidenceResult,
-		Bundle:    bundlePtr,
-		CreatedAt: d.now(),
+		ID:          id,
+		Request:     req,
+		Evidence:    evidenceResult,
+		Bundle:      bundlePtr,
+		Eligibility: elig,
+		CreatedAt:   d.now(),
 	})
 	if err != nil {
 		return nil, err
@@ -121,7 +137,7 @@ func SubmitRelease(ctx context.Context, raw []byte, d Deps) (*release.Release, e
 
 	if err := d.Store.Save(r); err != nil {
 		return nil, release.Internal("release_not_persisted",
-			fmt.Sprintf("release %s was decided but could not be persisted: %v", r.ID, err))
+			fmt.Sprintf("release %s was recorded but could not be persisted: %v", r.ID, err))
 	}
 
 	return r, nil
@@ -143,11 +159,12 @@ func verifyEvidence(ctx context.Context, req release.ReleaseRequest, d Deps) (re
 	}
 
 	ghClaim := github.Claim{
-		Repository:             repo.String(),
-		PullRequestNumber:      req.Review.PullRequestNumber,
-		ExpectedMergeCommitSHA: req.Source.MergeCommitSHA,
-		RequiredCheckName:      req.CI.CheckName,
-		ExpectedBaseRef:        req.Source.BaseBranch,
+		Repository:              repo.String(),
+		PullRequestNumber:       req.Review.PullRequestNumber,
+		ExpectedMergeCommitSHA:  req.Source.MergeCommitSHA,
+		RequiredCheckName:       req.CI.CheckName,
+		ExpectedBaseRef:         req.Source.BaseBranch,
+		SkipIndependentApproval: !d.policy().IndependentPRApprovalRequired,
 	}
 	ghResult := github.Verify(ctx, d.GitHub, ghClaim, repo.Owner, repo.Name)
 
@@ -182,12 +199,20 @@ func verifyEvidence(ctx context.Context, req release.ReleaseRequest, d Deps) (re
 
 // buildReleaseEvidence assembles release.EvidenceInput from verified GitHub
 // Facts and the GHCR-resolved digest. It is only called when both checks
-// returned StatusVerified, so the approver and check-run lookups below are
-// guaranteed to find what Evaluate already proved exists.
+// returned StatusVerified, so the check-run lookup below is guaranteed to
+// find what Evaluate already proved exists. An independent approver is
+// present only when the Release Policy required one.
 func buildReleaseEvidence(req release.ReleaseRequest, gh github.Result, gr ghcr.Result, now time.Time) (release.ReleaseEvidence, error) {
 	facts := *gh.Facts
 
-	approver, _ := facts.IndependentApprover()
+	approver, hasApprover := facts.IndependentApprover()
+	approval := release.VerifiedApproval{}
+	if hasApprover {
+		approval = release.VerifiedApproval{
+			Reviewer:   approver.Reviewer,
+			ApprovedAt: approver.ApprovedAt,
+		}
+	}
 	check, _ := facts.CheckRun(req.CI.CheckName)
 
 	repo, _ := req.Repository()
@@ -202,10 +227,7 @@ func buildReleaseEvidence(req release.ReleaseRequest, gh github.Result, gr ghcr.
 			BaseBranch: facts.BaseRef,
 			MergedAt:   facts.MergedAt,
 		},
-		Approval: release.VerifiedApproval{
-			Reviewer:   approver.Reviewer,
-			ApprovedAt: approver.ApprovedAt,
-		},
+		Approval:       approval,
 		MergeCommitSHA: facts.MergeCommitSHA,
 		RequiredCheck: release.VerifiedCheckRun{
 			Name:        check.Name,

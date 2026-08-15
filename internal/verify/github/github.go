@@ -65,6 +65,10 @@ type Claim struct {
 	RequiredCheckName string
 	// ExpectedBaseRef is the branch the PR must have merged into, e.g. "main".
 	ExpectedBaseRef string
+	// SkipIndependentApproval, when true, means the operator Release Policy
+	// does not require an independent PR approval. The zero value keeps
+	// fail-closed required-approval behavior.
+	SkipIndependentApproval bool
 }
 
 // CheckRun is one check run GitHub reports against a commit SHA.
@@ -207,21 +211,23 @@ func Evaluate(claim Claim, facts Facts) Result {
 	}
 
 	approvedBy := facts.approvedBy()
-	approverFound := false
-	for _, login := range approvedBy {
-		if login == facts.AuthorLogin {
-			continue // self-approval never counts
+	if !claim.SkipIndependentApproval {
+		approverFound := false
+		for _, login := range approvedBy {
+			if login == facts.AuthorLogin {
+				continue // self-approval never counts
+			}
+			approverFound = true
+			break
 		}
-		approverFound = true
-		break
-	}
-	if !approverFound {
-		if len(approvedBy) == 1 && approvedBy[0] == facts.AuthorLogin {
-			return rejected(ReasonApproverIsAuthor, facts,
-				"pull request #%d is only approved by its own author %q", facts.Number, facts.AuthorLogin)
+		if !approverFound {
+			if len(approvedBy) == 1 && approvedBy[0] == facts.AuthorLogin {
+				return rejected(ReasonApproverIsAuthor, facts,
+					"pull request #%d is only approved by its own author %q", facts.Number, facts.AuthorLogin)
+			}
+			return rejected(ReasonApprovalMissing, facts,
+				"pull request #%d has no approval from a reviewer other than the author", facts.Number)
 		}
-		return rejected(ReasonApprovalMissing, facts,
-			"pull request #%d has no approval from a reviewer other than the author", facts.Number)
 	}
 
 	if claim.RequiredCheckName == "" {

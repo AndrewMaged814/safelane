@@ -72,7 +72,6 @@ These tools solve admission and policy enforcement. They do not, by themselves, 
 - **Access control:** Kubernetes RBAC and namespace isolation.
 - **Admission:** Kubernetes ValidatingAdmissionPolicy for simple CEL checks; Kyverno or Gatekeeper when richer policy templates, audit, or external data are required.
 - **Evidence:** existing GitHub review/check identifiers, SLSA/Sigstore provenance, and OCI manifest digests. SafeLane should not invent a competing evidence format or store.
-- **Deployment risk:** evaluate DeployWhisper as the external provider for infrastructure/deployment-artifact analysis before designing any SafeLane risk engine. SafeLane should consume and conservatively normalize its report, not copy its orchestration layer.
 - **Agent protocol:** MCP or A2A only as an adapter surface; neither protocol is itself a root of trust for release evidence.
 
 ## What SafeLane would still uniquely provide
@@ -92,7 +91,7 @@ The novelty is not “an agent can deploy,” “AI can analyze a canary,” or 
 - A custom LLM canary-analysis engine.
 - A new rollout controller, traffic router, probe system, or remediation engine.
 - A proprietary evidence schema, provenance store, or signing system.
-- A new deployment/infrastructure risk engine before evaluating DeployWhisper or other existing providers.
+- A new deployment/infrastructure risk engine or YAML scanner.
 - A generic policy language competing with CEL, Kyverno, Gatekeeper, OPA, or Cedar.
 - Warden-like generic command/network sandboxing as the primary product; use existing agent-runtime guardrails where useful.
 - A dashboard, multi-agent/provider matrix, broad cluster support, and production platform hardening in the initial prototype.

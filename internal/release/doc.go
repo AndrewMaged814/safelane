@@ -23,8 +23,8 @@
 // populated reads as "unknown", never as "verified". Only [EvidenceVerified] results
 // carry a [ReleaseEvidence] at all; a missing, failed or unknown result has nothing to
 // read. There is deliberately no boolean conversion, no "OK()" helper, and no default
-// severity anywhere in this package: turning an outcome into a risk tier or a policy
-// decision is #50's job and must not be short-circuited here.
+// severity anywhere in this package: mapping evidence onto Release Eligibility
+// is #50's job and must not be short-circuited here.
 //
 // # No Kubernetes configuration crosses the intake boundary
 //
@@ -56,8 +56,8 @@
 //
 // # Extension points for #50 and #52
 //
-// This package deliberately contains no risk vocabulary and no policy vocabulary.
-// #50 adds the assessment and the policy decision as an additive section on [Release]
+// This package deliberately contains no risk vocabulary.
+// #50 adds Release Eligibility as an additive section on [Release]
 // (a new field plus a new JSON key); #52 adds proof rendering as a read model over
 // these types. Neither may change release identity, evidence, or the artifact/target/
 // bundle binding enforced by [NewRelease] - those are frozen by this package.

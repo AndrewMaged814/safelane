@@ -39,8 +39,7 @@ Nothing else changes. `Render` is unaware of which directory it was handed.
 6. **`TEMPLATE` (optional)** holds `name:` and `version:` lines. An unrecognized key is
    an error rather than a silent drop. The content digest, not the version label, is
    what a Release pins.
-7. **No Secrets, no credentials.** The bundle is hashed, handed to an external risk
-   provider, and recorded in Release Proof.
+7. **No Secrets, no credentials.** The bundle is hashed and recorded in Release Proof.
 
 ## Values SafeLane supplies
 
@@ -93,9 +92,9 @@ that does not match the pre-created Rollout (#55) will not apply:
   change the derivation in `render.newTemplateData` — do not paper over it in the
   template.
 - **`replicas: 4`** and the resource requests/limits in `40-rollout.yaml.tmpl`.
-- **The canary step ladder** (`5 / 25 / 50` with 60s pauses). The Release Policy's
-  envelope (`docs/policy/safelane-policy.yml`) is the authority on allowed stages; the
-  template's steps must be consistent with it. #50 owns that reconciliation.
+- **The canary step ladder** (`5 / 25 / 50` with 60s pauses; policy envelope includes `100` as the final promote). The operator's static envelope in
+  `docs/policy/safelane-policy.yml` is the authority on allowed stages; the
+  template's steps must be consistent with it. Evidence does not choose these stages.
 - **`trafficRouting.nginx.stableIngress`** and the Ingress host
   (`<app>.<env>.svc.cluster.local`). If the demo cluster has no nginx ingress
   controller, drop `35-ingress.yaml.tmpl` and the `trafficRouting` block; Argo then

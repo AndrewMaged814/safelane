@@ -241,8 +241,8 @@ func TestDigestPinningChangesOnlyTheImage(t *testing.T) {
 }
 
 // TestBundleManifestConcatenatesTheHashedBytes checks that the multi-document view
-// handed to an external risk provider contains exactly the bytes the recorded hashes
-// cover - no re-serialization anywhere in the path.
+// contains exactly the bytes the recorded hashes cover - no re-serialization
+// anywhere in the path.
 func TestBundleManifestConcatenatesTheHashedBytes(t *testing.T) {
 	bundle := renderFixture(t, digestA)
 	manifest := bundle.Manifest()

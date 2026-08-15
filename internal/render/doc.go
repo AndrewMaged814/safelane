@@ -5,9 +5,9 @@
 // the exact final Kubernetes object bytes SafeLane intends to apply, each one
 // content-hashed.
 //
-// The entire security claim of SafeLane lives in this package. "The bytes
-// DeployWhisper assessed are the bytes that reach the cluster" is true only if
-// rendering happens once, the hash covers exactly what was rendered, and nothing
+// The entire security claim of SafeLane lives in this package. "The bytes that
+// were hashed are the bytes that reach the cluster" is true only if rendering
+// happens once, the hash covers exactly what was rendered, and nothing
 // downstream renders again. Three properties carry that claim, and each is structural
 // rather than a rule someone has to remember.
 //
@@ -44,7 +44,7 @@
 // state, and - crucially - no method anywhere on release.Release or
 // release.RenderedBundle that invokes this package. A caller that has a bundle cannot
 // ask for it to be rendered again; it can only read the one it holds. Downstream
-// consumers (risk analysis, proof, execution) receive that value, and
+// consumers (proof, execution) receive that value, and
 // release.RenderedResource.Bytes returns a copy, so they cannot alter the bytes the
 // recorded hashes cover.
 //

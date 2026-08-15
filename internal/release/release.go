@@ -8,7 +8,7 @@ import (
 
 // RecordSchemaVersion is the version of the persisted Release record shape.
 //
-// #50 (risk, provider, policy decision) and #52 (proof read model) extend the record
+// #50 (Release Eligibility) and #52 (proof read model) extend the record
 // by *adding* sections - a new field on [Release] and a new key in its JSON - which is
 // a backwards-compatible change that does not need a new version. Bump this only if
 // identity, evidence or the artifact/target/bundle binding below ever changes shape.
@@ -16,8 +16,8 @@ const RecordSchemaVersion = "safelane.release.record/v1"
 
 // ReleaseParams is the argument to [NewRelease].
 type ReleaseParams struct {
-	// ID must already be minted. #48 requires a stable release ID before any risk
-	// assessment or policy decision, so it is an input here rather than something
+	// ID must already be minted. #48 requires a stable release ID before
+	// eligibility is recorded, so it is an input here rather than something
 	// this constructor invents at an arbitrary point in the flow.
 	ID ReleaseID
 	// Request is the caller's submission, recorded verbatim. Keeping the claims lets
@@ -30,6 +30,9 @@ type ReleaseParams struct {
 	// Bundle is the single rendering for this Release, or nil when evidence did not
 	// verify and nothing was rendered.
 	Bundle *RenderedBundle
+	// Eligibility is the determination of whether this exact release may enter
+	// SafeLane. Every persisted Release has one, including withheld attempts.
+	Eligibility Eligibility
 	// CreatedAt is SafeLane's own timestamp, distinct from the caller's claimed
 	// metadata.submitted_at.
 	CreatedAt time.Time
@@ -56,19 +59,17 @@ type ReleaseParams struct {
 //
 // # What is deliberately absent
 //
-// No risk tier, no severity, no provider result, no policy version, no allowed
-// envelope, no next action. Those belong to #50 and arrive as an additional section on
-// this type. No execution or boundary evidence either; those are #53/#54, rendered by
-// #52.
+// No execution or boundary evidence either; those are #53/#54, rendered by #52.
 type Release struct {
 	// ID is the stable release identity.
 	ID ReleaseID `json:"release_id"`
 	// CreatedAt is when SafeLane created the record.
 	CreatedAt time.Time `json:"created_at"`
 
-	request  ReleaseRequest
-	evidence EvidenceResult
-	bundle   *RenderedBundle
+	request     ReleaseRequest
+	evidence    EvidenceResult
+	bundle      *RenderedBundle
+	eligibility Eligibility
 }
 
 // NewRelease validates and assembles the Release record.
@@ -86,6 +87,33 @@ func NewRelease(p ReleaseParams) (*Release, error) {
 	}
 
 	verified, isVerified := p.Evidence.Verified()
+
+	if p.Eligibility.IsZero() {
+		errs = append(errs, Internal("missing_eligibility",
+			"a Release must record Release Eligibility before it is persisted"))
+	} else {
+		switch p.Eligibility.Status() {
+		case EligibilityEligible:
+			if !isVerified {
+				errs = append(errs, Internal("eligible_without_verified_evidence",
+					"an eligible release requires verified mandatory evidence"))
+			}
+		case EligibilityIndeterminate:
+			if p.Evidence.Outcome() != EvidenceUnknown {
+				errs = append(errs, Internal("indeterminate_without_unknown_evidence",
+					"indeterminate eligibility is only for verification that could not be completed"))
+			}
+		case EligibilityIneligible:
+			if isVerified {
+				errs = append(errs, Internal("ineligible_with_verified_evidence",
+					"verified mandatory evidence is eligible in phase one; it is not ineligible"))
+			}
+			if p.Evidence.Outcome() == EvidenceUnknown {
+				errs = append(errs, Internal("ineligible_for_unknown_evidence",
+					"unknown evidence is indeterminate, not ineligible"))
+			}
+		}
+	}
 
 	if isVerified {
 		if verified.MergeCommitSHA() != p.Request.Source.MergeCommitSHA {
@@ -144,10 +172,11 @@ func NewRelease(p ReleaseParams) (*Release, error) {
 	}
 
 	r := &Release{
-		ID:        p.ID,
-		CreatedAt: p.CreatedAt.UTC(),
-		request:   p.Request,
-		evidence:  p.Evidence,
+		ID:          p.ID,
+		CreatedAt:   p.CreatedAt.UTC(),
+		request:     p.Request,
+		evidence:    p.Evidence,
+		eligibility: p.Eligibility,
 	}
 	if p.Bundle != nil {
 		bundle := *p.Bundle
@@ -204,6 +233,10 @@ func (r *Release) Bundle() (RenderedBundle, bool) {
 	return *r.bundle, true
 }
 
+// Eligibility is the persisted determination of whether this release may enter
+// SafeLane. It has no setters: re-running assessment cannot rewrite it.
+func (r *Release) Eligibility() Eligibility { return r.eligibility }
+
 // TemplateIdentity returns the pinned Release Template identity, if a bundle exists.
 func (r *Release) TemplateIdentity() (TemplateIdentity, bool) {
 	if r.bundle == nil {
@@ -228,6 +261,7 @@ type releaseJSON struct {
 	Request       ReleaseRequest  `json:"request"`
 	Evidence      EvidenceResult  `json:"evidence"`
 	Bundle        *RenderedBundle `json:"bundle"`
+	Eligibility   Eligibility     `json:"eligibility"`
 }
 
 // MarshalJSON writes the persisted record.
@@ -239,6 +273,7 @@ func (r *Release) MarshalJSON() ([]byte, error) {
 		Request:       r.request,
 		Evidence:      r.evidence,
 		Bundle:        r.bundle,
+		Eligibility:   r.eligibility,
 	})
 }
 
@@ -259,11 +294,12 @@ func (r *Release) UnmarshalJSON(data []byte) error {
 			fmt.Sprintf("This build reads %q records.", RecordSchemaVersion))
 	}
 	built, err := NewRelease(ReleaseParams{
-		ID:        w.ID,
-		Request:   w.Request,
-		Evidence:  w.Evidence,
-		Bundle:    w.Bundle,
-		CreatedAt: w.CreatedAt,
+		ID:          w.ID,
+		Request:     w.Request,
+		Evidence:    w.Evidence,
+		Bundle:      w.Bundle,
+		Eligibility: w.Eligibility,
+		CreatedAt:   w.CreatedAt,
 	})
 	if err != nil {
 		return err

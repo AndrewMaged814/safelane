@@ -217,7 +217,7 @@ func isSafeScalar(s string) bool {
 
 // finalizeDocument normalizes a rendered document: LF line endings and exactly one
 // trailing newline. Normalization happens *before* hashing, so the hash covers the
-// bytes as they will be recorded, handed to a provider, and applied.
+// bytes as they will be recorded and applied.
 func finalizeDocument(b []byte) []byte {
 	s := normalizeNewlines(string(b))
 	s = strings.TrimRight(s, "\n")

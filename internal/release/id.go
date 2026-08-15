@@ -10,8 +10,7 @@ import (
 )
 
 // ReleaseIDPrefix prefixes every release ID so an ID is self-describing in logs, CLI
-// output and proof, and cannot be confused with a provider report ID, a request ID, or
-// a commit SHA.
+// output and proof, and cannot be confused with a request ID or a commit SHA.
 const ReleaseIDPrefix = "rel_"
 
 // releaseIDBodyLen is the length of the ULID body: 26 Crockford base32 characters
@@ -36,9 +35,9 @@ const crockford = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 //
 // A ULID gives:
 //
-//   - assignment before any verification, rendering, risk or policy step, because it
+//   - assignment before any verification, rendering, or eligibility step, because it
 //     depends on nothing but the clock and entropy. #48 requires the record to be
-//     persisted with a stable ID before any risk assessment or policy decision;
+//     persisted with a stable ID before Release Eligibility is recorded;
 //   - 80 bits of cryptographic randomness per millisecond, so IDs do not collide
 //     across releases for the same target;
 //   - lexicographic order that matches creation order, so a listing sorts correctly

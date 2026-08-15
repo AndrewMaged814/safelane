@@ -1,31 +1,19 @@
 version: 1
 
-risk_policy:
-  low:
-    initial_traffic: 10
-    stages: [10, 50, 100]
-    human_approval: false
-  medium:
-    initial_traffic: 5
-    stages: [5, 25, 50, 100]
-    human_approval: false
-  high:
-    initial_traffic: 5
-    stages: [5, 10, 25, 50, 100]
-    human_approval_before: 50
-  critical:
-    action: deny
-  unknown:
-    action: withhold_authority
+# Phase-one Release Policy. Evidence decides eligibility only; it does not
+# produce a risk tier or choose these stages. Risk-based envelopes are a
+# later extension, not part of #50.
 
-required_evidence:
-  - merged_pull_request
-  - passing_ci
-  - immutable_oci_digest
+mandatory_evidence:
+  - merged_commit_on_main
+  - passing_publish_workflow
+  - immutable_ghcr_digest
 
-aggregation:
-  strategy: highest_risk_wins
-  missing_required_evidence: unknown
+# Required only when enabled. The progress demo turns this on so Ahmed's
+# independent approval is a gate; other environments may leave it off.
+independent_pr_approval:
+  required: true
 
-runtime_analysis:
-  required_after_each_stage: true
+rollout:
+  stages: [5, 25, 50, 100]
+  next_action: start

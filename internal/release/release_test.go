@@ -117,6 +117,45 @@ func mustID(t *testing.T) release.ReleaseID {
 	return id
 }
 
+func eligibilityFor(t *testing.T, ev release.EvidenceResult) release.Eligibility {
+	t.Helper()
+	switch ev.Outcome() {
+	case release.EvidenceVerified:
+		env, err := release.NewRolloutEnvelope([]int{5, 25, 50, 100}, "start")
+		if err != nil {
+			t.Fatalf("NewRolloutEnvelope: %v", err)
+		}
+		elig, err := release.Eligible("1", "all_mandatory_evidence_verified",
+			"All configured mandatory evidence verified.", env)
+		if err != nil {
+			t.Fatalf("Eligible: %v", err)
+		}
+		return elig
+	case release.EvidenceUnknown:
+		elig, err := release.Indeterminate("1", "verification_incomplete",
+			"Verification could not be completed. Retry once GitHub and GHCR are reachable.")
+		if err != nil {
+			t.Fatalf("Indeterminate: %v", err)
+		}
+		return elig
+	default:
+		elig, err := release.Ineligible("1", "requirement_failed",
+			"A mandatory evidence requirement failed.")
+		if err != nil {
+			t.Fatalf("Ineligible: %v", err)
+		}
+		return elig
+	}
+}
+
+func newRelease(t *testing.T, p release.ReleaseParams) (*release.Release, error) {
+	t.Helper()
+	if p.Eligibility.IsZero() {
+		p.Eligibility = eligibilityFor(t, p.Evidence)
+	}
+	return release.NewRelease(p)
+}
+
 // ---------------------------------------------------------------- release id
 
 func TestReleaseIDIsSortableAndParseable(t *testing.T) {
@@ -368,6 +407,15 @@ func TestNewReleaseEvidenceAcceptsCompleteEvidence(t *testing.T) {
 	}
 }
 
+func TestNewReleaseEvidence_AllowsMissingApproval(t *testing.T) {
+	in := validEvidenceInput()
+	in.Approval = release.VerifiedApproval{}
+	ev := mustEvidence(t, in)
+	if ev.IndependentApproval() {
+		t.Error("no recorded approval is not an independent approval")
+	}
+}
+
 func TestNewReleaseEvidenceRejects(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -380,9 +428,6 @@ func TestNewReleaseEvidenceRejects(t *testing.T) {
 		{"self approval differing case", func(in *release.EvidenceInput) {
 			in.Approval.Reviewer = strings.ToUpper(in.PullRequest.Author)
 		}, "self_approval"},
-		{"no approval", func(in *release.EvidenceInput) {
-			in.Approval = release.VerifiedApproval{}
-		}, "missing_review_approval"},
 		{"unmerged pull request", func(in *release.EvidenceInput) {
 			in.PullRequest.MergedAt = time.Time{}
 		}, "pull_request_not_merged"},
@@ -679,7 +724,7 @@ func TestRenderedBundleJSONDetectsTamperedBytes(t *testing.T) {
 func TestNewReleaseBindsEvidenceArtifactTargetAndBundle(t *testing.T) {
 	req := validRequest()
 	ev := mustEvidence(t, validEvidenceInput())
-	rel, err := release.NewRelease(release.ReleaseParams{
+	rel, err := newRelease(t, release.ReleaseParams{
 		ID:        mustID(t),
 		Request:   req,
 		Evidence:  mustVerified(t, ev),
@@ -710,7 +755,7 @@ func TestNewReleaseBindsEvidenceArtifactTargetAndBundle(t *testing.T) {
 }
 
 func TestReleaseWithoutVerifiedEvidenceHasNoBundle(t *testing.T) {
-	rel, err := release.NewRelease(release.ReleaseParams{
+	rel, err := newRelease(t, release.ReleaseParams{
 		ID:      mustID(t),
 		Request: validRequest(),
 		Evidence: release.UnknownEvidence(release.UnknownEvidenceError(
@@ -736,7 +781,7 @@ func TestReleaseWithoutVerifiedEvidenceHasNoBundle(t *testing.T) {
 
 func TestNewReleaseRejectsBundleWithoutVerifiedEvidence(t *testing.T) {
 	req := validRequest()
-	_, err := release.NewRelease(release.ReleaseParams{
+	_, err := newRelease(t, release.ReleaseParams{
 		ID:        mustID(t),
 		Request:   req,
 		Evidence:  release.UnknownEvidence(),
@@ -807,7 +852,7 @@ func TestNewReleaseRejectsCrossReleaseAndCrossTargetCombination(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := release.NewRelease(tc.params())
+			_, err := newRelease(t, tc.params())
 			if err == nil {
 				t.Fatal("expected rejection")
 			}
@@ -819,7 +864,7 @@ func TestNewReleaseRejectsCrossReleaseAndCrossTargetCombination(t *testing.T) {
 }
 
 func TestNewReleaseRequiresAValidID(t *testing.T) {
-	_, err := release.NewRelease(release.ReleaseParams{
+	_, err := newRelease(t, release.ReleaseParams{
 		ID: "podinfo-2026-08-15", Request: validRequest(),
 		Evidence:  mustVerified(t, mustEvidence(t, validEvidenceInput())),
 		CreatedAt: testTime,
@@ -831,7 +876,7 @@ func TestNewReleaseRequiresAValidID(t *testing.T) {
 
 func TestReleaseJSONRoundTripRechecksBindings(t *testing.T) {
 	req := validRequest()
-	rel, err := release.NewRelease(release.ReleaseParams{
+	rel, err := newRelease(t, release.ReleaseParams{
 		ID:        mustID(t),
 		Request:   req,
 		Evidence:  mustVerified(t, mustEvidence(t, validEvidenceInput())),
@@ -880,7 +925,7 @@ func TestReleaseJSONRoundTripRechecksBindings(t *testing.T) {
 // breaking readers of this schema version.
 func TestReleaseRecordToleratesFutureSections(t *testing.T) {
 	req := validRequest()
-	rel, err := release.NewRelease(release.ReleaseParams{
+	rel, err := newRelease(t, release.ReleaseParams{
 		ID:        mustID(t),
 		Request:   req,
 		Evidence:  mustVerified(t, mustEvidence(t, validEvidenceInput())),
@@ -902,12 +947,11 @@ func TestReleaseRecordToleratesFutureSections(t *testing.T) {
 	}
 }
 
-// TestNoRiskOrPolicyVocabularyLeakedIntoTheRecord guards the seam with #50: this
-// package produces and persists identity, evidence and rendered-bundle facts, and must
-// not start expressing decisions.
-func TestNoRiskOrPolicyVocabularyLeakedIntoTheRecord(t *testing.T) {
+// TestNoRiskVocabularyOnTheReleaseRecord: eligibility is not risk. The record
+// may carry an eligibility section; it must not carry risk tiers.
+func TestNoRiskVocabularyOnTheReleaseRecord(t *testing.T) {
 	req := validRequest()
-	rel, err := release.NewRelease(release.ReleaseParams{
+	rel, err := newRelease(t, release.ReleaseParams{
 		ID:        mustID(t),
 		Request:   req,
 		Evidence:  mustVerified(t, mustEvidence(t, validEvidenceInput())),
@@ -925,9 +969,123 @@ func TestNoRiskOrPolicyVocabularyLeakedIntoTheRecord(t *testing.T) {
 	if err := json.Unmarshal(raw, &record); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	for _, forbidden := range []string{"risk", "severity", "decision", "policy", "envelope", "stages", "next_action"} {
+	if _, ok := record["eligibility"]; !ok {
+		t.Fatal("the Release record must persist eligibility")
+	}
+	for _, forbidden := range []string{"risk", "severity", "normalized_risk", "decision"} {
 		if _, present := record[forbidden]; present {
-			t.Errorf("the Release record carries %q, which belongs to #50", forbidden)
+			t.Errorf("the Release record carries %q; evidence is not a risk policy", forbidden)
 		}
+	}
+}
+
+func TestNewRelease_EligibleVerified_PersistsStaticEnvelope(t *testing.T) {
+	req := validRequest()
+	ev := mustVerified(t, mustEvidence(t, validEvidenceInput()))
+	env, err := release.NewRolloutEnvelope([]int{5, 25, 50, 100}, "start")
+	if err != nil {
+		t.Fatalf("NewRolloutEnvelope: %v", err)
+	}
+	elig, err := release.Eligible("1", "all_mandatory_evidence_verified",
+		"All configured mandatory evidence verified.", env)
+	if err != nil {
+		t.Fatalf("Eligible: %v", err)
+	}
+
+	rel, err := release.NewRelease(release.ReleaseParams{
+		ID:          mustID(t),
+		Request:     req,
+		Evidence:    ev,
+		Bundle:      mustBundle(t, req.Target, digestA),
+		Eligibility: elig,
+		CreatedAt:   testTime,
+	})
+	if err != nil {
+		t.Fatalf("NewRelease: %v", err)
+	}
+	got := rel.Eligibility()
+	if got.Status() != release.EligibilityEligible {
+		t.Fatalf("status = %s, want eligible", got.Status())
+	}
+	gotEnv, ok := got.Envelope()
+	if !ok {
+		t.Fatal("eligible release lost its envelope")
+	}
+	if gotEnv.NextAction() != "start" {
+		t.Errorf("next action = %q, want start", gotEnv.NextAction())
+	}
+}
+
+func TestNewRelease_RejectsEligibleWithoutVerifiedEvidence(t *testing.T) {
+	env, err := release.NewRolloutEnvelope([]int{5, 25, 50, 100}, "start")
+	if err != nil {
+		t.Fatalf("NewRolloutEnvelope: %v", err)
+	}
+	elig, err := release.Eligible("1", "all_mandatory_evidence_verified", "ok", env)
+	if err != nil {
+		t.Fatalf("Eligible: %v", err)
+	}
+	_, err = release.NewRelease(release.ReleaseParams{
+		ID:          mustID(t),
+		Request:     validRequest(),
+		Evidence:    release.UnknownEvidence(),
+		Eligibility: elig,
+		CreatedAt:   testTime,
+	})
+	if err == nil || !strings.Contains(err.Error(), "eligible_without_verified_evidence") {
+		t.Errorf("error = %v, want eligible_without_verified_evidence", err)
+	}
+}
+
+func TestNewRelease_RequiresEligibility(t *testing.T) {
+	req := validRequest()
+	_, err := release.NewRelease(release.ReleaseParams{
+		ID:        mustID(t),
+		Request:   req,
+		Evidence:  mustVerified(t, mustEvidence(t, validEvidenceInput())),
+		Bundle:    mustBundle(t, req.Target, digestA),
+		CreatedAt: testTime,
+	})
+	if err == nil || !strings.Contains(err.Error(), "missing_eligibility") {
+		t.Errorf("error = %v, want missing_eligibility", err)
+	}
+}
+
+func TestReleaseJSONRoundTrip_PreservesEligibility(t *testing.T) {
+	req := validRequest()
+	rel, err := newRelease(t, release.ReleaseParams{
+		ID:        mustID(t),
+		Request:   req,
+		Evidence:  mustVerified(t, mustEvidence(t, validEvidenceInput())),
+		Bundle:    mustBundle(t, req.Target, digestA),
+		CreatedAt: testTime,
+	})
+	if err != nil {
+		t.Fatalf("NewRelease: %v", err)
+	}
+	raw, err := json.Marshal(rel)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var back release.Release
+	if err := json.Unmarshal(raw, &back); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if back.Eligibility().Status() != rel.Eligibility().Status() {
+		t.Errorf("status %s -> %s", rel.Eligibility().Status(), back.Eligibility().Status())
+	}
+	if back.Eligibility().ReasonCode() != rel.Eligibility().ReasonCode() {
+		t.Errorf("reason %q -> %q", rel.Eligibility().ReasonCode(), back.Eligibility().ReasonCode())
+	}
+	origEnv, _ := rel.Eligibility().Envelope()
+	backEnv, ok := back.Eligibility().Envelope()
+	if !ok || backEnv.NextAction() != origEnv.NextAction() {
+		t.Error("envelope did not survive round-trip")
+	}
+
+	// Re-running assessment is not represented as a rewrite: the loaded
+	// record keeps the original eligibility, including policy version.
+	if back.Eligibility().PolicyVersion() != "1" {
+		t.Errorf("policy version = %q", back.Eligibility().PolicyVersion())
 	}
 }

@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/AndrewMaged814/safelane/internal/policy"
 	"github.com/AndrewMaged814/safelane/internal/release"
 	"github.com/AndrewMaged814/safelane/internal/render"
 	"github.com/AndrewMaged814/safelane/internal/verify/github"
@@ -171,6 +172,22 @@ func TestSubmitRelease_ValidFixture_ProducesVerifiedPersistedRelease(t *testing.
 	if r.ArtifactDigest() != fixtureDigest {
 		t.Fatalf("want artifact digest %s, got %s", fixtureDigest, r.ArtifactDigest())
 	}
+	if r.Eligibility().Status() != release.EligibilityEligible {
+		t.Fatalf("want eligible, got %s", r.Eligibility().Status())
+	}
+	env, ok := r.Eligibility().Envelope()
+	if !ok {
+		t.Fatal("eligible release must carry the static envelope")
+	}
+	if env.NextAction() != "start" {
+		t.Errorf("next action = %q, want start", env.NextAction())
+	}
+	if got := env.Stages(); len(got) != 4 || got[0] != 5 || got[3] != 100 {
+		t.Errorf("stages = %v, want 5 → 25 → 50 → 100", got)
+	}
+	if r.Eligibility().Retryable() {
+		t.Error("eligible is not retryable")
+	}
 	if len(store.saved) != 1 || store.saved[0].ID != r.ID {
 		t.Fatalf("want exactly the returned release persisted, got %+v", store.saved)
 	}
@@ -280,6 +297,15 @@ func TestSubmitRelease_RequiredCheckFailed_PersistsFailedEvidence(t *testing.T) 
 	if r.Evidence().Outcome() != release.EvidenceFailed {
 		t.Fatalf("want EvidenceFailed for a failed required check, got %s", r.Evidence().Outcome())
 	}
+	if r.Eligibility().Status() != release.EligibilityIneligible {
+		t.Fatalf("want ineligible when the required check failed, got %s", r.Eligibility().Status())
+	}
+	if r.Eligibility().Retryable() {
+		t.Fatal("ineligible is not retryable")
+	}
+	if _, ok := r.Eligibility().Envelope(); ok {
+		t.Fatal("ineligible must not attach an envelope")
+	}
 	if _, ok := r.Bundle(); ok {
 		t.Fatal("want no bundle when the required check failed")
 	}
@@ -318,6 +344,32 @@ func TestSubmitRelease_NoApproval_PersistsMissingEvidence(t *testing.T) {
 	}
 }
 
+func TestSubmitRelease_ApprovalNotRequired_EligibleWithoutApproval(t *testing.T) {
+	deps, store := baseDeps(t)
+	deps.Policy = policy.Default()
+	deps.Policy.IndependentPRApprovalRequired = false
+	facts := verifiedFacts()
+	facts.Approvals = nil
+	deps.GitHub = fakeFetcher{facts: facts}
+
+	r, err := SubmitRelease(context.Background(), loadFixtureRaw(t), deps)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !r.Evidence().IsVerified() {
+		t.Fatalf("want verified evidence when approval is not required, got %s", r.Evidence())
+	}
+	if r.Eligibility().Status() != release.EligibilityEligible {
+		t.Fatalf("want eligible, got %s", r.Eligibility().Status())
+	}
+	if _, ok := r.Eligibility().Envelope(); !ok {
+		t.Fatal("eligible must attach the static envelope")
+	}
+	if len(store.saved) != 1 {
+		t.Fatalf("want the release persisted, got %d", len(store.saved))
+	}
+}
+
 func TestSubmitRelease_GitHubUnreachable_PersistsUnknownEvidence_NeverPassing(t *testing.T) {
 	deps, store := baseDeps(t)
 	deps.GitHub = fakeFetcher{err: fmt.Errorf("connection reset")}
@@ -328,6 +380,15 @@ func TestSubmitRelease_GitHubUnreachable_PersistsUnknownEvidence_NeverPassing(t 
 	}
 	if r.Evidence().Outcome() != release.EvidenceUnknown {
 		t.Fatalf("want EvidenceUnknown when GitHub is unreachable, got %s", r.Evidence().Outcome())
+	}
+	if r.Eligibility().Status() != release.EligibilityIndeterminate {
+		t.Fatalf("want indeterminate eligibility when GitHub is unreachable, got %s", r.Eligibility().Status())
+	}
+	if !r.Eligibility().Retryable() {
+		t.Fatal("indeterminate must be retryable")
+	}
+	if _, ok := r.Eligibility().Envelope(); ok {
+		t.Fatal("indeterminate must not attach an envelope")
 	}
 	if r.Evidence().IsVerified() {
 		t.Fatal("an unreachable GitHub must never verify")

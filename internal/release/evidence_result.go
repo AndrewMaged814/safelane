@@ -12,7 +12,7 @@ import (
 // that panicked all read as "unknown". Nothing defaults to verified.
 //
 // There is intentionally no method converting an outcome to a boolean, a severity, or
-// a risk tier. Mapping evidence status onto authority is Release Policy's job (#50).
+// a risk tier. Mapping evidence status onto Release Eligibility is #50's job.
 // If such a helper existed here, a future caller would eventually treat
 // "!failed" as "pass".
 type EvidenceOutcome uint8

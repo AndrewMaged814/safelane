@@ -37,6 +37,15 @@ func repeatHex() string {
 	return string(b)
 }
 
+func mustStoreEligibility(t *testing.T) release.Eligibility {
+	t.Helper()
+	elig, err := release.Ineligible("1", "requirement_failed", "A mandatory evidence requirement failed.")
+	if err != nil {
+		t.Fatalf("Ineligible: %v", err)
+	}
+	return elig
+}
+
 func fixtureRelease(t *testing.T) *release.Release {
 	t.Helper()
 	id, err := release.MintReleaseID()
@@ -44,10 +53,11 @@ func fixtureRelease(t *testing.T) *release.Release {
 		t.Fatalf("test setup: %v", err)
 	}
 	r, err := release.NewRelease(release.ReleaseParams{
-		ID:        id,
-		Request:   fixtureRequest(),
-		Evidence:  release.MissingEvidence(),
-		CreatedAt: time.Now(),
+		ID:          id,
+		Request:     fixtureRequest(),
+		Evidence:    release.MissingEvidence(),
+		Eligibility: mustStoreEligibility(t),
+		CreatedAt:   time.Now(),
 	})
 	if err != nil {
 		t.Fatalf("test setup: %v", err)

@@ -76,6 +76,17 @@ func TestEvaluate_ApprovalMissing(t *testing.T) {
 	assertRejected(t, got, ReasonApprovalMissing)
 }
 
+func TestEvaluate_ApprovalMissing_SkippedWhenPolicyDoesNotRequireIt(t *testing.T) {
+	facts := baseFacts()
+	facts.Approvals = nil
+	claim := baseClaim()
+	claim.SkipIndependentApproval = true
+	got := Evaluate(claim, facts)
+	if got.Status != StatusVerified {
+		t.Fatalf("want Verified when independent approval is not required, got %+v", got)
+	}
+}
+
 func TestEvaluate_ApproverIsAuthor(t *testing.T) {
 	facts := baseFacts()
 	facts.Approvals = []Approval{{Reviewer: "andrew", State: "APPROVED"}} // same as AuthorLogin

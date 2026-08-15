@@ -9,26 +9,27 @@ The progress meeting succeeds when the team can show this chain:
 1. A real Podinfo PR in the public fork was approved by Ahmed and merged to `main`.
 2. A minimal GitHub Actions workflow ran for that merge commit and published an image to a public GHCR package, exposing an immutable OCI digest.
 3. Codex, Claude Code, CI, or another caller invokes the neutral SafeLane CLI, submitting release identity and evidence only.
-4. SafeLane verifies the merged PR, the reviewer, the required check on the merge commit SHA, and the immutable digest.
-5. SafeLane renders the deployment bundle from the operator-owned Release Template, pinned to the verified digest, and hashes every rendered resource.
-6. DeployWhisper contributes a normalized advisory risk result on those exact bytes through the pinned adapter, with its provider state recorded honestly.
-7. SafeLane maps risk through the versioned Release Policy.
-8. SafeLane returns a typed release decision and allowed rollout envelope, and persists the Release record.
-9. `safelane proof <release-id>` shows populated Artifact and Decision proof, with Execution and Boundary explicitly pending.
-10. SafeLane patches the pre-created `podinfo` Rollout to the verified digest through its constrained, patch-only controller identity.
-11. Argo executes a genuine first canary stage against the pre-existing baseline version.
-12. A restricted caller identity attempts a direct mutation of the protected Rollout, receives `Forbidden`, and the protected state is shown unchanged.
+4. SafeLane verifies the merged commit on `main`, the publish workflow on that commit, the immutable digest, and independent PR approval when configured.
+5. SafeLane renders the deployment bundle from the operator-owned Release Template, pinned to the verified digest, and hashes every rendered resource. It does not scan that YAML.
+6. SafeLane records Release Eligibility from that evidence. It does not treat evidence completeness as risk and does not choose an envelope from it.
+7. SafeLane returns eligibility, and, when eligible, the operator's static rollout envelope, then persists the Release record.
+8. `safelane proof <release-id>` shows populated Artifact and Decision proof, with Execution and Boundary explicitly pending.
+9. SafeLane patches the pre-created `podinfo` Rollout to the verified digest through its constrained, patch-only controller identity.
+10. Argo executes a genuine first canary stage against the pre-existing baseline version.
+11. A restricted caller identity attempts a direct mutation of the protected Rollout, receives `Forbidden`, and the protected state is shown unchanged.
 
-Ahmed pre-creates the Rollout at a baseline image as a provisioning step. This is what makes step 11 possible at all: Argo does not execute canary steps on a Rollout's initial creation, so a release that *created* the Rollout would jump to 100% and show no canary. It also lets the controller identity drop `create` entirely and hold only patch on the named resource.
+Ahmed pre-creates the Rollout at a baseline image as a provisioning step. This is what makes step 10 possible at all: Argo does not execute canary steps on a Rollout's initial creation, so a release that *created* the Rollout would jump to 100% and show no canary. It also lets the controller identity drop `create` entirely and hold only patch on the named resource.
 
-Step 12 needs no SafeLane code and runs from Ahmed's environment. It is the demonstration's strongest minute — the half of the claim that survives an agent ignoring guidance. If the cluster is not ready, steps 1–9 still stand on their own; do not block the meeting on full cluster execution.
+Step 11 needs no SafeLane code and runs from Ahmed's environment. It is the demonstration's strongest minute — the half of the claim that survives an agent ignoring guidance. If the cluster is not ready, steps 1–8 still stand on their own; do not block the meeting on full cluster execution.
 
 ## Deliberately deferred from this slice
 
 Present these as roadmap, not as gaps:
 
+- scanning the rendered YAML — SafeLane renders the bundle and proceeds from GitHub and GHCR evidence;
 - the HTTP API and MCP adapter — the CLI is the surface; the intake boundary stays transport-neutral;
-- build-provenance and attestation verification — required evidence is merged PR, passing CI, and immutable digest;
+- build-provenance and attestation verification — required evidence is merged commit, passing publish workflow, and immutable digest; independent approval only when configured;
+- risk-based or dynamically chosen rollout envelopes;
 - Execution and Boundary proof ingestion, which waits for real Argo and runtime evidence.
 
 ## Stretch demonstrations

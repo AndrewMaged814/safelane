@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/AndrewMaged814/safelane/internal/orchestrate"
 	"github.com/AndrewMaged814/safelane/internal/release"
@@ -94,12 +95,10 @@ func runRelease(ctx context.Context, args []string, stdout, stderr io.Writer, de
 	return outcomeExitCode(r)
 }
 
-// outcomeExitCode is ExitOK only when evidence verified, so a caller
-// scripting this command can branch on exit status alone: a withheld or
-// failed release is still successfully recorded (a plain ExitFail, not a
-// crash), but its exit code says "do not proceed" either way.
+// outcomeExitCode is ExitOK only when the release is eligible, so a caller
+// scripting this command can branch on exit status alone.
 func outcomeExitCode(r *release.Release) int {
-	if r.Evidence().IsVerified() {
+	if r.Eligibility().Status() == release.EligibilityEligible {
 		return ExitOK
 	}
 	return ExitFail
@@ -134,10 +133,9 @@ func printError(w io.Writer, e *release.Error) {
 	}
 }
 
-// printSummary prints the concise, human-readable result #47 asks for:
-// release identity, caller, evidence outcome, and - only for a verified
-// release - the bundle it rendered. Structured detail remains available via
-// --json for automation.
+// printSummary prints the concise, human-readable result: release identity,
+// evidence outcome, and Release Eligibility. Structured detail remains
+// available via --json for automation.
 func printSummary(w io.Writer, r *release.Release) {
 	fmt.Fprintf(w, "release_id: %s\n", r.ID)
 	fmt.Fprintf(w, "application: %s  environment: %s\n", r.Target().Application, r.Target().Environment)
@@ -162,4 +160,28 @@ func printSummary(w io.Writer, r *release.Release) {
 			fmt.Fprintf(w, "  - %s: %s\n", h.Ref, h.Hash)
 		}
 	}
+
+	elig := r.Eligibility()
+	fmt.Fprintf(w, "eligibility: %s\n", elig.Status())
+	fmt.Fprintf(w, "policy_version: %s\n", elig.PolicyVersion())
+	fmt.Fprintf(w, "reason: %s\n", elig.ReasonCode())
+	if elig.Message() != "" {
+		fmt.Fprintf(w, "  %s\n", elig.Message())
+	}
+	fmt.Fprintf(w, "retryable: %v\n", elig.Retryable())
+	if env, ok := elig.Envelope(); ok {
+		fmt.Fprintf(w, "rollout_envelope: %s\n", joinStages(env.Stages()))
+		fmt.Fprintf(w, "next_action: %s\n", env.NextAction())
+	}
+}
+
+func joinStages(stages []int) string {
+	if len(stages) == 0 {
+		return ""
+	}
+	parts := make([]string, len(stages))
+	for i, s := range stages {
+		parts[i] = fmt.Sprintf("%d", s)
+	}
+	return strings.Join(parts, " → ")
 }
