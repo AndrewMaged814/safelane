@@ -1,0 +1,31 @@
+version: 1
+
+risk_policy:
+  low:
+    initial_traffic: 10
+    stages: [10, 50, 100]
+    human_approval: false
+  medium:
+    initial_traffic: 5
+    stages: [5, 25, 50, 100]
+    human_approval: false
+  high:
+    initial_traffic: 5
+    stages: [5, 10, 25, 50, 100]
+    human_approval_before: 50
+  critical:
+    action: deny
+  unknown:
+    action: withhold_authority
+
+required_evidence:
+  - merged_pull_request
+  - passing_ci
+  - immutable_oci_digest
+
+aggregation:
+  strategy: highest_risk_wins
+  missing_required_evidence: unknown
+
+runtime_analysis:
+  required_after_each_stage: true
