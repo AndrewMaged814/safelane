@@ -31,7 +31,7 @@ then every one of them is a plausible placeholder.
 | `source.merge_commit_sha` | `4f0c1b9e7ac2d5386b1d9f4a5c8e2b7d3a6f0e91` | the actual merge commit SHA on `main` produced when the reviewed PR is merged. Not the PR head SHA — SafeLane verifies the required check against the *merge* commit |
 | `review.pull_request_number` / `review.pull_request_url` | `1` / `.../pull/1` | the real PR number and URL |
 | `review.author` | `AndrewMaged814` | the real PR author's GitHub login |
-| `review.approver` | `ahmed-placeholder` | **Ahmed's real GitHub login.** He must be added as a collaborator on the fork before the PR is opened, or he cannot approve it. Self-approval is not review evidence and SafeLane rejects it |
+| `review.approver` | `ahmed-placeholder` | the claimed reviewer login. Phase one does not require an independent GitHub approval; this field is recorded as a claim. |
 | `ci.workflow` / `ci.check_name` | `publish` / `publish / build-and-push` | the workflow name and the exact required check-run name emitted by the minimal `push`-to-`main` workflow #46 adds. The check name must match what GitHub reports, character for character |
 | `ci.run_id` / `ci.run_url` | `16453210987` | the real Actions run id and URL for the run that executed **for the merge commit** |
 | `artifact.image_reference` | `ghcr.io/andrewmaged814/podinfo@sha256:3fbc…50e8` | the real immutable GHCR reference, once #46 publishes the image and makes the package **public**. Both halves change: the repository path is the fork owner's lowercased GHCR path, and the digest is the one emitted by the build/push step |

@@ -19,8 +19,8 @@ func TestDefault_MatchesOperatorPolicyFile(t *testing.T) {
 	if p.Version != "1" {
 		t.Errorf("version = %q, want 1", p.Version)
 	}
-	if !p.IndependentPRApprovalRequired {
-		t.Error("demo policy requires independent PR approval")
+	if p.IndependentPRApprovalRequired {
+		t.Error("phase one does not require independent PR approval; that gate is deferred")
 	}
 	if !strings.Contains(text, "stages: [5, 25, 50, 100]") {
 		t.Error("operator policy file must declare stages: [5, 25, 50, 100]")
@@ -30,5 +30,8 @@ func TestDefault_MatchesOperatorPolicyFile(t *testing.T) {
 	}
 	if !strings.Contains(text, "independent_pr_approval:") {
 		t.Error("operator policy file must declare independent_pr_approval")
+	}
+	if !strings.Contains(text, "required: false") {
+		t.Error("operator policy file must leave independent_pr_approval.required false")
 	}
 }

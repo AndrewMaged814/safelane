@@ -6,7 +6,7 @@
 
 The progress meeting succeeds when the team can show this chain:
 
-1. A real Podinfo PR in the public fork was approved by Ahmed and merged to `main`.
+1. A real Podinfo PR in the public fork was merged to the default branch. Independent PR approval is deferred to a later phase.
 2. A minimal GitHub Actions workflow ran for that merge commit and published an image to a public GHCR package, exposing an immutable OCI digest.
 3. Codex, Claude Code, CI, or another caller invokes the neutral SafeLane CLI, submitting release identity and evidence only.
 4. SafeLane verifies the merged commit on `main`, the publish workflow on that commit, the immutable digest, and independent PR approval when configured.

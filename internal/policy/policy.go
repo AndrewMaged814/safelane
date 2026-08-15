@@ -22,12 +22,12 @@ type Policy struct {
 }
 
 // Default is the compiled phase-one Release Policy. It matches
-// docs/policy/safelane-policy.yml: independent PR approval is required, and
-// eligible releases receive the static 5 → 25 → 50 → 100 envelope.
+// docs/policy/safelane-policy.yml: independent PR approval is not required,
+// and eligible releases receive the static 5 → 25 → 50 → 100 envelope.
 func Default() Policy {
 	return Policy{
 		Version:                       "1",
-		IndependentPRApprovalRequired: true,
+		IndependentPRApprovalRequired: false,
 		Stages:                        []int{5, 25, 50, 100},
 		NextAction:                    "start",
 	}

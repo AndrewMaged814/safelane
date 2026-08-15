@@ -316,6 +316,8 @@ func TestSubmitRelease_RequiredCheckFailed_PersistsFailedEvidence(t *testing.T) 
 
 func TestSubmitRelease_ApproverIsAuthor_PersistsFailedEvidence(t *testing.T) {
 	deps, _ := baseDeps(t)
+	deps.Policy = policy.Default()
+	deps.Policy.IndependentPRApprovalRequired = true
 	facts := verifiedFacts()
 	facts.Approvals = []github.Approval{{Reviewer: facts.AuthorLogin, State: "APPROVED"}}
 	deps.GitHub = fakeFetcher{facts: facts}
@@ -331,6 +333,8 @@ func TestSubmitRelease_ApproverIsAuthor_PersistsFailedEvidence(t *testing.T) {
 
 func TestSubmitRelease_NoApproval_PersistsMissingEvidence(t *testing.T) {
 	deps, _ := baseDeps(t)
+	deps.Policy = policy.Default()
+	deps.Policy.IndependentPRApprovalRequired = true
 	facts := verifiedFacts()
 	facts.Approvals = nil
 	deps.GitHub = fakeFetcher{facts: facts}
@@ -346,8 +350,6 @@ func TestSubmitRelease_NoApproval_PersistsMissingEvidence(t *testing.T) {
 
 func TestSubmitRelease_ApprovalNotRequired_EligibleWithoutApproval(t *testing.T) {
 	deps, store := baseDeps(t)
-	deps.Policy = policy.Default()
-	deps.Policy.IndependentPRApprovalRequired = false
 	facts := verifiedFacts()
 	facts.Approvals = nil
 	deps.GitHub = fakeFetcher{facts: facts}

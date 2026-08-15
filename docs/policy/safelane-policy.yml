@@ -9,10 +9,10 @@ mandatory_evidence:
   - passing_publish_workflow
   - immutable_ghcr_digest
 
-# Required only when enabled. The progress demo turns this on so Ahmed's
-# independent approval is a gate; other environments may leave it off.
+# Optional. Phase one leaves this off so GitHub and GHCR evidence can be
+# tested without an independent reviewer. Turn it on in a later phase.
 independent_pr_approval:
-  required: true
+  required: false
 
 rollout:
   stages: [5, 25, 50, 100]
