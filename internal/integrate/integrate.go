@@ -4,8 +4,8 @@
 package integrate
 
 import (
-	_ "embed"
 	"bytes"
+	_ "embed"
 	"fmt"
 	"os"
 	"path/filepath"
