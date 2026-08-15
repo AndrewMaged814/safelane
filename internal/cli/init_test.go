@@ -134,3 +134,82 @@ func TestInit_OneManagedBlock_ReplacesOnlyThatBlock(t *testing.T) {
 		t.Fatalf("want updated report for AGENTS.md, got %q", stdout.String())
 	}
 }
+
+func TestInit_AmbiguousAgentsMd_LeavesFileAndWritesFallback(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		why  string
+	}{
+		{
+			name: "incomplete begin only",
+			body: "# Notes\n<!-- BEGIN SAFELANE MANAGED: guidance -->\nno end\n",
+			why:  "incomplete",
+		},
+		{
+			name: "incomplete end only",
+			body: "# Notes\n<!-- END SAFELANE MANAGED: guidance -->\n",
+			why:  "incomplete",
+		},
+		{
+			name: "nested markers",
+			body: "<!-- BEGIN SAFELANE MANAGED: guidance -->\n<!-- BEGIN SAFELANE MANAGED: guidance -->\ninner\n<!-- END SAFELANE MANAGED: guidance -->\n<!-- END SAFELANE MANAGED: guidance -->\n",
+			why:  "nested",
+		},
+		{
+			name: "duplicated markers",
+			body: "<!-- BEGIN SAFELANE MANAGED: guidance -->\nfirst\n<!-- END SAFELANE MANAGED: guidance -->\n<!-- BEGIN SAFELANE MANAGED: guidance -->\nsecond\n<!-- END SAFELANE MANAGED: guidance -->\n",
+			why:  "duplicated",
+		},
+		{
+			name: "end before begin",
+			body: "<!-- END SAFELANE MANAGED: guidance -->\n<!-- BEGIN SAFELANE MANAGED: guidance -->\n",
+			why:  "malformed",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			agentsPath := filepath.Join(root, "AGENTS.md")
+			if err := os.WriteFile(agentsPath, []byte(tc.body), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			cmd := InitCommand(root)
+			var stdout, stderr bytes.Buffer
+			code := cmd.Run(context.Background(), []string{"--adapter", "codex"}, &stdout, &stderr)
+			if code != ExitOK {
+				t.Fatalf("want ExitOK, got %d (stderr: %s)", code, stderr.String())
+			}
+
+			got, err := os.ReadFile(agentsPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(got) != tc.body {
+				t.Fatalf("want AGENTS.md left byte-for-byte unchanged, got %q", got)
+			}
+
+			report := stdout.String()
+			if !strings.Contains(report, "skipped AGENTS.md") || !strings.Contains(report, tc.why) {
+				t.Fatalf("want skipped AGENTS.md mentioning %q, got %q", tc.why, report)
+			}
+			if !strings.Contains(report, "created .safelane/integrations/codex.md") {
+				t.Fatalf("want created fallback report, got %q", report)
+			}
+
+			fallback, err := os.ReadFile(filepath.Join(root, ".safelane", "integrations", "codex.md"))
+			if err != nil {
+				t.Fatalf("want fallback file, got %v", err)
+			}
+			text := string(fallback)
+			if !strings.Contains(text, "does not auto-load") {
+				t.Fatalf("want the fallback to say Codex will not auto-load it, got %q", text)
+			}
+			if !strings.Contains(text, "<!-- BEGIN SAFELANE MANAGED: guidance -->") {
+				t.Fatalf("want a copyable managed section in the fallback, got %q", text)
+			}
+		})
+	}
+}

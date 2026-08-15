@@ -17,6 +17,7 @@ var agentGuidance []byte
 const (
 	guidanceRelPath = ".safelane/agent-guidance.md"
 	agentsRelPath   = "AGENTS.md"
+	fallbackRelPath = ".safelane/integrations/codex.md"
 	beginMarker     = "<!-- BEGIN SAFELANE MANAGED: guidance -->"
 	endMarker       = "<!-- END SAFELANE MANAGED: guidance -->"
 )
@@ -26,6 +27,11 @@ const (
 const ManagedSection = beginMarker + "\n" +
 	"See `.safelane/agent-guidance.md` for the protected release workflow. Use `safelane release --file ...`, follow the returned `safelane execute <release-id>` action when eligible, and use `safelane proof <release-id>` to retrieve the outcome. Do not call Kubernetes or Argo directly for the protected application.\n" +
 	endMarker + "\n"
+
+const fallbackDoc = "# SafeLane Codex fallback\n\n" +
+	"Codex does not auto-load this file. It reads `AGENTS.md` from the repository root. " +
+	"Copy the managed section below into a root `AGENTS.md`, then start a new Codex session.\n\n" +
+	ManagedSection
 
 // Apply writes SafeLane-owned discovery files under root and reports each
 // created, updated, unchanged, or skipped path.
@@ -38,7 +44,7 @@ func Apply(root string) ([]Change, error) {
 	if err != nil {
 		return nil, err
 	}
-	return []Change{guidance, agents}, nil
+	return append([]Change{guidance}, agents...), nil
 }
 
 // Change is one line of the init/sync report.
@@ -79,34 +85,42 @@ func WriteGuidance(root string) (Change, error) {
 	return Change{Action: "updated", Path: guidanceRelPath}, nil
 }
 
-func writeAgents(root string) (Change, error) {
+func writeAgents(root string) ([]Change, error) {
 	path := filepath.Join(root, agentsRelPath)
 	existing, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		if err := os.WriteFile(path, []byte(ManagedSection), 0o644); err != nil {
-			return Change{}, err
+			return nil, err
 		}
-		return Change{Action: "created", Path: "AGENTS.md managed section"}, nil
+		return []Change{{Action: "created", Path: "AGENTS.md managed section"}}, nil
 	}
 	if err != nil {
-		return Change{}, err
+		return nil, err
 	}
 
-	switch classifyMarkers(existing) {
+	class, why := classifyMarkers(existing)
+	switch class {
 	case markersNone:
 		next := appendManaged(existing)
 		if err := os.WriteFile(path, next, 0o644); err != nil {
-			return Change{}, err
+			return nil, err
 		}
-		return Change{Action: "updated", Path: "AGENTS.md managed section"}, nil
+		return []Change{{Action: "updated", Path: "AGENTS.md managed section"}}, nil
 	case markersOne:
 		next := replaceManaged(existing)
 		if err := os.WriteFile(path, next, 0o644); err != nil {
-			return Change{}, err
+			return nil, err
 		}
-		return Change{Action: "updated", Path: "AGENTS.md managed section"}, nil
+		return []Change{{Action: "updated", Path: "AGENTS.md managed section"}}, nil
 	default:
-		return Change{Action: "unchanged", Path: "AGENTS.md managed section"}, nil
+		fallback, err := writeOwned(root, fallbackRelPath, []byte(fallbackDoc))
+		if err != nil {
+			return nil, err
+		}
+		return []Change{
+			{Action: "skipped", Path: "AGENTS.md", Reason: why + " SafeLane markers; left unchanged"},
+			fallback,
+		}, nil
 	}
 }
 
@@ -126,20 +140,54 @@ const (
 	markersMalformed
 )
 
-func classifyMarkers(body []byte) markerClass {
-	begins := bytes.Count(body, []byte(beginMarker))
-	ends := bytes.Count(body, []byte(endMarker))
+func classifyMarkers(body []byte) (markerClass, string) {
+	begin := []byte(beginMarker)
+	end := []byte(endMarker)
+	begins := bytes.Count(body, begin)
+	ends := bytes.Count(body, end)
 	if begins == 0 && ends == 0 {
-		return markersNone
+		return markersNone, ""
 	}
 	if begins == 1 && ends == 1 {
-		bi := bytes.Index(body, []byte(beginMarker))
-		ei := bytes.Index(body, []byte(endMarker))
+		bi := bytes.Index(body, begin)
+		ei := bytes.Index(body, end)
 		if bi < ei {
-			return markersOne
+			return markersOne, ""
 		}
+		return markersMalformed, "malformed"
 	}
-	return markersMalformed
+	if begins != ends {
+		return markersMalformed, "incomplete"
+	}
+
+	firstBegin := bytes.Index(body, begin)
+	firstEnd := bytes.Index(body, end)
+	secondBegin := firstBegin + len(begin) + bytes.Index(body[firstBegin+len(begin):], begin)
+	if firstEnd == -1 || secondBegin < firstEnd {
+		return markersMalformed, "nested"
+	}
+	return markersMalformed, "duplicated"
+}
+
+func writeOwned(root, rel string, content []byte) (Change, error) {
+	path := filepath.Join(root, filepath.FromSlash(rel))
+	existing, readErr := os.ReadFile(path)
+	if readErr != nil && !os.IsNotExist(readErr) {
+		return Change{}, readErr
+	}
+	if readErr == nil && bytes.Equal(existing, content) {
+		return Change{Action: "unchanged", Path: rel}, nil
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return Change{}, err
+	}
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		return Change{}, err
+	}
+	if os.IsNotExist(readErr) {
+		return Change{Action: "created", Path: rel}, nil
+	}
+	return Change{Action: "updated", Path: rel}, nil
 }
 
 func replaceManaged(body []byte) []byte {
