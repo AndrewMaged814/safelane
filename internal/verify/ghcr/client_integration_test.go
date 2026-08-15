@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/AndrewMaged814/safelane/internal/release"
 )
 
 // TestClient_ResolveDigest_RealGHCR hits the real, public
@@ -28,7 +30,7 @@ func TestClient_ResolveDigest_RealGHCR(t *testing.T) {
 		t.Skip("requires network access to ghcr.io")
 	}
 
-	ref, err := ParseReference("ghcr.io/stefanprodan/podinfo@sha256:f9537f729129d339aaef049b76ab2cd4ff06a424f99e5f6a5923c10621018fb1")
+	ref, err := release.ParseImageReference("ghcr.io/stefanprodan/podinfo@sha256:f9537f729129d339aaef049b76ab2cd4ff06a424f99e5f6a5923c10621018fb1")
 	if err != nil {
 		t.Fatalf("test setup: %v", err)
 	}

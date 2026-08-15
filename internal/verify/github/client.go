@@ -70,9 +70,11 @@ func (c *Client) do(ctx context.Context, method, path string, out any) error {
 var errNotFound = fmt.Errorf("github: not found")
 
 type pullRequestResponse struct {
-	Number         int    `json:"number"`
-	Merged         bool   `json:"merged"`
-	MergeCommitSHA string `json:"merge_commit_sha"`
+	Number         int       `json:"number"`
+	HTMLURL        string    `json:"html_url"`
+	Merged         bool      `json:"merged"`
+	MergedAt       time.Time `json:"merged_at"`
+	MergeCommitSHA string    `json:"merge_commit_sha"`
 	Base           struct {
 		Ref string `json:"ref"`
 	} `json:"base"`
@@ -91,9 +93,12 @@ type reviewResponse struct {
 
 type checkRunsResponse struct {
 	CheckRuns []struct {
-		Name       string `json:"name"`
-		Conclusion string `json:"conclusion"`
-		HeadSHA    string `json:"head_sha"`
+		ID          int64     `json:"id"`
+		Name        string    `json:"name"`
+		Conclusion  string    `json:"conclusion"`
+		HeadSHA     string    `json:"head_sha"`
+		HTMLURL     string    `json:"html_url"`
+		CompletedAt time.Time `json:"completed_at"`
 	} `json:"check_runs"`
 }
 
@@ -110,16 +115,17 @@ func (c *Client) FetchPullRequestFacts(ctx context.Context, owner, repo string, 
 	if err := c.do(ctx, http.MethodGet, fmt.Sprintf("/repos/%s/%s/pulls/%d/reviews", owner, repo, number), &reviews); err != nil {
 		return Facts{}, err
 	}
-	approvedBy := latestApprovals(reviews)
 
 	facts := Facts{
 		Repository:     owner + "/" + repo,
 		Number:         pr.Number,
+		URL:            pr.HTMLURL,
 		Merged:         pr.Merged,
+		MergedAt:       pr.MergedAt,
 		BaseRef:        pr.Base.Ref,
 		MergeCommitSHA: pr.MergeCommitSHA,
 		AuthorLogin:    pr.User.Login,
-		ApprovedBy:     approvedBy,
+		Approvals:      latestReviews(reviews),
 	}
 
 	// Check runs are fetched for the merge commit SHA specifically. If the
@@ -133,9 +139,12 @@ func (c *Client) FetchPullRequestFacts(ctx context.Context, owner, repo string, 
 		}
 		for _, run := range checks.CheckRuns {
 			facts.CheckRuns = append(facts.CheckRuns, CheckRun{
-				Name:       run.Name,
-				Conclusion: run.Conclusion,
-				HeadSHA:    facts.MergeCommitSHA, // the API scopes this call to this exact SHA
+				Name:        run.Name,
+				Conclusion:  run.Conclusion,
+				HeadSHA:     facts.MergeCommitSHA, // the API scopes this call to this exact SHA
+				RunID:       run.ID,
+				URL:         run.HTMLURL,
+				CompletedAt: run.CompletedAt,
 			})
 		}
 	}
@@ -143,30 +152,27 @@ func (c *Client) FetchPullRequestFacts(ctx context.Context, owner, repo string, 
 	return facts, nil
 }
 
-// latestApprovals collapses a pull request's review history to the set of
-// logins whose most recent review state is APPROVED. A later dismissal or
+// latestReviews collapses a pull request's review history to one Approval per
+// reviewer, keeping only their most recent review state. A later dismissal or
 // change-request from the same reviewer overrides an earlier approval.
-func latestApprovals(reviews []reviewResponse) []string {
-	latestState := make(map[string]string)
-	latestAt := make(map[string]time.Time)
+func latestReviews(reviews []reviewResponse) []Approval {
+	latest := make(map[string]reviewResponse)
 	order := make([]string, 0, len(reviews))
 	for _, r := range reviews {
 		login := r.User.Login
-		if _, seen := latestState[login]; !seen {
+		if _, seen := latest[login]; !seen {
 			order = append(order, login)
 		}
-		if t, ok := latestAt[login]; !ok || r.SubmittedAt.After(t) {
-			latestState[login] = r.State
-			latestAt[login] = r.SubmittedAt
+		if prev, ok := latest[login]; !ok || r.SubmittedAt.After(prev.SubmittedAt) {
+			latest[login] = r
 		}
 	}
-	var approved []string
+	out := make([]Approval, 0, len(order))
 	for _, login := range order {
-		if latestState[login] == "APPROVED" {
-			approved = append(approved, login)
-		}
+		r := latest[login]
+		out = append(out, Approval{Reviewer: login, State: r.State, ApprovedAt: r.SubmittedAt})
 	}
-	return approved
+	return out
 }
 
 // Verify fetches Facts for claim.PullRequestNumber via fetcher and evaluates

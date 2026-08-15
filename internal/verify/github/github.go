@@ -10,7 +10,10 @@
 // satisfy the Claim under these rules.
 package github
 
-import "fmt"
+import (
+	"fmt"
+	"time"
+)
 
 // Status is the outcome of verifying one piece of GitHub evidence.
 type Status string
@@ -66,9 +69,12 @@ type Claim struct {
 
 // CheckRun is one check run GitHub reports against a commit SHA.
 type CheckRun struct {
-	Name       string
-	Conclusion string // "success", "failure", "neutral", "cancelled", ...
-	HeadSHA    string // the exact commit this run ran against
+	Name        string
+	Conclusion  string // "success", "failure", "neutral", "cancelled", ...
+	HeadSHA     string // the exact commit this run ran against
+	RunID       int64
+	URL         string
+	CompletedAt time.Time
 }
 
 // Facts is everything SafeLane itself observed about a pull request via the
@@ -77,16 +83,49 @@ type CheckRun struct {
 type Facts struct {
 	Repository     string
 	Number         int
+	URL            string
 	Merged         bool
+	MergedAt       time.Time
 	BaseRef        string
 	MergeCommitSHA string
 	AuthorLogin    string
-	// ApprovedBy holds logins whose latest review state is APPROVED,
-	// after collapsing multiple reviews per user to their most recent state.
-	ApprovedBy []string
+	// Approvals holds every reviewer's latest review state, after collapsing
+	// multiple reviews per user to their most recent one. Only entries whose
+	// State is "APPROVED" count as an approval; the others are kept so a
+	// dismissal or change-request is visible rather than discarded.
+	Approvals []Approval
 	// CheckRuns holds check runs GitHub reported for MergeCommitSHA. Runs
 	// reported against any other SHA must not appear here (see Fetcher).
 	CheckRuns []CheckRun
+}
+
+// Approval is one reviewer's latest review state on the pull request.
+type Approval struct {
+	Reviewer   string
+	State      string // "APPROVED", "CHANGES_REQUESTED", "COMMENTED", "DISMISSED"
+	ApprovedAt time.Time
+}
+
+// approvedBy returns the logins whose latest review state is APPROVED, in
+// the order they first appear -- the shape [Evaluate] reasons about.
+func (f Facts) approvedBy() []string {
+	var out []string
+	for _, a := range f.Approvals {
+		if a.State == "APPROVED" {
+			out = append(out, a.Reviewer)
+		}
+	}
+	return out
+}
+
+// approvalFor returns the given reviewer's latest review, if any.
+func (f Facts) approvalFor(reviewer string) (Approval, bool) {
+	for _, a := range f.Approvals {
+		if a.Reviewer == reviewer && a.State == "APPROVED" {
+			return a, true
+		}
+	}
+	return Approval{}, false
 }
 
 // Result is the typed, actionable outcome of verifying one Claim.
@@ -141,8 +180,9 @@ func Evaluate(claim Claim, facts Facts) Result {
 			claim.ExpectedMergeCommitSHA, facts.MergeCommitSHA)
 	}
 
+	approvedBy := facts.approvedBy()
 	approverFound := false
-	for _, login := range facts.ApprovedBy {
+	for _, login := range approvedBy {
 		if login == facts.AuthorLogin {
 			continue // self-approval never counts
 		}
@@ -150,7 +190,7 @@ func Evaluate(claim Claim, facts Facts) Result {
 		break
 	}
 	if !approverFound {
-		if len(facts.ApprovedBy) == 1 && facts.ApprovedBy[0] == facts.AuthorLogin {
+		if len(approvedBy) == 1 && approvedBy[0] == facts.AuthorLogin {
 			return rejected(ReasonApproverIsAuthor, facts,
 				"pull request #%d is only approved by its own author %q", facts.Number, facts.AuthorLogin)
 		}

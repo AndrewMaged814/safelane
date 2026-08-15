@@ -1,0 +1,40 @@
+{
+  "schema_version": "safelane.release.request/v1",
+  "target": {
+    "application": "podinfo",
+    "environment": "production",
+    "cluster": "safelane-demo",
+    "namespace": "podinfo"
+  },
+  "source": {
+    "repository": "AndrewMaged814/podinfo",
+    "base_branch": "main",
+    "merge_commit_sha": "4f0c1b9e7ac2d5386b1d9f4a5c8e2b7d3a6f0e91"
+  },
+  "review": {
+    "pull_request_number": 1,
+    "pull_request_url": "https://github.com/AndrewMaged814/podinfo/pull/1",
+    "author": "AndrewMaged814",
+    "approver": "ahmed-placeholder"
+  },
+  "ci": {
+    "workflow": "publish",
+    "check_name": "publish / build-and-push",
+    "run_id": 16453210987,
+    "run_url": "https://github.com/AndrewMaged814/podinfo/actions/runs/16453210987"
+  },
+  "artifact": {
+    "image_reference": "ghcr.io/andrewmaged814/podinfo@sha256:3fbc1d9a7e42c8056d1f9b3e7a5c204d8e6b1f39a7c50d28e4b6f19a3c7d50e8"
+  },
+  "caller": {
+    "identity": "codex-cli",
+    "kind": "agent",
+    "tool": "codex",
+    "tool_version": "0.0.0-fixture"
+  },
+  "metadata": {
+    "request_id": "req-fixture-0001",
+    "submitted_at": "2026-08-15T09:30:00Z",
+    "reason": "Release the reviewed version/build-information change to production."
+  }
+}

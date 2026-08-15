@@ -3,74 +3,27 @@ package ghcr
 import (
 	"strings"
 	"testing"
+
+	"github.com/AndrewMaged814/safelane/internal/release"
 )
 
 const validDigest = "sha256:" + "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"
 
-func TestParseReference_Valid(t *testing.T) {
-	ref, err := ParseReference("ghcr.io/acme/podinfo@" + validDigest)
+func mustParse(t *testing.T, s string) release.ImageReference {
+	t.Helper()
+	ref, err := release.ParseImageReference(s)
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("test setup: %v", err)
 	}
-	if ref.Registry != "ghcr.io" || ref.Owner != "acme" || ref.Package != "podinfo" || ref.Digest != validDigest {
-		t.Fatalf("unexpected reference: %+v", ref)
-	}
-	if ref.Repository() != "acme/podinfo" {
-		t.Fatalf("unexpected repository: %s", ref.Repository())
-	}
-}
-
-func TestParseReference_MutableTag_Rejected(t *testing.T) {
-	_, err := ParseReference("ghcr.io/acme/podinfo:latest")
-	if err == nil {
-		t.Fatal("want error for mutable tag reference")
-	}
-	got := RejectionForParseError(err)
-	if got.Status != StatusRejected || got.Reason != ReasonMutableTag {
-		t.Fatalf("want Rejected/MutableTag, got %+v", got)
-	}
-}
-
-func TestParseReference_BareMutableTag_Rejected(t *testing.T) {
-	_, err := ParseReference("ghcr.io/acme/podinfo")
-	if err == nil {
-		t.Fatal("want error for bare (implicit-latest) reference")
-	}
-	got := RejectionForParseError(err)
-	if got.Reason != ReasonMutableTag {
-		t.Fatalf("want MutableTag, got %+v", got)
-	}
-}
-
-func TestParseReference_MalformedDigest_Rejected(t *testing.T) {
-	_, err := ParseReference("ghcr.io/acme/podinfo@sha256:not-hex")
-	if err == nil {
-		t.Fatal("want error for malformed digest")
-	}
-	got := RejectionForParseError(err)
-	if got.Status != StatusRejected || got.Reason != ReasonMalformedReference {
-		t.Fatalf("want Rejected/MalformedReference, got %+v", got)
-	}
-}
-
-func TestParseReference_MissingOwnerOrPackage_Rejected(t *testing.T) {
-	_, err := ParseReference("ghcr.io/podinfo@" + validDigest)
-	if err == nil {
-		t.Fatal("want error for missing owner/package segment")
-	}
+	return ref
 }
 
 func baseClaim(t *testing.T) Claim {
 	t.Helper()
-	ref, err := ParseReference("ghcr.io/acme/podinfo@" + validDigest)
-	if err != nil {
-		t.Fatalf("test setup: %v", err)
-	}
 	return Claim{
-		ExpectedRegistry: "ghcr.io",
-		ExpectedOwner:    "acme",
-		ExpectedPackage:  "podinfo",
-		Reference:        ref,
+		ExpectedRegistry:   "ghcr.io",
+		ExpectedRepository: "acme/podinfo",
+		Reference:          mustParse(t, "ghcr.io/acme/podinfo@"+validDigest),
 	}
 }
 
@@ -93,7 +46,7 @@ func TestEvaluateResolved_RegistryMismatch(t *testing.T) {
 
 func TestEvaluateResolved_RepositoryMismatch(t *testing.T) {
 	claim := baseClaim(t)
-	claim.ExpectedOwner = "someone-else"
+	claim.ExpectedRepository = "someone-else/podinfo"
 	got := EvaluateResolved(claim, validDigest, nil)
 	if got.Status != StatusRejected || got.Reason != ReasonRepositoryMismatch {
 		t.Fatalf("want Rejected/RepositoryMismatch, got %+v", got)

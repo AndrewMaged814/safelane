@@ -6,14 +6,17 @@ import (
 	"fmt"
 	"net/http"
 	"time"
+
+	"github.com/AndrewMaged814/safelane/internal/release"
 )
 
-// Resolver resolves what digest a registry actually reports for a
-// Reference. Verify depends on this interface, not on *Client directly, so
-// tests can supply a fixture Resolver and this seam can be pointed at a
-// different OCI-compatible registry without changing verification logic.
+// Resolver resolves what digest a registry actually reports for an
+// [release.ImageReference]. Verify depends on this interface, not on
+// *Client directly, so tests can supply a fixture Resolver and this seam
+// can be pointed at a different OCI-compatible registry without changing
+// verification logic.
 type Resolver interface {
-	ResolveDigest(ctx context.Context, ref Reference) (string, error)
+	ResolveDigest(ctx context.Context, ref release.ImageReference) (string, error)
 }
 
 // Client is the real Resolver, implementing the public GHCR anonymous flow:
@@ -84,13 +87,13 @@ const manifestAcceptHeaders = "application/vnd.oci.image.index.v1+json, " +
 
 // ResolveDigest performs the anonymous token → manifest HEAD flow and
 // returns the registry's reported docker-content-digest for ref.
-func (c *Client) ResolveDigest(ctx context.Context, ref Reference) (string, error) {
-	token, err := c.fetchToken(ctx, ref.Repository())
+func (c *Client) ResolveDigest(ctx context.Context, ref release.ImageReference) (string, error) {
+	token, err := c.fetchToken(ctx, ref.Repository)
 	if err != nil {
 		return "", err
 	}
 
-	url := fmt.Sprintf("%s/v2/%s/manifests/%s", c.baseURL(), ref.Repository(), ref.Digest)
+	url := fmt.Sprintf("%s/v2/%s/manifests/%s", c.baseURL(), ref.Repository, ref.Digest)
 	req, err := http.NewRequestWithContext(ctx, http.MethodHead, url, nil)
 	if err != nil {
 		return "", err

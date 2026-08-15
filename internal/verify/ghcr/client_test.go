@@ -40,7 +40,7 @@ func fixtureRegistry(t *testing.T, reportedDigest string) *httptest.Server {
 func TestClient_ResolveDigest_MatchesRealFlowShape(t *testing.T) {
 	srv := fixtureRegistry(t, validDigest)
 	client := &Client{BaseURL: srv.URL}
-	ref, _ := ParseReference("ghcr.io/acme/podinfo@" + validDigest)
+	ref := mustParse(t, "ghcr.io/acme/podinfo@"+validDigest)
 
 	got, err := client.ResolveDigest(context.Background(), ref)
 	if err != nil {
@@ -82,7 +82,7 @@ func TestClient_ResolveDigest_TokenEndpointFails_IsError(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 	client := &Client{BaseURL: srv.URL}
-	ref, _ := ParseReference("ghcr.io/acme/podinfo@" + validDigest)
+	ref := mustParse(t, "ghcr.io/acme/podinfo@"+validDigest)
 
 	_, err := client.ResolveDigest(context.Background(), ref)
 	if err == nil {
@@ -101,7 +101,7 @@ func TestClient_ResolveDigest_ManifestMissingDigestHeader_IsError(t *testing.T) 
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 	client := &Client{BaseURL: srv.URL}
-	ref, _ := ParseReference("ghcr.io/acme/podinfo@" + validDigest)
+	ref := mustParse(t, "ghcr.io/acme/podinfo@"+validDigest)
 
 	_, err := client.ResolveDigest(context.Background(), ref)
 	if err == nil {

@@ -1,0 +1,25 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: {{ .AnalysisTemplateName }}
+  namespace: {{ .Namespace }}
+  labels:
+    app.kubernetes.io/name: {{ .Application }}
+    app.kubernetes.io/part-of: safelane
+spec:
+  args:
+    - name: service-name
+  metrics:
+    - name: request-success-rate
+      interval: 30s
+      count: 3
+      initialDelay: 30s
+      successCondition: len(result) == 0 || result[0] >= 0.99
+      failureLimit: 1
+      provider:
+        prometheus:
+          address: http://prometheus.monitoring.svc.cluster.local:9090
+          query: >-
+            sum(rate(http_requests_total{namespace="{{ .Namespace }}",service="{{ .CanaryServiceName }}",status!~"5.."}[1m]))
+            /
+            sum(rate(http_requests_total{namespace="{{ .Namespace }}",service="{{ .CanaryServiceName }}"}[1m]))

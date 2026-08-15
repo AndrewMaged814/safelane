@@ -33,7 +33,9 @@ func fixtureServer(t *testing.T, pullBody, reviewsBody, checksBody string) *http
 
 const fixturePull = `{
 	"number": 42,
+	"html_url": "https://github.com/acme/podinfo/pull/42",
 	"merged": true,
+	"merged_at": "2026-08-10T11:00:00Z",
 	"merge_commit_sha": "merge-sha-1",
 	"base": {"ref": "main"},
 	"user": {"login": "andrew"}
@@ -45,7 +47,7 @@ const fixtureReviews = `[
 
 const fixtureChecks = `{
 	"check_runs": [
-		{"name": "publish", "conclusion": "success", "head_sha": "merge-sha-1"}
+		{"id": 999, "name": "publish", "conclusion": "success", "head_sha": "merge-sha-1", "html_url": "https://github.com/acme/podinfo/actions/runs/999", "completed_at": "2026-08-10T10:55:00Z"}
 	]
 }`
 
@@ -60,8 +62,18 @@ func TestClient_FetchPullRequestFacts_RealShapedResponses(t *testing.T) {
 	if facts.Repository != "acme/podinfo" || !facts.Merged || facts.MergeCommitSHA != "merge-sha-1" {
 		t.Fatalf("unexpected facts: %+v", facts)
 	}
-	if len(facts.ApprovedBy) != 1 || facts.ApprovedBy[0] != "ahmed" {
-		t.Fatalf("unexpected approvals: %+v", facts.ApprovedBy)
+	if facts.MergedAt.IsZero() || facts.URL == "" {
+		t.Fatalf("want merged_at and html_url populated, got %+v", facts)
+	}
+	approvedBy := facts.approvedBy()
+	if len(approvedBy) != 1 || approvedBy[0] != "ahmed" {
+		t.Fatalf("unexpected approvals: %+v", facts.Approvals)
+	}
+	if a, ok := facts.approvalFor("ahmed"); !ok || a.ApprovedAt.IsZero() {
+		t.Fatalf("want ahmed's approval timestamp populated, got %+v", facts.Approvals)
+	}
+	if len(facts.CheckRuns) != 1 || facts.CheckRuns[0].RunID != 999 || facts.CheckRuns[0].CompletedAt.IsZero() {
+		t.Fatalf("want check run id/completed_at populated, got %+v", facts.CheckRuns)
 	}
 	if len(facts.CheckRuns) != 1 || facts.CheckRuns[0].Conclusion != "success" {
 		t.Fatalf("unexpected check runs: %+v", facts.CheckRuns)

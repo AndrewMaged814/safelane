@@ -1,16 +1,20 @@
 package github
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func baseFacts() Facts {
 	return Facts{
 		Repository:     "acme/podinfo",
-		Number:          42,
-		Merged:          true,
-		BaseRef:         "main",
-		MergeCommitSHA:  "merge-sha-1",
-		AuthorLogin:     "andrew",
-		ApprovedBy:      []string{"ahmed"},
+		Number:         42,
+		Merged:         true,
+		MergedAt:       time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC),
+		BaseRef:        "main",
+		MergeCommitSHA: "merge-sha-1",
+		AuthorLogin:    "andrew",
+		Approvals:      []Approval{{Reviewer: "ahmed", State: "APPROVED", ApprovedAt: time.Date(2026, 8, 10, 10, 0, 0, 0, time.UTC)}},
 		CheckRuns: []CheckRun{
 			{Name: "publish", Conclusion: "success", HeadSHA: "merge-sha-1"},
 		},
@@ -67,21 +71,24 @@ func TestEvaluate_MergeCommitMismatch_PRHeadIsNotEnough(t *testing.T) {
 
 func TestEvaluate_ApprovalMissing(t *testing.T) {
 	facts := baseFacts()
-	facts.ApprovedBy = nil
+	facts.Approvals = nil
 	got := Evaluate(baseClaim(), facts)
 	assertRejected(t, got, ReasonApprovalMissing)
 }
 
 func TestEvaluate_ApproverIsAuthor(t *testing.T) {
 	facts := baseFacts()
-	facts.ApprovedBy = []string{"andrew"} // same as AuthorLogin
+	facts.Approvals = []Approval{{Reviewer: "andrew", State: "APPROVED"}} // same as AuthorLogin
 	got := Evaluate(baseClaim(), facts)
 	assertRejected(t, got, ReasonApproverIsAuthor)
 }
 
 func TestEvaluate_ApproverIsAuthor_AmongOthers_StillCountsOtherApprover(t *testing.T) {
 	facts := baseFacts()
-	facts.ApprovedBy = []string{"andrew", "ahmed"} // author's own stale approval plus a real one
+	facts.Approvals = []Approval{
+		{Reviewer: "andrew", State: "APPROVED"}, // author's own stale approval
+		{Reviewer: "ahmed", State: "APPROVED"},  // plus a real one
+	}
 	got := Evaluate(baseClaim(), facts)
 	if got.Status != StatusVerified {
 		t.Fatalf("a non-author approval among others must still verify, got %+v", got)
