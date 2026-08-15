@@ -1,6 +1,7 @@
 package store
 
 import (
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -106,6 +107,8 @@ func TestFileStore_Load_MissingRelease(t *testing.T) {
 
 	if _, err := s.Load(id); err == nil {
 		t.Fatal("want an error loading a release that was never saved")
+	} else if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("want ErrNotFound, got %v", err)
 	}
 }
 

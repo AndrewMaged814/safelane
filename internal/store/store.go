@@ -5,12 +5,16 @@ package store
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 
 	"github.com/AndrewMaged814/safelane/internal/release"
 )
+
+// ErrNotFound is returned by [FileStore.Load] when no record exists for the id.
+var ErrNotFound = errors.New("release not found")
 
 // FileStore persists Release records as one JSON file per release under Dir.
 //
@@ -71,7 +75,7 @@ func (s *FileStore) Load(id release.ReleaseID) (*release.Release, error) {
 	data, err := os.ReadFile(s.path(id))
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("store: no release record for %s", id)
+			return nil, fmt.Errorf("store: no release record for %s: %w", id, ErrNotFound)
 		}
 		return nil, fmt.Errorf("store: could not read the record for %s: %w", id, err)
 	}

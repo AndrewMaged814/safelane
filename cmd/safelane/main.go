@@ -1,6 +1,6 @@
 // Command safelane is the release-facing CLI entry point. It exposes no
 // arbitrary Kubernetes mutation, Argo commands, or protected production
-// credentials -- only the typed release-intake surface described in #47/#48.
+// credentials -- only the typed release-intake and proof-retrieval surface.
 package main
 
 import (
@@ -34,6 +34,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	commands := []cli.Command{
 		versionCommand(),
 		cli.ReleaseCommand(defaultTemplateDir, defaultStoreDir),
+		cli.ProofCommand(defaultStoreDir),
 	}
 	return cli.Dispatch(context.Background(), args, stdout, stderr, commands)
 }

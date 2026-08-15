@@ -1,7 +1,7 @@
 // Package cli is the safelane binary's command dispatch layer. It knows
 // nothing about release semantics; it only routes argv to a named
 // subcommand and reports usage/exit-code conventions consistently, so every
-// subcommand (release today; proof and others later) behaves the same way
+// subcommand (release, proof, and others later) behaves the same way
 // for an agent or operator driving the CLI.
 package cli
 
