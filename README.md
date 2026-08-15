@@ -18,144 +18,146 @@
   <img alt="Built for a DevOps hackathon" src="https://img.shields.io/badge/DevOps-hackathon%202026-30363d.svg">
 </p>
 
-## Why SafeLane?
+## The missing safety layer for deployment agents
 
-An autonomous deployer can ask for a production release. It needs one safe place to send that
-request.
+Deployment agents can plan a release, watch it, and repair it. They should not set their own limits
+or hold the keys to production.
 
-Direct cluster credentials are not safe — a deployer with real Kubernetes access can bypass any rule.
-Trusting the deployer's own claims is not safe either — it can say a change was reviewed when it was
-not. And if the deployer supplies the Kubernetes objects a risk scanner reads, it can shape its own
-risk score: the bytes the scanner checked and the bytes the cluster runs are no longer provably the
-same bytes.
+SafeLane gives Codex, Claude Code, CI, and humans one guarded path to production. A caller asks to
+release one reviewed change and one immutable image. SafeLane checks the evidence, applies the
+Release Policy, and allows only the rollout step that the policy permits.
 
-SafeLane closes all three gaps. A deployer sends release identity and evidence only: which
-application, which reviewed change, which built artifact. It sends no Kubernetes object, no patch, no
-template choice, no policy choice — SafeLane rejects these fields, it does not ignore them. SafeLane
-checks the evidence itself, against GitHub and the container registry. It renders the deployment
-bundle itself, from a template the operator owns. SafeLane is the only path to a real production
-release.
+The caller does not send Kubernetes configuration. It does not choose the policy. It does not get
+production credentials. If it tries to change the protected application directly, Kubernetes denies
+the change.
 
-## How it works
+**The agent can drive the release. SafeLane remains the release authority.**
+
+## One request. One decision. One proof.
 
 ```mermaid
 flowchart LR
-    A["Release Request\napp, target, PR, digest, caller"] --> B["Intake"]
-    B -->|"forbidden field\npresent"| R1["Rejected"]
-    B --> C["Verify GitHub\nmerged, approver != author,\nrequired check @ merge commit"]
-    B --> D["Verify GHCR\ndigest resolves"]
-    C --> E{"both verified?"}
-    D --> E
-    E -->|"no"| REC["Release record\nmissing / failed / unknown"]
-    E -->|"yes"| F["Render once\nfrom operator template,\npin verified digest"]
-    F --> H["Hash every resource"]
-    H --> REC2["Release record\nverified + bundle"]
-    REC2 -.->|"next: risk + policy (#50)"| P["Typed decision"]
-    P -.->|"next: proof (#52)"| PR["Release Proof"]
+    A["Codex, Claude Code,<br/>CI, or a human"] -->|"Release Request"| B["SafeLane"]
+    B --> C["Verify<br/>GitHub + GHCR"]
+    C --> D["Assess risk<br/>DeployWhisper"]
+    D --> E["Decide<br/>Release Policy"]
+    E -->|"Allowed rollout step"| F["Execute<br/>Argo Rollouts"]
+    F --> G["Enforce<br/>Kubernetes"]
+    C --> H["Release Proof"]
+    E --> H
+    F --> H
+    G --> H
 ```
 
-Four stages. The third stage never runs on anything the second stage did not confirm.
+1. **Request.** The caller sends release identity and evidence: the application, target, reviewed
+   change, CI result, and immutable image digest.
+2. **Verify.** SafeLane checks GitHub and GHCR. It then renders the Kubernetes objects from an
+   operator-owned Release Template. The caller cannot supply or change these objects.
+3. **Decide.** DeployWhisper reports advisory risk on the exact Rendered Manifest Bundle. The
+   Release Policy decides whether to deny, wait for a human, or allow a bounded rollout path.
+4. **Execute and prove.** SafeLane gives the approved image and limits to Argo Rollouts. Argo runs
+   the canary. Kubernetes enforces the boundary. SafeLane joins the evidence and outcome into one
+   Release Proof.
 
-1. **Intake.** SafeLane reads the Release Request. The request holds identity and evidence only.
-   SafeLane rejects any Kubernetes object, patch, template choice, or policy choice by name — it does
-   not stay silent and drop the field.
-2. **Verify.** SafeLane checks the pull request against GitHub: the change merged to the correct
-   branch, the approver is not the author, and the required check passed **on the merge commit**, not
-   the pull request head. SafeLane checks the image digest against the registry through GHCR's public
-   anonymous flow. Anything SafeLane cannot confirm is `unknown`. `Unknown` is never a pass.
-3. **Render.** SafeLane renders the Rendered Manifest Bundle once, and only after both checks pass. It
-   fills the operator's Release Template with the verified digest and hashes every object it renders.
-   Nothing downstream renders a second bundle. The hashed bytes, the bytes a risk scanner would read,
-   and the bytes the cluster would run are the same bytes.
-4. **Record.** SafeLane writes one Release record with a stable ID before any risk check or policy
-   decision exists — whether the evidence passed, failed, was missing, or could not be checked.
+SafeLane fails closed. Failed, missing, or unknown evidence never becomes permission to release.
 
-## Claimed evidence versus verified evidence
+## The part SafeLane owns
 
-Every field in a Release Request is a claim. SafeLane does not trust a claim on its own.
+GitHub already stores reviews and CI results. GHCR already stores images. DeployWhisper already finds
+deployment risk. Argo Rollouts already runs canaries. Kubernetes already enforces access.
 
-The `ReleaseEvidence` type enforces this in code: only SafeLane's own verification step can build one.
-Its fields are unexported, so no other code path can fake a "verified" result. A check that does not
-pass returns one of three answers:
+SafeLane does not rebuild those tools. It makes them answer one release question:
 
-| Outcome | What it means | Example |
-| --- | --- | --- |
-| **Failed** | SafeLane checked, and the answer is no | The pull request is not merged; the approver is the author |
-| **Missing** | The evidence does not exist | No approving review; no check run for the merge commit |
-| **Unknown** | SafeLane could not check | GitHub did not respond; the registry timed out |
+> May this exact reviewed image take the next production step under this Release Policy?
 
-None of the three counts as a pass. See [`CONTEXT.md`](CONTEXT.md) for the full vocabulary.
+SafeLane owns the small layer needed to answer that question:
 
-## Try it
+- one caller-neutral Release Request for agents, CI, and humans;
+- independent checks that bind the reviewed change to an immutable image;
+- one trusted Rendered Manifest Bundle for risk checks and execution;
+- a typed policy decision that limits the next rollout step;
+- a constrained Release Controller that cannot act outside those limits; and
+- one Release Proof that shows the artifact, decision, execution, and enforced boundary.
+
+Risk providers advise. The Release Policy decides. Argo executes. Kubernetes enforces. SafeLane
+binds the full release together.
+
+## Try the working slice
+
+SafeLane requires Go 1.26.5 or later.
 
 ```powershell
-go build ./...
+git clone https://github.com/AndrewMaged814/safelane.git
+cd safelane
 go test ./...
 go run ./cmd/safelane release --file testdata/release-evidence.json
 ```
 
-This fixture's pull request and digest are placeholders — the demo Podinfo fork does not exist yet
-(see [Project status](#project-status)). The command still makes a real call to GitHub and to GHCR,
-and correctly returns `unknown`. `testdata/README.md` lists every value to replace once real evidence
-exists.
+The command uses the real GitHub and GHCR verification paths. The checked-in request contains
+placeholder demo evidence, so SafeLane records the attempt and returns `unknown`. This is the
+expected fail-closed result. [`testdata/README.md`](testdata/README.md) lists the values that the live
+demo must provide.
 
-## Project status
+## Prototype status
 
-This table tracks the 12-step chain the team's progress demonstration needs. See
-`docs/prototype/progress-meeting.md` for the full chain.
+SafeLane is an active DevOpsDays Cairo 2026 hackathon prototype.
 
-| Step | Status |
-| --- | --- |
-| A real Podinfo pull request is reviewed and merged | Not started — longest lead time, needs a second human reviewer |
-| CI publishes a public, immutable GHCR digest | Not started |
-| The release-facing CLI accepts identity and evidence only | **Done** |
-| SafeLane verifies GitHub evidence (merge, reviewer, check on the merge commit) | **Done** — tested against real GitHub |
-| SafeLane verifies the GHCR digest (public anonymous flow) | **Done** — tested against real GHCR |
-| SafeLane renders the bundle once and hashes every object | **Done** |
-| SafeLane persists the Release record with a stable ID | **Done** |
-| DeployWhisper reports advisory risk on the exact rendered bytes | Not started |
-| SafeLane maps risk through the versioned Release Policy to a typed decision | Not started |
-| `safelane proof <release-id>` | Not started |
-| Argo patches the pre-created Rollout to the verified digest | Not started — depends on the infrastructure workstream |
-| A restricted deployer identity is denied a direct mutation attempt | Not started |
+**Works now**
+
+- `safelane release` accepts release identity and evidence only.
+- SafeLane verifies the merged pull request, independent approval, required CI check, and GHCR
+  digest against the real services.
+- SafeLane renders the bundle once from the Release Template and hashes every object.
+- Every attempt gets a stable Release ID and a stored Release record, including failed or unknown
+  checks.
+
+**Next**
+
+- run DeployWhisper on the rendered bundle;
+- map its result through the versioned Release Policy; and
+- add `safelane proof <release-id>` with Artifact and Decision proof.
+
+**Final demonstration**
+
+- patch a pre-created Argo Rollout through the constrained Release Controller;
+- progress a healthy canary to 100% using trusted runtime results;
+- deny a direct change from the Restricted Caller Identity; and
+- finish the Execution and Boundary sections of Release Proof.
+
+See the [progress demonstration](docs/prototype/progress-meeting.md) for the exact build order and the
+[open issue map](https://github.com/AndrewMaged814/safelane/issues/31) for current work.
+
+## What SafeLane is not
+
+- **Not a deployment agent.** Any agent, CI job, or human can use the same release interface.
+- **Not a new risk engine.** DeployWhisper is the first external risk provider. Its result is advice,
+  not production authority.
+- **Not a rollout engine.** Argo Rollouts owns workload, traffic, and analysis execution.
+- **Not a cluster administrator.** The Release Controller gets only the narrow access needed to
+  update the protected Rollout.
+- **Not a prompt-only guardrail.** Guidance helps agents find SafeLane. Kubernetes access rules still
+  stop a caller that ignores the guidance.
 
 ## Repository guide
 
-| Path | Purpose |
+| Path | Start here for |
 | --- | --- |
-| [`CONTEXT.md`](CONTEXT.md) | The project's vocabulary — Release Request, Release Evidence, Rendered Manifest Bundle, and the rest |
-| [`AGENTS.md`](AGENTS.md) | Where an agent finds the issue tracker, the triage labels, and the domain docs |
-| [`docs/prototype/`](docs/prototype) | The release interface spec and the progress-meeting chain |
-| [`docs/policy/safelane-policy.yml`](docs/policy/safelane-policy.yml) | The sample Release Policy — risk tier mapped to rollout stage |
-| [`docs/research/`](docs/research) | Prior-art and integration research, including the DeployWhisper spike |
-| `internal/release` | The core types — Release Request, Release Evidence, Rendered Manifest Bundle, the persisted Release |
-| `internal/render` | The render-and-hash step — renders once, from the operator's Release Template |
-| `internal/intake` | Reads the request and screens out forbidden fields |
-| `internal/verify/github`, `internal/verify/ghcr` | Verifies evidence against real GitHub and GHCR |
-| `internal/orchestrate` | The one release-intake path every transport must call |
-| `internal/store` | Saves and loads the Release record |
-| `internal/cli`, `cmd/safelane` | The CLI itself |
-
-## Scope
-
-SafeLane does not yet do these things:
-
-- score risk or apply a release policy (the DeployWhisper integration);
-- render the Release Proof;
-- create or change an Argo Rollout, or touch Kubernetes in any way;
-- serve an HTTP API or an MCP adapter;
-- verify build provenance or attestation;
-- store private-registry credentials.
-
-Each item above is roadmap work or a named upcoming ticket. See the Progress Vertical Slice and Final
-Prototype entries in [`CONTEXT.md`](CONTEXT.md).
+| [`CONTEXT.md`](CONTEXT.md) | The exact SafeLane vocabulary and product scope |
+| [`docs/prototype/release-interface.md`](docs/prototype/release-interface.md) | The Release Request, result, and Release Proof contracts |
+| [`docs/prototype/progress-meeting.md`](docs/prototype/progress-meeting.md) | The current demonstration and its finish line |
+| [`docs/policy/safelane-policy.yml`](docs/policy/safelane-policy.yml) | The example risk tiers and allowed rollout paths |
+| [`docs/research/`](docs/research) | Prior-art, evidence, and integration decisions |
+| [`internal/release`](internal/release) | Release Request, Release Evidence, bundle, and Release types |
+| [`internal/orchestrate`](internal/orchestrate) | The shared release path used by every caller |
+| [`internal/verify`](internal/verify) | Live GitHub and GHCR evidence checks |
+| [`internal/render`](internal/render) | Trusted bundle rendering and content hashes |
+| [`cmd/safelane`](cmd/safelane) | The CLI entry point |
 
 ## Attribution
 
-SafeLane treats [DeployWhisper](https://github.com/deploywhisper/deploywhisper) as one replaceable
-evidence provider. SafeLane calls it through a pinned adapter and does not copy its code — see
-[`docs/research/deploywhisper-spike.md`](docs/research/deploywhisper-spike.md) for the research behind
-that decision.
+SafeLane uses [DeployWhisper](https://github.com/deploywhisper/deploywhisper) as a replaceable External
+Risk Provider. SafeLane calls it through a pinned adapter and does not copy its code. Read the
+[integration research](docs/research/deploywhisper-spike.md) for the full decision.
 
 ## License
 
