@@ -213,3 +213,51 @@ func TestInit_AmbiguousAgentsMd_LeavesFileAndWritesFallback(t *testing.T) {
 		})
 	}
 }
+
+func TestInit_RepeatedWithoutChange_ReportsUnchanged(t *testing.T) {
+	root := t.TempDir()
+	cmd := InitCommand(root)
+	var stdout, stderr bytes.Buffer
+
+	if code := cmd.Run(context.Background(), []string{"--adapter", "codex"}, &stdout, &stderr); code != ExitOK {
+		t.Fatalf("first init: want ExitOK, got %d (stderr: %s)", code, stderr.String())
+	}
+
+	guidanceBefore, err := os.ReadFile(filepath.Join(root, ".safelane", "agent-guidance.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agentsBefore, err := os.ReadFile(filepath.Join(root, "AGENTS.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	if code := cmd.Run(context.Background(), []string{"--adapter", "codex"}, &stdout, &stderr); code != ExitOK {
+		t.Fatalf("second init: want ExitOK, got %d (stderr: %s)", code, stderr.String())
+	}
+
+	report := stdout.String()
+	if !strings.Contains(report, "unchanged .safelane/agent-guidance.md") {
+		t.Fatalf("want unchanged guidance report, got %q", report)
+	}
+	if !strings.Contains(report, "unchanged AGENTS.md managed section") {
+		t.Fatalf("want unchanged AGENTS.md report, got %q", report)
+	}
+
+	guidanceAfter, err := os.ReadFile(filepath.Join(root, ".safelane", "agent-guidance.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agentsAfter, err := os.ReadFile(filepath.Join(root, "AGENTS.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(guidanceBefore, guidanceAfter) {
+		t.Fatal("second init changed agent-guidance.md")
+	}
+	if !bytes.Equal(agentsBefore, agentsAfter) {
+		t.Fatal("second init changed AGENTS.md")
+	}
+}

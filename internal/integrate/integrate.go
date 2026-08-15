@@ -102,16 +102,10 @@ func writeAgents(root string) ([]Change, error) {
 	switch class {
 	case markersNone:
 		next := appendManaged(existing)
-		if err := os.WriteFile(path, next, 0o644); err != nil {
-			return nil, err
-		}
-		return []Change{{Action: "updated", Path: "AGENTS.md managed section"}}, nil
+		return writeIfChanged(path, existing, next, "AGENTS.md managed section")
 	case markersOne:
 		next := replaceManaged(existing)
-		if err := os.WriteFile(path, next, 0o644); err != nil {
-			return nil, err
-		}
-		return []Change{{Action: "updated", Path: "AGENTS.md managed section"}}, nil
+		return writeIfChanged(path, existing, next, "AGENTS.md managed section")
 	default:
 		fallback, err := writeOwned(root, fallbackRelPath, []byte(fallbackDoc))
 		if err != nil {
@@ -167,6 +161,16 @@ func classifyMarkers(body []byte) (markerClass, string) {
 		return markersMalformed, "nested"
 	}
 	return markersMalformed, "duplicated"
+}
+
+func writeIfChanged(path string, existing, next []byte, reportPath string) ([]Change, error) {
+	if bytes.Equal(existing, next) {
+		return []Change{{Action: "unchanged", Path: reportPath}}, nil
+	}
+	if err := os.WriteFile(path, next, 0o644); err != nil {
+		return nil, err
+	}
+	return []Change{{Action: "updated", Path: reportPath}}, nil
 }
 
 func writeOwned(root, rel string, content []byte) (Change, error) {
