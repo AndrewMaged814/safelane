@@ -5,13 +5,11 @@
 # SafeLane
 
 <p align="center">
-  <strong>An autonomous caller asks for release authority. SafeLane decides what it actually gets.</strong>
+  <strong>Ship on autopilot. Stay in control.</strong>
 </p>
 
 <p align="center">
-  SafeLane is the one neutral entry point an agent, CI system, or human uses to request a production
-  release — and the release-facing decision layer that verifies evidence, renders the exact bundle it
-  will assess and apply, and enforces the boundary a caller cannot talk its way past.
+  SafeLane ships reviewed changes on autopilot, while keeping every release inside your rules.
 </p>
 
 <p align="center">
