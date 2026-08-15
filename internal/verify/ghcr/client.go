@@ -120,6 +120,12 @@ func (c *Client) ResolveDigest(ctx context.Context, ref release.ImageReference) 
 // Verify resolves claim.Reference's digest via resolver and evaluates it
 // against claim. Resolution failures (network error, missing header,
 // non-2xx status) produce StatusUnknown, never a passing result.
+//
+// The binding check below duplicates the one EvaluateResolved also runs --
+// deliberately: it fails fast on a registry/repository mismatch before
+// spending a network round trip resolving a digest whose result would be
+// discarded anyway. EvaluateResolved keeps its own copy so it stays correct
+// when called directly (as tests do) without going through Verify.
 func Verify(ctx context.Context, resolver Resolver, claim Claim) Result {
 	if bound := evaluateBinding(claim); bound.Status != StatusVerified {
 		return bound

@@ -76,7 +76,7 @@ func Parse(raw []byte) (release.ReleaseRequest, error) {
 				"Match the Release Request schema exactly. Remove unrecognized or misspelled fields.").WithCause(err))
 		}
 	} else if err := req.Validate(); err != nil {
-		errs = append(errs, flatten(err)...)
+		errs = append(errs, release.Flatten(err)...)
 	}
 
 	if err := errs.OrNil(); err != nil {
@@ -133,20 +133,4 @@ func unknownFieldName(err error) (name string, ok bool) {
 		return "", false
 	}
 	return rest[:end], true
-}
-
-// flatten normalizes a single *release.Error or a release.Errors set into a
-// slice, mirroring the unexported helper release.ReleaseRequest.Validate
-// uses internally.
-func flatten(err error) release.Errors {
-	switch e := err.(type) {
-	case nil:
-		return nil
-	case release.Errors:
-		return e
-	case *release.Error:
-		return release.Errors{e}
-	default:
-		return release.Errors{release.Internal("unclassified_error", err.Error())}
-	}
 }

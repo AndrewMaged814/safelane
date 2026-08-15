@@ -207,6 +207,24 @@ func (es Errors) OrNil() error {
 	return es
 }
 
+// Flatten normalizes a single *Error, an Errors set, or any other error into
+// an Errors slice. Callers outside this package (intake, in particular) use
+// this instead of hand-rolling the same type switch, since a plain error
+// from outside the package's constructors still needs to become one
+// reportable rejection rather than being dropped.
+func Flatten(err error) Errors {
+	switch e := err.(type) {
+	case nil:
+		return nil
+	case Errors:
+		return e
+	case *Error:
+		return Errors{e}
+	default:
+		return Errors{Internal("unclassified_error", err.Error())}
+	}
+}
+
 // Categorize reports the most severe category present in err, or "" when err
 // carries no SafeLane category. Severity order is intentional: unknown outranks
 // missing and failed, because "we could not tell" must never be reported as the

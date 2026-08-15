@@ -77,7 +77,7 @@ func (s *FileStore) Load(id release.ReleaseID) (*release.Release, error) {
 	}
 	var r release.Release
 	if err := json.Unmarshal(data, &r); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("store: the record for %s failed validation on load: %w", id, err)
 	}
 	return &r, nil
 }

@@ -113,7 +113,12 @@ const (
 	CallerUnknown CallerKind = "unknown"
 )
 
-// CallerIdentity identifies who submitted the request.
+// CallerIdentity is the caller's self-declared submitter identity: an
+// unverified claim recorded for audit and Release Proof, carrying no
+// authority of its own. This is distinct from CONTEXT.md's "Restricted
+// Caller Identity" - the caller's namespace-scoped Kubernetes identity,
+// used for observability only and enforced by the cluster, not by this
+// struct.
 type CallerIdentity struct {
 	// Identity is the caller's self-declared name, e.g. "codex-cli".
 	Identity string     `json:"identity"`
@@ -293,16 +298,6 @@ func (r ReleaseRequest) Repository() (RepositoryRef, error) {
 	return ParseRepositoryRef(r.Source.Repository)
 }
 
-// flatten normalizes a single *Error or an Errors set into a slice.
-func flatten(err error) Errors {
-	switch e := err.(type) {
-	case nil:
-		return nil
-	case Errors:
-		return e
-	case *Error:
-		return Errors{e}
-	default:
-		return Errors{Internal("unclassified_error", err.Error())}
-	}
-}
+// flatten is a package-local alias for Flatten, kept so call sites inside
+// this package read the same as before Flatten was exported for intake.
+func flatten(err error) Errors { return Flatten(err) }

@@ -265,6 +265,29 @@ func TestSubmitRelease_PullRequestNotMerged_PersistsFailedEvidenceWithoutBundle(
 	}
 }
 
+func TestSubmitRelease_RequiredCheckFailed_PersistsFailedEvidence(t *testing.T) {
+	deps, store := baseDeps(t)
+	facts := verifiedFacts()
+	facts.CheckRuns = []github.CheckRun{
+		{Name: "publish / build-and-push", Conclusion: "failure", HeadSHA: fixtureMergeSHA},
+	}
+	deps.GitHub = fakeFetcher{facts: facts}
+
+	r, err := SubmitRelease(context.Background(), loadFixtureRaw(t), deps)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if r.Evidence().Outcome() != release.EvidenceFailed {
+		t.Fatalf("want EvidenceFailed for a failed required check, got %s", r.Evidence().Outcome())
+	}
+	if _, ok := r.Bundle(); ok {
+		t.Fatal("want no bundle when the required check failed")
+	}
+	if len(store.saved) != 1 {
+		t.Fatalf("want the release still persisted, got %d", len(store.saved))
+	}
+}
+
 func TestSubmitRelease_ApproverIsAuthor_PersistsFailedEvidence(t *testing.T) {
 	deps, _ := baseDeps(t)
 	facts := verifiedFacts()

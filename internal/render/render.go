@@ -100,7 +100,7 @@ func Render(t Template, target release.Target, evidence release.ReleaseEvidence)
 		}
 
 		rendered := finalizeDocument(buf.Bytes())
-		ref, err := identify(rt.path, rendered)
+		ref, err := identifyResource(rt.path, rendered)
 		if err != nil {
 			return release.RenderedBundle{}, err
 		}
@@ -236,7 +236,7 @@ func finalizeDocument(b []byte) []byte {
 // loudly instead of being recorded with a blank identity.
 //
 // It never influences the hashed bytes.
-func identify(path string, rendered []byte) (release.ResourceRef, error) {
+func identifyResource(path string, rendered []byte) (release.ResourceRef, error) {
 	ref := release.ResourceRef{TemplatePath: path}
 	inMetadata := false
 	started := false
