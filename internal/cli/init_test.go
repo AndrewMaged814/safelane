@@ -92,3 +92,45 @@ func TestInit_UnmarkedAgentsMd_AppendsManagedSection(t *testing.T) {
 		t.Fatalf("want updated report for AGENTS.md, got %q", stdout.String())
 	}
 }
+
+func TestInit_OneManagedBlock_ReplacesOnlyThatBlock(t *testing.T) {
+	root := t.TempDir()
+	prefix := "# Team rules\n\nRun go test.\n\n"
+	suffix := "\n## Local notes\nDo not rewrite this.\n"
+	original := prefix +
+		"<!-- BEGIN SAFELANE MANAGED: guidance -->\nOLD POINTER\n<!-- END SAFELANE MANAGED: guidance -->\n" +
+		suffix
+	if err := os.WriteFile(filepath.Join(root, "AGENTS.md"), []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := InitCommand(root)
+	var stdout, stderr bytes.Buffer
+
+	code := cmd.Run(context.Background(), []string{"--adapter", "codex"}, &stdout, &stderr)
+
+	if code != ExitOK {
+		t.Fatalf("want ExitOK, got %d (stderr: %s)", code, stderr.String())
+	}
+
+	body, err := os.ReadFile(filepath.Join(root, "AGENTS.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(body)
+	if !strings.HasPrefix(got, prefix) {
+		t.Fatalf("want prefix preserved, got %q", got)
+	}
+	if !strings.HasSuffix(got, suffix) {
+		t.Fatalf("want suffix preserved, got %q", got)
+	}
+	if strings.Contains(got, "OLD POINTER") {
+		t.Fatalf("want the stale managed body replaced, got %q", got)
+	}
+	if !strings.Contains(got, ".safelane/agent-guidance.md") {
+		t.Fatalf("want the canonical pointer, got %q", got)
+	}
+	if !strings.Contains(stdout.String(), "updated AGENTS.md managed section") {
+		t.Fatalf("want updated report for AGENTS.md, got %q", stdout.String())
+	}
+}

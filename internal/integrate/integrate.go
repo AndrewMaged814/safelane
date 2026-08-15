@@ -92,15 +92,22 @@ func writeAgents(root string) (Change, error) {
 		return Change{}, err
 	}
 
-	if bytes.Contains(existing, []byte(beginMarker)) || bytes.Contains(existing, []byte(endMarker)) {
+	switch classifyMarkers(existing) {
+	case markersNone:
+		next := appendManaged(existing)
+		if err := os.WriteFile(path, next, 0o644); err != nil {
+			return Change{}, err
+		}
+		return Change{Action: "updated", Path: "AGENTS.md managed section"}, nil
+	case markersOne:
+		next := replaceManaged(existing)
+		if err := os.WriteFile(path, next, 0o644); err != nil {
+			return Change{}, err
+		}
+		return Change{Action: "updated", Path: "AGENTS.md managed section"}, nil
+	default:
 		return Change{Action: "unchanged", Path: "AGENTS.md managed section"}, nil
 	}
-
-	next := appendManaged(existing)
-	if err := os.WriteFile(path, next, 0o644); err != nil {
-		return Change{}, err
-	}
-	return Change{Action: "updated", Path: "AGENTS.md managed section"}, nil
 }
 
 func appendManaged(existing []byte) []byte {
@@ -109,4 +116,45 @@ func appendManaged(existing []byte) []byte {
 		out = append(out, '\n')
 	}
 	return append(out, []byte(ManagedSection)...)
+}
+
+type markerClass int
+
+const (
+	markersNone markerClass = iota
+	markersOne
+	markersMalformed
+)
+
+func classifyMarkers(body []byte) markerClass {
+	begins := bytes.Count(body, []byte(beginMarker))
+	ends := bytes.Count(body, []byte(endMarker))
+	if begins == 0 && ends == 0 {
+		return markersNone
+	}
+	if begins == 1 && ends == 1 {
+		bi := bytes.Index(body, []byte(beginMarker))
+		ei := bytes.Index(body, []byte(endMarker))
+		if bi < ei {
+			return markersOne
+		}
+	}
+	return markersMalformed
+}
+
+func replaceManaged(body []byte) []byte {
+	bi := bytes.Index(body, []byte(beginMarker))
+	ei := bytes.Index(body, []byte(endMarker))
+	endAt := ei + len(endMarker)
+	if endAt < len(body) && body[endAt] == '\r' {
+		endAt++
+	}
+	if endAt < len(body) && body[endAt] == '\n' {
+		endAt++
+	}
+	next := make([]byte, 0, bi+len(ManagedSection)+len(body)-endAt)
+	next = append(next, body[:bi]...)
+	next = append(next, []byte(ManagedSection)...)
+	next = append(next, body[endAt:]...)
+	return next
 }
