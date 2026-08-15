@@ -1,0 +1,124 @@
+package github
+
+import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+)
+
+// fixtureServer serves canned GitHub API responses for one pull request,
+// matching the real shapes of GET .../pulls/{n}, .../pulls/{n}/reviews, and
+// .../commits/{sha}/check-runs, so Client can be tested against real-looking
+// endpoints without a network dependency.
+func fixtureServer(t *testing.T, pullBody, reviewsBody, checksBody string) *httptest.Server {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/repos/acme/podinfo/pulls/42", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(pullBody))
+	})
+	mux.HandleFunc("/repos/acme/podinfo/pulls/42/reviews", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(reviewsBody))
+	})
+	mux.HandleFunc("/repos/acme/podinfo/commits/merge-sha-1/check-runs", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(checksBody))
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+const fixturePull = `{
+	"number": 42,
+	"merged": true,
+	"merge_commit_sha": "merge-sha-1",
+	"base": {"ref": "main"},
+	"user": {"login": "andrew"}
+}`
+
+const fixtureReviews = `[
+	{"state": "APPROVED", "user": {"login": "ahmed"}, "submitted_at": "2026-08-10T10:00:00Z"}
+]`
+
+const fixtureChecks = `{
+	"check_runs": [
+		{"name": "publish", "conclusion": "success", "head_sha": "merge-sha-1"}
+	]
+}`
+
+func TestClient_FetchPullRequestFacts_RealShapedResponses(t *testing.T) {
+	srv := fixtureServer(t, fixturePull, fixtureReviews, fixtureChecks)
+	client := &Client{BaseURL: srv.URL}
+
+	facts, err := client.FetchPullRequestFacts(context.Background(), "acme", "podinfo", 42)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if facts.Repository != "acme/podinfo" || !facts.Merged || facts.MergeCommitSHA != "merge-sha-1" {
+		t.Fatalf("unexpected facts: %+v", facts)
+	}
+	if len(facts.ApprovedBy) != 1 || facts.ApprovedBy[0] != "ahmed" {
+		t.Fatalf("unexpected approvals: %+v", facts.ApprovedBy)
+	}
+	if len(facts.CheckRuns) != 1 || facts.CheckRuns[0].Conclusion != "success" {
+		t.Fatalf("unexpected check runs: %+v", facts.CheckRuns)
+	}
+}
+
+func TestClient_FetchPullRequestFacts_NotFound(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/repos/acme/podinfo/pulls/999", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	client := &Client{BaseURL: srv.URL}
+
+	_, err := client.FetchPullRequestFacts(context.Background(), "acme", "podinfo", 999)
+	if err != errNotFound {
+		t.Fatalf("want errNotFound, got %v", err)
+	}
+}
+
+func TestVerify_EndToEnd_UsesRealFetcher(t *testing.T) {
+	srv := fixtureServer(t, fixturePull, fixtureReviews, fixtureChecks)
+	client := &Client{BaseURL: srv.URL}
+
+	got := Verify(context.Background(), client, baseClaim(), "acme", "podinfo")
+	if got.Status != StatusVerified {
+		t.Fatalf("want Verified, got %+v", got)
+	}
+}
+
+func TestVerify_FetchFailure_IsUnknownNeverPassing(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/repos/acme/podinfo/pulls/42", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	client := &Client{BaseURL: srv.URL}
+
+	got := Verify(context.Background(), client, baseClaim(), "acme", "podinfo")
+	if got.Status != StatusUnknown {
+		t.Fatalf("want Unknown on fetch failure, got %+v", got)
+	}
+}
+
+func TestVerify_NotFound_IsUnknownWithReason(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/repos/acme/podinfo/pulls/42", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	client := &Client{BaseURL: srv.URL}
+
+	got := Verify(context.Background(), client, baseClaim(), "acme", "podinfo")
+	if got.Status != StatusUnknown || got.Reason != ReasonPullRequestNotFound {
+		t.Fatalf("want Unknown/PullRequestNotFound, got %+v", got)
+	}
+}

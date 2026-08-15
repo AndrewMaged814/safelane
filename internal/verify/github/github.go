@@ -1,0 +1,191 @@
+// Package github verifies GitHub evidence for a Release Request: that a
+// pull request exists, is merged into the expected branch, that the
+// submitted source revision is that merge's commit (not the PR head), that
+// an approval exists from someone other than the author, and that a
+// required check run succeeded for that exact merge commit SHA.
+//
+// This package never trusts a caller's declared claims. A Claim is what the
+// caller asserts; a Facts is what SafeLane itself observed by calling the
+// GitHub API. Verify only ever returns Verified when the observed Facts
+// satisfy the Claim under these rules.
+package github
+
+import "fmt"
+
+// Status is the outcome of verifying one piece of GitHub evidence.
+type Status string
+
+const (
+	// StatusVerified means the observed facts satisfy every rule below.
+	StatusVerified Status = "verified"
+	// StatusRejected means SafeLane was able to observe the facts and they
+	// deterministically fail a rule (unmerged, wrong repo, wrong commit,
+	// self-approval, failed check, mutable check target, ...).
+	StatusRejected Status = "rejected"
+	// StatusUnknown means SafeLane could not determine the facts at all
+	// (API error, not found, malformed response). Unknown must never be
+	// treated as passing evidence by any caller of this package.
+	StatusUnknown Status = "unknown"
+)
+
+// ReasonCode names why a Result is not Verified, so callers can branch on
+// category instead of parsing Detail strings.
+type ReasonCode string
+
+const (
+	ReasonNone                  ReasonCode = ""
+	ReasonFetchFailed           ReasonCode = "fetch_failed"
+	ReasonPullRequestNotFound   ReasonCode = "pull_request_not_found"
+	ReasonRepositoryMismatch    ReasonCode = "repository_mismatch"
+	ReasonNotMerged             ReasonCode = "not_merged"
+	ReasonBaseRefMismatch       ReasonCode = "base_ref_mismatch"
+	ReasonMergeCommitMismatch   ReasonCode = "merge_commit_mismatch"
+	ReasonApprovalMissing       ReasonCode = "approval_missing"
+	ReasonApproverIsAuthor      ReasonCode = "approver_is_author"
+	ReasonRequiredCheckMissing  ReasonCode = "required_check_missing"
+	ReasonRequiredCheckFailed   ReasonCode = "required_check_failed"
+	ReasonRequiredCheckWrongSHA ReasonCode = "required_check_wrong_sha"
+)
+
+// Claim is what the caller declared about the reviewed change. It is
+// input to verify, never authority on its own.
+type Claim struct {
+	// Repository is the expected "owner/repo" the pull request must target.
+	Repository string
+	// PullRequestNumber identifies the pull request to verify.
+	PullRequestNumber int
+	// ExpectedMergeCommitSHA is the source revision the caller submitted.
+	// It must equal the PR's actual merge commit SHA, not its head SHA.
+	ExpectedMergeCommitSHA string
+	// RequiredCheckName is the check run name that must have succeeded
+	// against ExpectedMergeCommitSHA specifically.
+	RequiredCheckName string
+	// ExpectedBaseRef is the branch the PR must have merged into, e.g. "main".
+	ExpectedBaseRef string
+}
+
+// CheckRun is one check run GitHub reports against a commit SHA.
+type CheckRun struct {
+	Name       string
+	Conclusion string // "success", "failure", "neutral", "cancelled", ...
+	HeadSHA    string // the exact commit this run ran against
+}
+
+// Facts is everything SafeLane itself observed about a pull request via the
+// GitHub API. Every field here is a SafeLane-verified fact, never a
+// caller-declared claim.
+type Facts struct {
+	Repository     string
+	Number         int
+	Merged         bool
+	BaseRef        string
+	MergeCommitSHA string
+	AuthorLogin    string
+	// ApprovedBy holds logins whose latest review state is APPROVED,
+	// after collapsing multiple reviews per user to their most recent state.
+	ApprovedBy []string
+	// CheckRuns holds check runs GitHub reported for MergeCommitSHA. Runs
+	// reported against any other SHA must not appear here (see Fetcher).
+	CheckRuns []CheckRun
+}
+
+// Result is the typed, actionable outcome of verifying one Claim.
+type Result struct {
+	Status Status
+	Reason ReasonCode
+	Detail string
+	// Facts is populated whenever SafeLane could observe them, even when
+	// the result is Rejected, so callers/operators can see what was found.
+	Facts *Facts
+}
+
+func rejected(reason ReasonCode, facts Facts, detailf string, args ...any) Result {
+	f := facts
+	return Result{Status: StatusRejected, Reason: reason, Detail: fmt.Sprintf(detailf, args...), Facts: &f}
+}
+
+func unknown(reason ReasonCode, detailf string, args ...any) Result {
+	return Result{Status: StatusUnknown, Reason: reason, Detail: fmt.Sprintf(detailf, args...)}
+}
+
+func verified(facts Facts) Result {
+	f := facts
+	return Result{Status: StatusVerified, Facts: &f}
+}
+
+// Evaluate applies the evidence rules to already-fetched Facts. It is pure
+// and takes no network dependency, so every rejection/acceptance case can be
+// tested directly without an HTTP fixture.
+func Evaluate(claim Claim, facts Facts) Result {
+	if claim.Repository != "" && facts.Repository != claim.Repository {
+		return rejected(ReasonRepositoryMismatch, facts,
+			"expected repository %q, pull request targets %q", claim.Repository, facts.Repository)
+	}
+
+	if !facts.Merged {
+		return rejected(ReasonNotMerged, facts, "pull request #%d is not merged", facts.Number)
+	}
+
+	if claim.ExpectedBaseRef != "" && facts.BaseRef != claim.ExpectedBaseRef {
+		return rejected(ReasonBaseRefMismatch, facts,
+			"expected base ref %q, pull request merged into %q", claim.ExpectedBaseRef, facts.BaseRef)
+	}
+
+	if facts.MergeCommitSHA == "" {
+		return unknown(ReasonMergeCommitMismatch, "pull request #%d has no recorded merge commit SHA", facts.Number)
+	}
+
+	if claim.ExpectedMergeCommitSHA != facts.MergeCommitSHA {
+		return rejected(ReasonMergeCommitMismatch, facts,
+			"submitted source revision %q does not match the pull request's merge commit %q",
+			claim.ExpectedMergeCommitSHA, facts.MergeCommitSHA)
+	}
+
+	approverFound := false
+	for _, login := range facts.ApprovedBy {
+		if login == facts.AuthorLogin {
+			continue // self-approval never counts
+		}
+		approverFound = true
+		break
+	}
+	if !approverFound {
+		if len(facts.ApprovedBy) == 1 && facts.ApprovedBy[0] == facts.AuthorLogin {
+			return rejected(ReasonApproverIsAuthor, facts,
+				"pull request #%d is only approved by its own author %q", facts.Number, facts.AuthorLogin)
+		}
+		return rejected(ReasonApprovalMissing, facts,
+			"pull request #%d has no approval from a reviewer other than the author", facts.Number)
+	}
+
+	if claim.RequiredCheckName == "" {
+		return unknown(ReasonRequiredCheckMissing, "no required check name was configured to verify")
+	}
+
+	var found *CheckRun
+	for i := range facts.CheckRuns {
+		if facts.CheckRuns[i].Name == claim.RequiredCheckName {
+			found = &facts.CheckRuns[i]
+			break
+		}
+	}
+	if found == nil {
+		return rejected(ReasonRequiredCheckMissing, facts,
+			"required check %q was not found for merge commit %q", claim.RequiredCheckName, facts.MergeCommitSHA)
+	}
+	if found.HeadSHA != facts.MergeCommitSHA {
+		// Defensive: Fetcher implementations must only return check runs for
+		// the requested SHA, but a passing check on the PR head must never
+		// satisfy this claim, so this is enforced again here.
+		return rejected(ReasonRequiredCheckWrongSHA, facts,
+			"required check %q ran against %q, not the merge commit %q",
+			claim.RequiredCheckName, found.HeadSHA, facts.MergeCommitSHA)
+	}
+	if found.Conclusion != "success" {
+		return rejected(ReasonRequiredCheckFailed, facts,
+			"required check %q concluded %q for merge commit %q",
+			claim.RequiredCheckName, found.Conclusion, facts.MergeCommitSHA)
+	}
+
+	return verified(facts)
+}
