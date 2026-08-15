@@ -83,6 +83,26 @@ SafeLane owns the small layer needed to answer that question:
 Eligibility gates entry. Argo executes. Kubernetes enforces. SafeLane binds the full release
 together.
 
+## Install
+
+SafeLane is a Go CLI. With the repository public, install the binary from GitHub:
+
+```bash
+go install github.com/AndrewMaged814/safelane/cmd/safelane@main
+```
+
+That puts `safelane` in `$(go env GOPATH)/bin` (or `GOBIN`). Put that directory on your `PATH`.
+
+Use `@main` until we publish a semantic version tag such as `v0.1.0`. Then `@latest` is the right query.
+
+```bash
+safelane init --adapter codex
+```
+
+`init` writes local discovery files. It does not start a background agent. Start a new Codex session after it runs.
+
+A `curl | sh` installer needs GitHub Release binaries. We do not publish those yet.
+
 ## Try the working slice
 
 SafeLane requires Go 1.26.5 or later.
