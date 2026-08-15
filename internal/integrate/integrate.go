@@ -13,7 +13,32 @@ import (
 //go:embed guidance.md
 var agentGuidance []byte
 
-const guidanceRelPath = ".safelane/agent-guidance.md"
+const (
+	guidanceRelPath = ".safelane/agent-guidance.md"
+	agentsRelPath   = "AGENTS.md"
+	beginMarker     = "<!-- BEGIN SAFELANE MANAGED: guidance -->"
+	endMarker       = "<!-- END SAFELANE MANAGED: guidance -->"
+)
+
+// ManagedSection is the Codex-discoverable AGENTS.md block. It is a pointer
+// to local guidance, not a copy of the workflow and not a security boundary.
+const ManagedSection = beginMarker + "\n" +
+	"See `.safelane/agent-guidance.md` for the protected release workflow. Use `safelane release --file ...`, follow the returned `safelane execute <release-id>` action when eligible, and use `safelane proof <release-id>` to retrieve the outcome. Do not call Kubernetes or Argo directly for the protected application.\n" +
+	endMarker + "\n"
+
+// Apply writes SafeLane-owned discovery files under root and reports each
+// created, updated, unchanged, or skipped path.
+func Apply(root string) ([]Change, error) {
+	guidance, err := WriteGuidance(root)
+	if err != nil {
+		return nil, err
+	}
+	agents, err := writeAgents(root)
+	if err != nil {
+		return nil, err
+	}
+	return []Change{guidance, agents}, nil
+}
 
 // Change is one line of the init/sync report.
 type Change struct {
@@ -51,4 +76,19 @@ func WriteGuidance(root string) (Change, error) {
 		return Change{Action: "created", Path: guidanceRelPath}, nil
 	}
 	return Change{Action: "updated", Path: guidanceRelPath}, nil
+}
+
+func writeAgents(root string) (Change, error) {
+	path := filepath.Join(root, agentsRelPath)
+	_, err := os.Stat(path)
+	if err == nil {
+		return Change{Action: "unchanged", Path: "AGENTS.md managed section"}, nil
+	}
+	if !os.IsNotExist(err) {
+		return Change{}, err
+	}
+	if err := os.WriteFile(path, []byte(ManagedSection), 0o644); err != nil {
+		return Change{}, err
+	}
+	return Change{Action: "created", Path: "AGENTS.md managed section"}, nil
 }

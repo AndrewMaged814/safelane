@@ -39,11 +39,13 @@ func runInit(args []string, stdout, stderr io.Writer, root string) int {
 		return ExitUsage
 	}
 
-	change, err := integrate.WriteGuidance(root)
+	changes, err := integrate.Apply(root)
 	if err != nil {
 		fmt.Fprintf(stderr, "safelane init: %v\n", err)
 		return ExitFail
 	}
-	fmt.Fprintln(stdout, change.String())
+	for _, change := range changes {
+		fmt.Fprintln(stdout, change.String())
+	}
 	return ExitOK
 }
