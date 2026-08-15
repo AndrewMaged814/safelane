@@ -261,3 +261,101 @@ func TestInit_RepeatedWithoutChange_ReportsUnchanged(t *testing.T) {
 		t.Fatal("second init changed AGENTS.md")
 	}
 }
+
+func TestInit_GuidanceTeachesReleaseExecuteProof(t *testing.T) {
+	root := t.TempDir()
+	var stdout, stderr bytes.Buffer
+	if code := InitCommand(root).Run(context.Background(), []string{"--adapter", "codex"}, &stdout, &stderr); code != ExitOK {
+		t.Fatalf("want ExitOK, got %d (stderr: %s)", code, stderr.String())
+	}
+
+	body, err := os.ReadFile(filepath.Join(root, ".safelane", "agent-guidance.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(body)
+	want := []string{
+		"does not authorize a release",
+		"Eligibility does not mean the artifact is safe or deployed",
+		"safelane release --file release-evidence.json",
+		"safelane execute <release-id>",
+		"Proof may remain pending",
+		"Pending proof is not a completed deployment",
+		"Never call Kubernetes or Argo directly",
+	}
+	for _, phrase := range want {
+		if !strings.Contains(text, phrase) {
+			t.Errorf("guidance missing %q", phrase)
+		}
+	}
+}
+
+func TestInit_MissingAdapter_ExitsUsage(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := InitCommand(t.TempDir()).Run(context.Background(), nil, &stdout, &stderr)
+	if code != ExitUsage {
+		t.Fatalf("want ExitUsage, got %d", code)
+	}
+	if !strings.Contains(stderr.String(), "--adapter is required") {
+		t.Fatalf("want required-adapter message, got %q", stderr.String())
+	}
+}
+
+func TestInit_UnknownAdapter_ExitsUsage(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := InitCommand(t.TempDir()).Run(context.Background(), []string{"--adapter", "claude"}, &stdout, &stderr)
+	if code != ExitUsage {
+		t.Fatalf("want ExitUsage, got %d", code)
+	}
+	if !strings.Contains(stderr.String(), `unknown adapter "claude"`) {
+		t.Fatalf("want unknown-adapter message, got %q", stderr.String())
+	}
+}
+
+func TestInit_AmbiguousAgentsMd_SecondRunUnchanged(t *testing.T) {
+	root := t.TempDir()
+	original := "<!-- BEGIN SAFELANE MANAGED: guidance -->\nno end\n"
+	if err := os.WriteFile(filepath.Join(root, "AGENTS.md"), []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := InitCommand(root)
+	var stdout, stderr bytes.Buffer
+	if code := cmd.Run(context.Background(), []string{"--adapter", "codex"}, &stdout, &stderr); code != ExitOK {
+		t.Fatalf("first init: want ExitOK, got %d (stderr: %s)", code, stderr.String())
+	}
+
+	fallbackBefore, err := os.ReadFile(filepath.Join(root, ".safelane", "integrations", "codex.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	if code := cmd.Run(context.Background(), []string{"--adapter", "codex"}, &stdout, &stderr); code != ExitOK {
+		t.Fatalf("second init: want ExitOK, got %d (stderr: %s)", code, stderr.String())
+	}
+
+	report := stdout.String()
+	if !strings.Contains(report, "unchanged .safelane/integrations/codex.md") {
+		t.Fatalf("want unchanged fallback report, got %q", report)
+	}
+	if !strings.Contains(report, "skipped AGENTS.md") {
+		t.Fatalf("want AGENTS.md still skipped, got %q", report)
+	}
+
+	fallbackAfter, err := os.ReadFile(filepath.Join(root, ".safelane", "integrations", "codex.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(fallbackBefore, fallbackAfter) {
+		t.Fatal("second init changed the Codex fallback")
+	}
+	got, err := os.ReadFile(filepath.Join(root, "AGENTS.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != original {
+		t.Fatal("second init changed the ambiguous AGENTS.md")
+	}
+}
