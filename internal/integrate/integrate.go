@@ -5,6 +5,7 @@ package integrate
 
 import (
 	_ "embed"
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -80,15 +81,32 @@ func WriteGuidance(root string) (Change, error) {
 
 func writeAgents(root string) (Change, error) {
 	path := filepath.Join(root, agentsRelPath)
-	_, err := os.Stat(path)
-	if err == nil {
+	existing, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		if err := os.WriteFile(path, []byte(ManagedSection), 0o644); err != nil {
+			return Change{}, err
+		}
+		return Change{Action: "created", Path: "AGENTS.md managed section"}, nil
+	}
+	if err != nil {
+		return Change{}, err
+	}
+
+	if bytes.Contains(existing, []byte(beginMarker)) || bytes.Contains(existing, []byte(endMarker)) {
 		return Change{Action: "unchanged", Path: "AGENTS.md managed section"}, nil
 	}
-	if !os.IsNotExist(err) {
+
+	next := appendManaged(existing)
+	if err := os.WriteFile(path, next, 0o644); err != nil {
 		return Change{}, err
 	}
-	if err := os.WriteFile(path, []byte(ManagedSection), 0o644); err != nil {
-		return Change{}, err
+	return Change{Action: "updated", Path: "AGENTS.md managed section"}, nil
+}
+
+func appendManaged(existing []byte) []byte {
+	out := existing
+	if len(out) > 0 && out[len(out)-1] != '\n' {
+		out = append(out, '\n')
 	}
-	return Change{Action: "created", Path: "AGENTS.md managed section"}, nil
+	return append(out, []byte(ManagedSection)...)
 }
