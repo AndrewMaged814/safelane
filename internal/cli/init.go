@@ -5,8 +5,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-
-	"github.com/AndrewMaged814/safelane/internal/integrate"
 )
 
 // InitCommand builds `safelane init --adapter codex`: a local generator for
@@ -39,13 +37,5 @@ func runInit(args []string, stdout, stderr io.Writer, root string) int {
 		return ExitUsage
 	}
 
-	changes, err := integrate.Apply(root)
-	if err != nil {
-		fmt.Fprintf(stderr, "safelane init: %v\n", err)
-		return ExitFail
-	}
-	for _, change := range changes {
-		fmt.Fprintln(stdout, change.String())
-	}
-	return ExitOK
+	return reportApply(root, stdout, stderr, "init")
 }

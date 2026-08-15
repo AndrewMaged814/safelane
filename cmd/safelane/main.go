@@ -36,6 +36,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		cli.ReleaseCommand(defaultTemplateDir, defaultStoreDir),
 		cli.ProofCommand(defaultStoreDir),
 		cli.InitCommand("."),
+		cli.IntegrationsCommand("."),
 	}
 	return cli.Dispatch(context.Background(), args, stdout, stderr, commands)
 }
