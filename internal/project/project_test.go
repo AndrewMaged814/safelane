@@ -13,6 +13,22 @@ func TestImageTag_ShortSHA(t *testing.T) {
 	}
 }
 
+func TestImageTag_FullSHA(t *testing.T) {
+	sha := "def142b97b099bb7550ac9f4cb1ac32d16162740"
+	got := ImageTag("sha-{{merge_sha}}", sha)
+	if got != "sha-"+sha {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestImageTag_DefaultMatchesPublishWorkflow(t *testing.T) {
+	sha := "def142b97b099bb7550ac9f4cb1ac32d16162740"
+	got := ImageTag("", sha)
+	if got != "sha-"+sha {
+		t.Fatalf("default tag = %q, want sha-<full merge SHA> to match docker tags: sha-${{ github.sha }}", got)
+	}
+}
+
 func TestLoad_ValidFixture(t *testing.T) {
 	cfg, err := Load(filepath.Join("..", "..", "testdata", "project.yml"))
 	if err != nil {
@@ -58,5 +74,8 @@ func TestDefaultYAML_RoundTrip(t *testing.T) {
 	}
 	if cfg.Repository.DefaultBranch != "master" || cfg.Release.RequiredCheck != "build-and-push" {
 		t.Fatalf("unexpected default: %+v", cfg)
+	}
+	if cfg.Release.ImageTag != DefaultImageTag {
+		t.Fatalf("image_tag = %q, want %q", cfg.Release.ImageTag, DefaultImageTag)
 	}
 }

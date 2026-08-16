@@ -138,7 +138,7 @@ func (c Config) Validate() error {
 }
 
 // DefaultImageTag is the tag pattern used when project.yml omits image_tag.
-const DefaultImageTag = "sha-{{merge_sha_short8}}"
+const DefaultImageTag = "sha-{{merge_sha}}"
 
 // ImageTag renders the configured tag pattern against a merge commit SHA.
 func ImageTag(pattern, mergeSHA string) string {
@@ -259,7 +259,7 @@ repository:
 release:
   environment: production
   image_repository: %s
-  image_tag: "sha-{{merge_sha_short8}}"
+  image_tag: "sha-{{merge_sha}}"
   required_check: build-and-push
   template_path: .safelane/release-template
 
