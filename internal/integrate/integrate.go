@@ -7,8 +7,13 @@ import (
 	"bytes"
 	_ "embed"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
+
+	"github.com/AndrewMaged814/safelane/internal/project"
+	"github.com/AndrewMaged814/safelane/internal/render"
 )
 
 //go:embed guidance.md
@@ -25,7 +30,7 @@ const (
 // ManagedSection is the Codex-discoverable AGENTS.md block. It is a pointer
 // to local guidance, not a copy of the workflow and not a security boundary.
 const ManagedSection = beginMarker + "\n" +
-	"See `.safelane/agent-guidance.md` for the protected release workflow. Use `safelane release --file ...`, follow the returned `safelane execute <release-id>` action when eligible, and use `safelane proof <release-id>` to retrieve the outcome. Do not call Kubernetes or Argo directly for the protected application.\n" +
+	"See `.safelane/agent-guidance.md` for the protected release workflow. Identify the merged pull request and run `safelane release --pr <number>`. Do not author evidence claims or search fixtures. Follow the returned `safelane execute <release-id>` action when eligible, and use `safelane proof <release-id>` to retrieve the outcome. Do not call Kubernetes or Argo directly for the protected application.\n" +
 	endMarker + "\n"
 
 const fallbackDoc = "# SafeLane Codex fallback\n\n" +
@@ -44,7 +49,18 @@ func Apply(root string) ([]Change, error) {
 	if err != nil {
 		return nil, err
 	}
-	return append([]Change{guidance}, agents...), nil
+	proj, err := writeProject(root)
+	if err != nil {
+		return nil, err
+	}
+	tmpl, err := writeTemplate(root)
+	if err != nil {
+		return nil, err
+	}
+	out := []Change{guidance}
+	out = append(out, agents...)
+	out = append(out, proj, tmpl)
+	return out, nil
 }
 
 // Change is one line of the init/sync report.
@@ -161,6 +177,68 @@ func classifyMarkers(body []byte) (markerClass, string) {
 		return markersMalformed, "nested"
 	}
 	return markersMalformed, "duplicated"
+}
+
+func writeProject(root string) (Change, error) {
+	rel := project.RelPath
+	path := filepath.Join(root, filepath.FromSlash(rel))
+	if _, err := os.Stat(path); err == nil {
+		return Change{Action: "unchanged", Path: rel, Reason: "operator-owned; left in place"}, nil
+	} else if !os.IsNotExist(err) {
+		return Change{}, err
+	}
+
+	app := project.SanitizeApplication(root)
+	repo, _ := project.DetectGitHubRepo(root)
+	branch := project.DetectDefaultBranch(root)
+	image := ""
+	if repo != "" {
+		image = "ghcr.io/" + strings.ToLower(repo)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return Change{}, err
+	}
+	if err := os.WriteFile(path, project.DefaultYAML(app, repo, branch, image), 0o644); err != nil {
+		return Change{}, err
+	}
+	return Change{Action: "created", Path: rel}, nil
+}
+
+func writeTemplate(root string) (Change, error) {
+	const rel = ".safelane/release-template"
+	dest := filepath.Join(root, filepath.FromSlash(rel))
+	if entries, err := os.ReadDir(dest); err == nil && len(entries) > 0 {
+		return Change{Action: "unchanged", Path: rel, Reason: "operator-owned; left in place"}, nil
+	} else if err != nil && !os.IsNotExist(err) {
+		return Change{}, err
+	}
+
+	const embedRoot = "testdata/release-template"
+	err := fs.WalkDir(render.FixtureTemplateFS, embedRoot, func(name string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		relPath := strings.TrimPrefix(name, embedRoot+"/")
+		if relPath == name {
+			return fmt.Errorf("embed path %q is not under %s", name, embedRoot)
+		}
+		raw, err := fs.ReadFile(render.FixtureTemplateFS, name)
+		if err != nil {
+			return err
+		}
+		out := filepath.Join(dest, relPath)
+		if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
+			return err
+		}
+		return os.WriteFile(out, raw, 0o644)
+	})
+	if err != nil {
+		return Change{}, err
+	}
+	return Change{Action: "created", Path: rel}, nil
 }
 
 func writeIfChanged(path string, existing, next []byte, reportPath string) ([]Change, error) {

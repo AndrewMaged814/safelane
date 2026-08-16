@@ -3,25 +3,29 @@
 The protected release path has one caller-facing entry point:
 
 ```text
-safelane release --file release-evidence.json
+safelane release --pr 2
+```
+
+CI and tests may use the same intent as a file:
+
+```text
+safelane release --file release-request.json
 ```
 
 The caller may be Codex, Claude Code, CI, an MCP adapter, another agent, or a human. Caller identity does not change SafeLane's release logic, and callers do not receive direct Kubernetes or Argo credentials for the protected application.
 
-## Evidence request
+## Release Request
 
-`release-evidence.json` carries release identity and evidence only:
+`release-request.json` carries identifiers and intent only:
 
-- application and environment;
-- target cluster and namespace;
-- merged source revision;
-- pull request and review evidence;
-- passing CI evidence; and
-- immutable OCI image digest.
+- repository (`owner/name`, optional when git origin or project.yml supplies it);
+- pull request number;
+- environment (optional when project.yml has a default);
+- optional immutable digest pin.
 
-It contains no Kubernetes objects, no YAML or JSON patches, no template selection, and no policy selection. Those fields are rejected rather than ignored.
+It contains no evidence claims, Kubernetes objects, YAML or JSON patches, template selection, or policy selection. Those fields are rejected rather than ignored.
 
-The agent may generate the file from repository and CI outputs. SafeLane verifies critical GitHub and registry evidence rather than trusting caller-declared claims.
+SafeLane loads operator configuration from `.safelane/project.yml`, then collects and verifies the merge commit, required check, review (when policy requires it), and GHCR digest.
 
 ## Trusted bundle
 
@@ -62,12 +66,3 @@ The complete record is available as:
 safelane proof <release-id> --details
 safelane proof <release-id> --json
 ```
-
-It is organized into four sections:
-
-1. **Artifact proof:** all CI checks, source/merge identity, image digest, Release Template identity, and complete hashes of the SafeLane-rendered bundle. Provenance references are a planned addition.
-2. **Decision proof:** eligibility, policy version, reason, and the static envelope when eligible. Not a risk assessment.
-3. **Execution proof:** timestamps, Argo stages, AnalysisRun details, runtime outcomes, and final promotion/abort.
-4. **Boundary proof:** caller identity, requested/allowed/configured/observed traffic, direct-bypass denial and metadata, and proof that protected state was unchanged.
-
-Traffic fields are always distinct. If no explicit traffic router is used, observed traffic is labeled as a replica-based approximation rather than an exact percentage.

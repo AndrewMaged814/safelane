@@ -12,7 +12,7 @@ import (
 
 func validFixture(t *testing.T) map[string]any {
 	t.Helper()
-	raw, err := os.ReadFile(filepath.Join("..", "..", "testdata", "release-evidence.json"))
+	raw, err := os.ReadFile(filepath.Join("..", "..", "testdata", "release-request.json"))
 	if err != nil {
 		t.Fatalf("could not read fixture: %v", err)
 	}
@@ -34,32 +34,33 @@ func marshal(t *testing.T, obj map[string]any) []byte {
 
 func TestParse_ValidFixture_Succeeds(t *testing.T) {
 	obj := validFixture(t)
-	req, err := Parse(marshal(t, obj))
+	intent, err := Parse(marshal(t, obj))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if req.Target.Application != "podinfo" {
-		t.Fatalf("unexpected request: %+v", req)
+	if intent.PullRequest != 1 || intent.Repository != "AndrewMaged814/podinfo" {
+		t.Fatalf("unexpected intent: %+v", intent)
 	}
 }
 
-// Regression test for the "kind" collision: release.ForbiddenRequestKeys contains
-// "kind", which collides with the legitimate nested field caller.kind. The fixture
-// itself carries "caller": {"kind": "agent", ...}, so this is really just asserting
-// TestParse_ValidFixture_Succeeds does not regress -- but it is worth pinning down
-// explicitly, since a naive any-depth forbidden-key scan would break every valid
-// request.
-func TestParse_CallerKindField_IsNotForbidden(t *testing.T) {
+func TestParse_EmptyObject_IsInvalidRequest(t *testing.T) {
+	_, err := Parse([]byte(`{}`))
+	if err == nil {
+		t.Fatal("empty object must be rejected")
+	}
+	if release.Categorize(err) != release.CategoryInvalidRequest &&
+		release.Categorize(err) != release.CategoryMalformedRequest {
+		t.Fatalf("want invalid or malformed request for {}, got %v (%v)", release.Categorize(err), err)
+	}
+}
+
+func TestParse_EvidenceFields_Forbidden(t *testing.T) {
 	obj := validFixture(t)
-	caller, ok := obj["caller"].(map[string]any)
-	if !ok {
-		t.Fatalf("fixture has no caller object to assert against")
-	}
-	if caller["kind"] != "agent" {
-		t.Fatalf("expected the fixture to carry caller.kind, got %v", caller["kind"])
-	}
-	if _, err := Parse(marshal(t, obj)); err != nil {
-		t.Fatalf("caller.kind must not be rejected as a forbidden field: %v", err)
+	obj["review"] = map[string]any{"approver": "ahmed-placeholder"}
+
+	_, err := Parse(marshal(t, obj))
+	if release.Categorize(err) != release.CategoryForbiddenField {
+		t.Fatalf("want CategoryForbiddenField, got %v (%v)", release.Categorize(err), err)
 	}
 }
 
@@ -123,24 +124,6 @@ func TestParse_ForbiddenFieldCaseInsensitive(t *testing.T) {
 	}
 }
 
-func TestParse_NestedForbiddenField_RejectedAsMalformedNotSilentlyDropped(t *testing.T) {
-	obj := validFixture(t)
-	artifact := obj["artifact"].(map[string]any)
-	artifact["patch"] = map[string]any{"op": "replace"}
-	obj["artifact"] = artifact
-
-	req, err := Parse(marshal(t, obj))
-	if err == nil {
-		t.Fatalf("a patch nested under artifact must be rejected, not silently dropped, got request: %+v", req)
-	}
-	// It is caught by strict decode (an unknown field inside ClaimedArtifact), not by
-	// the top-level forbidden-field screen, so it surfaces as malformed rather than
-	// forbidden -- rejected either way.
-	if release.Categorize(err) != release.CategoryMalformedRequest {
-		t.Fatalf("want CategoryMalformedRequest for a field nested inside a known sub-object, got %v (%v)", release.Categorize(err), err)
-	}
-}
-
 func TestParse_InvalidJSON_Rejected(t *testing.T) {
 	_, err := Parse([]byte("{not json"))
 	if release.Categorize(err) != release.CategoryMalformedRequest {
@@ -175,14 +158,12 @@ func TestParse_StructurallyInvalidRequest_RunsValidate(t *testing.T) {
 	}
 }
 
-func TestParse_MissingTargetComponent_RejectedByValidate(t *testing.T) {
+func TestParse_MissingPullRequest_RejectedByValidate(t *testing.T) {
 	obj := validFixture(t)
-	target := obj["target"].(map[string]any)
-	delete(target, "namespace")
-	obj["target"] = target
+	delete(obj, "pull_request")
 
 	_, err := Parse(marshal(t, obj))
 	if release.Categorize(err) != release.CategoryInvalidRequest {
-		t.Fatalf("want CategoryInvalidRequest for a missing target component, got %v (%v)", release.Categorize(err), err)
+		t.Fatalf("want CategoryInvalidRequest for a missing pull request, got %v (%v)", release.Categorize(err), err)
 	}
 }

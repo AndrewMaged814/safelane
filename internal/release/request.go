@@ -212,6 +212,11 @@ func ForbiddenRequestKeys() []string {
 		// Execution shaping. A caller does not choose its own rollout envelope.
 		"stages", "trafficWeight", "traffic_weight", "steps", "envelope",
 		"autoPromote", "auto_promote",
+		// Evidence and operator facts. The caller submits intent only;
+		// SafeLane collects these itself.
+		"target", "source", "review", "ci", "artifact", "caller", "metadata",
+		"approver", "merge_commit_sha", "check_name", "run_id", "cluster",
+		"namespace",
 	}
 }
 
@@ -285,6 +290,43 @@ func (r ReleaseRequest) Validate() error {
 			"Supply a caller-generated request id for correlation. It is not the release id; SafeLane mints that."))
 	}
 
+	return errs.OrNil()
+}
+
+// ValidateIdentity checks the fields SafeLane records on every Release:
+// schema, target, repository, pull request, caller, and request id.
+// Merge SHA, approver, check name, and image are evidence, not identity.
+func (r ReleaseRequest) ValidateIdentity() error {
+	var errs Errors
+
+	if r.SchemaVersion != RequestSchemaVersion {
+		errs = append(errs, Malformed("unsupported_schema_version", "schema_version",
+			fmt.Sprintf("schema version %q is not supported", r.SchemaVersion),
+			fmt.Sprintf("Set schema_version to %q.", RequestSchemaVersion)))
+	}
+	if err := r.Target.Validate(); err != nil {
+		errs = append(errs, flatten(err)...)
+	}
+	if r.Source.Repository != "" {
+		if _, err := ParseRepositoryRef(r.Source.Repository); err != nil {
+			errs = append(errs, flatten(err)...)
+		}
+	}
+	if r.Review.PullRequestNumber <= 0 {
+		errs = append(errs, Invalid("missing_pull_request", "review.pull_request_number",
+			"no pull request number was supplied",
+			"Supply the number of the merged pull request."))
+	}
+	if r.Caller.Identity == "" {
+		errs = append(errs, Invalid("missing_caller_identity", "caller.identity",
+			"no caller identity was supplied",
+			"Identify the caller. Caller identity does not change release logic, but it is recorded in Release Proof."))
+	}
+	if r.Metadata.RequestID == "" {
+		errs = append(errs, Invalid("missing_request_id", "metadata.request_id",
+			"no request id was supplied",
+			"Supply a caller-generated request id for correlation. It is not the release id; SafeLane mints that."))
+	}
 	return errs.OrNil()
 }
 

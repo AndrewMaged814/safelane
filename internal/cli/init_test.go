@@ -27,6 +27,12 @@ func TestInit_CodexAdapter_EmptyDir_CreatesAgentGuidance(t *testing.T) {
 	if !strings.Contains(stdout.String(), "created .safelane/agent-guidance.md") {
 		t.Fatalf("want created report for agent-guidance.md, got %q", stdout.String())
 	}
+	if _, err := os.Stat(filepath.Join(root, ".safelane", "project.yml")); err != nil {
+		t.Fatalf("want created project.yml, got %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".safelane", "release-template")); err != nil {
+		t.Fatalf("want created release-template, got %v", err)
+	}
 }
 
 func TestInit_MissingAgentsMd_CreatesManagedSection(t *testing.T) {
@@ -277,7 +283,7 @@ func TestInit_GuidanceTeachesReleaseExecuteProof(t *testing.T) {
 	want := []string{
 		"does not authorize a release",
 		"Eligibility does not mean the artifact is safe or deployed",
-		"safelane release --file release-evidence.json",
+		"safelane release --pr <number>",
 		"safelane execute <release-id>",
 		"Proof may remain pending",
 		"Pending proof is not a completed deployment",

@@ -27,7 +27,7 @@ SafeLane must never overwrite an entire existing `AGENTS.md` or `CLAUDE.md`. It 
 
 ```markdown
 <!-- BEGIN SAFELANE MANAGED: guidance -->
-See `.safelane/agent-guidance.md` for the release workflow. Use `safelane release --file ...` for protected releases. Do not call Kubernetes or Argo directly for the protected application.
+See `.safelane/agent-guidance.md` for the release workflow. Identify the merged pull request and run `safelane release --pr <number>`. Do not author evidence claims. Do not call Kubernetes or Argo directly for the protected application.
 <!-- END SAFELANE MANAGED: guidance -->
 ```
 
@@ -38,8 +38,8 @@ If the file is missing, malformed, duplicated, or otherwise ambiguous, leave it 
 Guidance teaches agents to:
 
 - recognize when a change is ready for release;
-- gather release identity and evidence only — merge commit, review, CI check for that commit, and immutable digest — and never author Kubernetes configuration, which SafeLane renders from the operator-owned Release Template;
-- call `safelane release --file release-evidence.json`;
+- identify the merged pull request and never author evidence claims or Kubernetes configuration, which SafeLane renders from the operator-owned Release Template;
+- call `safelane release --pr <number>`;
 - interpret typed results and actionable rejections; and
 - avoid direct Kubernetes or Argo mutations in the protected release path.
 

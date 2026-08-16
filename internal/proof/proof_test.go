@@ -3,13 +3,13 @@ package proof
 import (
 	"context"
 	"encoding/json"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/AndrewMaged814/safelane/internal/orchestrate"
+	"github.com/AndrewMaged814/safelane/internal/project"
 	"github.com/AndrewMaged814/safelane/internal/release"
 	"github.com/AndrewMaged814/safelane/internal/render"
 	"github.com/AndrewMaged814/safelane/internal/store"
@@ -46,6 +46,13 @@ func (f fakeResolver) ResolveDigest(ctx context.Context, ref release.ImageRefere
 	return f.digest, nil
 }
 
+func (f fakeResolver) ResolveTag(ctx context.Context, repository, tag string) (string, error) {
+	if f.err != nil {
+		return "", f.err
+	}
+	return f.digest, nil
+}
+
 func verifiedFacts() github.Facts {
 	return github.Facts{
 		Repository:     "AndrewMaged814/podinfo",
@@ -69,13 +76,29 @@ func verifiedFacts() github.Facts {
 	}
 }
 
-func loadFixtureRaw(t *testing.T) []byte {
-	t.Helper()
-	raw, err := os.ReadFile(filepath.Join("..", "..", "testdata", "release-evidence.json"))
-	if err != nil {
-		t.Fatalf("could not read fixture: %v", err)
+func fixtureIntent() release.Intent {
+	return release.Intent{
+		SchemaVersion: release.RequestSchemaVersion,
+		Repository:    "AndrewMaged814/podinfo",
+		PullRequest:   1,
+		Environment:   "production",
 	}
-	return raw
+}
+
+func fixtureProject() project.Config {
+	return project.Config{
+		Version:     1,
+		Application: "podinfo",
+		Repository:  project.Repository{Name: "AndrewMaged814/podinfo", DefaultBranch: "main"},
+		Release: project.Release{
+			Environment:     "production",
+			ImageRepository: "ghcr.io/andrewmaged814/podinfo",
+			ImageTag:        "sha-{{merge_sha_short8}}",
+			RequiredCheck:   "publish / build-and-push",
+			TemplatePath:    ".safelane/release-template",
+		},
+		Target: project.Target{Cluster: "safelane-demo", Namespace: "podinfo", Rollout: "podinfo"},
+	}
 }
 
 func loadTemplate(t *testing.T) render.Template {
@@ -100,13 +123,14 @@ func persist(t *testing.T, mutate func(*orchestrate.Deps)) *release.Release {
 		GHCR:     fakeResolver{digest: fixtureDigest},
 		Template: loadTemplate(t),
 		Store:    fs,
+		Project:  fixtureProject(),
 		Now:      func() time.Time { return time.Date(2026, 8, 15, 12, 0, 0, 0, time.UTC) },
 		NewID:    func() (release.ReleaseID, error) { return id, nil },
 	}
 	if mutate != nil {
 		mutate(&deps)
 	}
-	if _, err := orchestrate.SubmitRelease(context.Background(), loadFixtureRaw(t), deps); err != nil {
+	if _, err := orchestrate.SubmitRelease(context.Background(), fixtureIntent(), deps); err != nil {
 		t.Fatalf("SubmitRelease: %v", err)
 	}
 	loaded, err := fs.Load(id)
@@ -254,7 +278,7 @@ func TestFrom_EligibleRelease_JSONArtifactFields(t *testing.T) {
 	}
 
 	caller := object(t, obj, "caller")
-	if caller["identity"] != "codex-cli" || caller["kind"] != "agent" {
+	if caller["identity"] != "safelane-cli" || caller["kind"] != "agent" {
 		t.Errorf("caller = %v", caller)
 	}
 }
@@ -331,7 +355,7 @@ func TestFrom_EligibleRelease_ConciseMatchesJSON(t *testing.T) {
 		"release_id: " + fixtureReleaseID,
 		"created_at: 2026-08-15T12:00:00Z",
 		"application: podinfo  environment: production",
-		"caller: codex-cli (agent)",
+		"caller: safelane-cli (agent)",
 		"#1",
 		"ahmed-placeholder",
 		fixtureMergeSHA,
