@@ -4,13 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/AndrewMaged814/safelane/internal/orchestrate"
+	"github.com/AndrewMaged814/safelane/internal/project"
 	"github.com/AndrewMaged814/safelane/internal/release"
 	"github.com/AndrewMaged814/safelane/internal/render"
 	"github.com/AndrewMaged814/safelane/internal/store"
@@ -40,6 +40,10 @@ type proofFakeResolver struct {
 }
 
 func (f proofFakeResolver) ResolveDigest(ctx context.Context, ref release.ImageReference) (string, error) {
+	return f.digest, nil
+}
+
+func (f proofFakeResolver) ResolveTag(ctx context.Context, repository, tag string) (string, error) {
 	return f.digest, nil
 }
 
@@ -73,19 +77,34 @@ func persistProofRelease(t *testing.T) string {
 	if err != nil {
 		t.Fatalf("ParseReleaseID: %v", err)
 	}
-	raw, err := os.ReadFile(filepath.Join("..", "..", "testdata", "release-evidence.json"))
-	if err != nil {
-		t.Fatalf("read fixture: %v", err)
-	}
 	deps := orchestrate.Deps{
 		GitHub:   proofFakeFetcher{facts: proofVerifiedFacts()},
 		GHCR:     proofFakeResolver{digest: proofFixtureDigest},
 		Template: tmpl,
 		Store:    &store.FileStore{Dir: dir},
-		Now:      func() time.Time { return time.Date(2026, 8, 15, 12, 0, 0, 0, time.UTC) },
-		NewID:    func() (release.ReleaseID, error) { return id, nil },
+		Project: project.Config{
+			Version:     1,
+			Application: "podinfo",
+			Repository:  project.Repository{Name: "AndrewMaged814/podinfo", DefaultBranch: "main"},
+			Release: project.Release{
+				Environment:     "production",
+				ImageRepository: "ghcr.io/andrewmaged814/podinfo",
+				ImageTag:        "sha-{{merge_sha_short8}}",
+				RequiredCheck:   "publish / build-and-push",
+				TemplatePath:    ".safelane/release-template",
+			},
+			Target: project.Target{Cluster: "safelane-demo", Namespace: "podinfo", Rollout: "podinfo"},
+		},
+		Now:   func() time.Time { return time.Date(2026, 8, 15, 12, 0, 0, 0, time.UTC) },
+		NewID: func() (release.ReleaseID, error) { return id, nil },
 	}
-	if _, err := orchestrate.SubmitRelease(context.Background(), raw, deps); err != nil {
+	intent := release.Intent{
+		SchemaVersion: release.RequestSchemaVersion,
+		Repository:    "AndrewMaged814/podinfo",
+		PullRequest:   1,
+		Environment:   "production",
+	}
+	if _, err := orchestrate.SubmitRelease(context.Background(), intent, deps); err != nil {
 		t.Fatalf("SubmitRelease: %v", err)
 	}
 	return dir

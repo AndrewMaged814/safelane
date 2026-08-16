@@ -4,13 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/AndrewMaged814/safelane/internal/policy"
+	"github.com/AndrewMaged814/safelane/internal/project"
 	"github.com/AndrewMaged814/safelane/internal/release"
 	"github.com/AndrewMaged814/safelane/internal/render"
 	"github.com/AndrewMaged814/safelane/internal/verify/github"
@@ -42,6 +42,13 @@ func (f fakeResolver) ResolveDigest(ctx context.Context, ref release.ImageRefere
 	return f.digest, nil
 }
 
+func (f fakeResolver) ResolveTag(ctx context.Context, repository, tag string) (string, error) {
+	if f.err != nil {
+		return "", f.err
+	}
+	return f.digest, nil
+}
+
 type fakeStore struct {
 	saved []*release.Release
 	err   error
@@ -60,31 +67,29 @@ func (s *fakeStore) Save(r *release.Release) error {
 const fixtureDigest = "sha256:3fbc1d9a7e42c8056d1f9b3e7a5c204d8e6b1f39a7c50d28e4b6f19a3c7d50e8"
 const fixtureMergeSHA = "4f0c1b9e7ac2d5386b1d9f4a5c8e2b7d3a6f0e91"
 
-func loadFixtureRaw(t *testing.T) []byte {
-	t.Helper()
-	raw, err := os.ReadFile(filepath.Join("..", "..", "testdata", "release-evidence.json"))
-	if err != nil {
-		t.Fatalf("could not read fixture: %v", err)
+func fixtureIntent() release.Intent {
+	return release.Intent{
+		SchemaVersion: release.RequestSchemaVersion,
+		Repository:    "AndrewMaged814/podinfo",
+		PullRequest:   1,
+		Environment:   "production",
 	}
-	return raw
 }
 
-func loadFixtureObject(t *testing.T) map[string]any {
-	t.Helper()
-	var obj map[string]any
-	if err := json.Unmarshal(loadFixtureRaw(t), &obj); err != nil {
-		t.Fatalf("fixture is not valid JSON: %v", err)
+func fixtureProject() project.Config {
+	return project.Config{
+		Version:     1,
+		Application: "podinfo",
+		Repository:  project.Repository{Name: "AndrewMaged814/podinfo", DefaultBranch: "main"},
+		Release: project.Release{
+			Environment:     "production",
+			ImageRepository: "ghcr.io/andrewmaged814/podinfo",
+			ImageTag:        "sha-{{merge_sha_short8}}",
+			RequiredCheck:   "publish / build-and-push",
+			TemplatePath:    ".safelane/release-template",
+		},
+		Target: project.Target{Cluster: "safelane-demo", Namespace: "podinfo", Rollout: "podinfo"},
 	}
-	return obj
-}
-
-func marshal(t *testing.T, obj map[string]any) []byte {
-	t.Helper()
-	raw, err := json.Marshal(obj)
-	if err != nil {
-		t.Fatalf("could not marshal test object: %v", err)
-	}
-	return raw
 }
 
 func loadTemplate(t *testing.T) render.Template {
@@ -96,7 +101,7 @@ func loadTemplate(t *testing.T) render.Template {
 	return tmpl
 }
 
-// verifiedFacts matches every claim in testdata/release-evidence.json, so a
+// verifiedFacts matches the fixture project and intent, so a
 // fixture request submitted against these fakes verifies end to end.
 func verifiedFacts() github.Facts {
 	return github.Facts{
@@ -138,6 +143,7 @@ func baseDeps(t *testing.T) (Deps, *fakeStore) {
 		GHCR:     fakeResolver{digest: fixtureDigest},
 		Template: loadTemplate(t),
 		Store:    store,
+		Project:  fixtureProject(),
 		Now:      func() time.Time { return time.Date(2026, 8, 15, 12, 0, 0, 0, time.UTC) },
 		NewID:    fixedReleaseID(t),
 	}
@@ -149,7 +155,7 @@ func baseDeps(t *testing.T) (Deps, *fakeStore) {
 func TestSubmitRelease_ValidFixture_ProducesVerifiedPersistedRelease(t *testing.T) {
 	deps, store := baseDeps(t)
 
-	r, err := SubmitRelease(context.Background(), loadFixtureRaw(t), deps)
+	r, err := SubmitRelease(context.Background(), fixtureIntent(), deps)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -210,7 +216,7 @@ func TestSubmitRelease_ValidFixture_ProducesVerifiedPersistedRelease(t *testing.
 
 func TestSubmitRelease_RoundTripsThroughJSON(t *testing.T) {
 	deps, store := baseDeps(t)
-	if _, err := SubmitRelease(context.Background(), loadFixtureRaw(t), deps); err != nil {
+	if _, err := SubmitRelease(context.Background(), fixtureIntent(), deps); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	data, err := json.Marshal(store.saved[0])
@@ -228,31 +234,18 @@ func TestSubmitRelease_RoundTripsThroughJSON(t *testing.T) {
 
 // --- intake rejections never reach persistence ---
 
-func TestSubmitRelease_MalformedRequest_NoReleaseCreated(t *testing.T) {
+func TestSubmitRelease_EmptyIntent_NoReleaseCreated(t *testing.T) {
 	deps, store := baseDeps(t)
-	_, err := SubmitRelease(context.Background(), []byte("{not json"), deps)
+	_, err := SubmitRelease(context.Background(), release.Intent{}, deps)
 	if err == nil {
-		t.Fatal("want an error for malformed JSON")
+		t.Fatal("want an error for an empty intent")
 	}
-	if release.Categorize(err) != release.CategoryMalformedRequest {
-		t.Fatalf("want CategoryMalformedRequest, got %v", release.Categorize(err))
-	}
-	if len(store.saved) != 0 {
-		t.Fatalf("want nothing persisted for a malformed request, got %d", len(store.saved))
-	}
-}
-
-func TestSubmitRelease_ForbiddenField_NoReleaseCreated(t *testing.T) {
-	deps, store := baseDeps(t)
-	obj := loadFixtureObject(t)
-	obj["manifests"] = []any{"whatever"}
-
-	_, err := SubmitRelease(context.Background(), marshal(t, obj), deps)
-	if release.Categorize(err) != release.CategoryForbiddenField {
-		t.Fatalf("want CategoryForbiddenField, got %v (%v)", release.Categorize(err), err)
+	if release.Categorize(err) != release.CategoryInvalidRequest &&
+		release.Categorize(err) != release.CategoryMalformedRequest {
+		t.Fatalf("want invalid or malformed request, got %v (%v)", release.Categorize(err), err)
 	}
 	if len(store.saved) != 0 {
-		t.Fatalf("want nothing persisted for a forbidden field, got %d", len(store.saved))
+		t.Fatalf("want nothing persisted for an empty intent, got %d", len(store.saved))
 	}
 }
 
@@ -264,7 +257,7 @@ func TestSubmitRelease_PullRequestNotMerged_PersistsFailedEvidenceWithoutBundle(
 	facts.Merged = false
 	deps.GitHub = fakeFetcher{facts: facts}
 
-	r, err := SubmitRelease(context.Background(), loadFixtureRaw(t), deps)
+	r, err := SubmitRelease(context.Background(), fixtureIntent(), deps)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -290,7 +283,7 @@ func TestSubmitRelease_RequiredCheckFailed_PersistsFailedEvidence(t *testing.T) 
 	}
 	deps.GitHub = fakeFetcher{facts: facts}
 
-	r, err := SubmitRelease(context.Background(), loadFixtureRaw(t), deps)
+	r, err := SubmitRelease(context.Background(), fixtureIntent(), deps)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -322,7 +315,7 @@ func TestSubmitRelease_ApproverIsAuthor_PersistsFailedEvidence(t *testing.T) {
 	facts.Approvals = []github.Approval{{Reviewer: facts.AuthorLogin, State: "APPROVED"}}
 	deps.GitHub = fakeFetcher{facts: facts}
 
-	r, err := SubmitRelease(context.Background(), loadFixtureRaw(t), deps)
+	r, err := SubmitRelease(context.Background(), fixtureIntent(), deps)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -339,7 +332,7 @@ func TestSubmitRelease_NoApproval_PersistsMissingEvidence(t *testing.T) {
 	facts.Approvals = nil
 	deps.GitHub = fakeFetcher{facts: facts}
 
-	r, err := SubmitRelease(context.Background(), loadFixtureRaw(t), deps)
+	r, err := SubmitRelease(context.Background(), fixtureIntent(), deps)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -354,7 +347,7 @@ func TestSubmitRelease_ApprovalNotRequired_EligibleWithoutApproval(t *testing.T)
 	facts.Approvals = nil
 	deps.GitHub = fakeFetcher{facts: facts}
 
-	r, err := SubmitRelease(context.Background(), loadFixtureRaw(t), deps)
+	r, err := SubmitRelease(context.Background(), fixtureIntent(), deps)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -376,7 +369,7 @@ func TestSubmitRelease_GitHubUnreachable_PersistsUnknownEvidence_NeverPassing(t 
 	deps, store := baseDeps(t)
 	deps.GitHub = fakeFetcher{err: fmt.Errorf("connection reset")}
 
-	r, err := SubmitRelease(context.Background(), loadFixtureRaw(t), deps)
+	r, err := SubmitRelease(context.Background(), fixtureIntent(), deps)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -406,8 +399,10 @@ func TestSubmitRelease_GitHubUnreachable_PersistsUnknownEvidence_NeverPassing(t 
 func TestSubmitRelease_DigestMismatch_PersistsFailedEvidence(t *testing.T) {
 	deps, _ := baseDeps(t)
 	deps.GHCR = fakeResolver{digest: "sha256:" + strings.Repeat("9", 64)}
+	intent := fixtureIntent()
+	intent.Image = "ghcr.io/andrewmaged814/podinfo@" + fixtureDigest
 
-	r, err := SubmitRelease(context.Background(), loadFixtureRaw(t), deps)
+	r, err := SubmitRelease(context.Background(), intent, deps)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -420,7 +415,7 @@ func TestSubmitRelease_RegistryUnreachable_PersistsUnknownEvidence(t *testing.T)
 	deps, _ := baseDeps(t)
 	deps.GHCR = fakeResolver{err: fmt.Errorf("registry timeout")}
 
-	r, err := SubmitRelease(context.Background(), loadFixtureRaw(t), deps)
+	r, err := SubmitRelease(context.Background(), fixtureIntent(), deps)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -436,7 +431,7 @@ func TestSubmitRelease_BothChecksFailIndependently_UnknownOutranksFailed(t *test
 	deps.GitHub = fakeFetcher{facts: facts}
 	deps.GHCR = fakeResolver{err: fmt.Errorf("registry timeout")} // ghcr: unknown
 
-	r, err := SubmitRelease(context.Background(), loadFixtureRaw(t), deps)
+	r, err := SubmitRelease(context.Background(), fixtureIntent(), deps)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -449,7 +444,7 @@ func TestSubmitRelease_StoreFailure_ReturnsError(t *testing.T) {
 	deps, store := baseDeps(t)
 	store.err = fmt.Errorf("disk full")
 
-	_, err := SubmitRelease(context.Background(), loadFixtureRaw(t), deps)
+	_, err := SubmitRelease(context.Background(), fixtureIntent(), deps)
 	if err == nil {
 		t.Fatal("want an error when the store fails")
 	}

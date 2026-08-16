@@ -12,8 +12,8 @@ import (
 	"github.com/AndrewMaged814/safelane/internal/release"
 )
 
-func TestReleaseCommand_MissingFile_ExitsUsage(t *testing.T) {
-	cmd := ReleaseCommand("template-dir-unused", "store-dir-unused")
+func TestReleaseCommand_MissingSelector_ExitsUsage(t *testing.T) {
+	cmd := ReleaseCommand(t.TempDir(), "store-dir-unused")
 	var stdout, stderr bytes.Buffer
 
 	code := cmd.Run(context.Background(), nil, &stdout, &stderr)
@@ -21,13 +21,13 @@ func TestReleaseCommand_MissingFile_ExitsUsage(t *testing.T) {
 	if code != ExitUsage {
 		t.Fatalf("want ExitUsage, got %d (stderr: %s)", code, stderr.String())
 	}
-	if !strings.Contains(stderr.String(), "--file is required") {
-		t.Fatalf("want a message about the required --file flag, got %q", stderr.String())
+	if !strings.Contains(stderr.String(), "--pr or --file is required") {
+		t.Fatalf("want a message about --pr or --file, got %q", stderr.String())
 	}
 }
 
 func TestReleaseCommand_UnreadableFile_ExitsUsage(t *testing.T) {
-	cmd := ReleaseCommand("template-dir-unused", "store-dir-unused")
+	cmd := ReleaseCommand(t.TempDir(), "store-dir-unused")
 	var stdout, stderr bytes.Buffer
 
 	code := cmd.Run(context.Background(), []string{"--file", filepath.Join(t.TempDir(), "does-not-exist.json")}, &stdout, &stderr)
@@ -40,14 +40,14 @@ func TestReleaseCommand_UnreadableFile_ExitsUsage(t *testing.T) {
 	}
 }
 
-func TestReleaseCommand_BadTemplateDir_ExitsFail(t *testing.T) {
+func TestReleaseCommand_EmptyJSON_IsInvalidRequestNotTemplateError(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "request.json")
 	if err := os.WriteFile(file, []byte(`{}`), 0o644); err != nil {
 		t.Fatalf("test setup: %v", err)
 	}
 
-	cmd := ReleaseCommand(filepath.Join(dir, "no-such-template-dir"), filepath.Join(dir, "store"))
+	cmd := ReleaseCommand(dir, filepath.Join(dir, "store"))
 	var stdout, stderr bytes.Buffer
 
 	code := cmd.Run(context.Background(), []string{"--file", file}, &stdout, &stderr)
@@ -55,13 +55,25 @@ func TestReleaseCommand_BadTemplateDir_ExitsFail(t *testing.T) {
 	if code != ExitFail {
 		t.Fatalf("want ExitFail, got %d (stderr: %s)", code, stderr.String())
 	}
-	if !strings.Contains(stderr.String(), "could not load the Release Template") {
-		t.Fatalf("want a template-load error message, got %q", stderr.String())
+	if strings.Contains(stderr.String(), "could not load the Release Template") {
+		t.Fatalf("empty request must fail before template load, got %q", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "pull_request") && !strings.Contains(stderr.String(), "invalid") {
+		t.Fatalf("want an invalid-request mentioning pull_request, got %q", stderr.String())
+	}
+}
+
+func TestReleaseCommand_BothPRAndFile_ExitsUsage(t *testing.T) {
+	cmd := ReleaseCommand(t.TempDir(), "store")
+	var stdout, stderr bytes.Buffer
+	code := cmd.Run(context.Background(), []string{"--pr", "2", "--file", "x.json"}, &stdout, &stderr)
+	if code != ExitUsage {
+		t.Fatalf("want ExitUsage, got %d (stderr: %s)", code, stderr.String())
 	}
 }
 
 func TestReleaseCommand_UnknownFlag_ExitsUsage(t *testing.T) {
-	cmd := ReleaseCommand("template-dir-unused", "store-dir-unused")
+	cmd := ReleaseCommand(t.TempDir(), "store-dir-unused")
 	var stdout, stderr bytes.Buffer
 
 	code := cmd.Run(context.Background(), []string{"--not-a-real-flag"}, &stdout, &stderr)

@@ -9,8 +9,8 @@ The agent identity that initiates and adapts a release. It is treated as fallibl
 _Avoid_: Cluster administrator, trusted release authority
 
 **Release Request**:
-A submission to SafeLane containing one reviewed source revision, one immutable deployable artifact, and the supporting evidence needed to consider it for production. It carries release identity and evidence only; it contains no Kubernetes objects, patches, template selection, or policy selection, so a caller cannot shape the configuration SafeLane will render and apply.
-_Avoid_: Deployment request, rollout manifest
+A caller's submission of one change identity and one environment selector: repository, pull request, and optionally environment. It does not carry evidence, cluster or namespace, reviewers, CI results, digests, or bookkeeping. SafeLane collects and verifies those itself.
+_Avoid_: Evidence dossier, release-evidence.json, deployment request
 
 **Reviewed Change**:
 A change merged into the demo fork after approval by the other hackathon teammate and a passing required CI check. The approval and CI result are evidence inputs, not SafeLane-generated claims.

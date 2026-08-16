@@ -21,19 +21,15 @@ func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
 }
 
-// defaultTemplateDir points at the fixture Release Template until Ahmed's
-// operator-owned template exists (see internal/render/testdata's README);
-// defaultStoreDir is where Release records land by default. Both are
-// overridable per invocation with --template-dir/--store-dir.
-const (
-	defaultTemplateDir = "internal/render/testdata/release-template"
-	defaultStoreDir    = ".safelane/releases"
-)
+// defaultStoreDir is where Release records land by default. The Release
+// Template path comes from .safelane/project.yml (overridable with
+// --template-dir).
+const defaultStoreDir = ".safelane/releases"
 
 func run(args []string, stdout, stderr io.Writer) int {
 	commands := []cli.Command{
 		versionCommand(),
-		cli.ReleaseCommand(defaultTemplateDir, defaultStoreDir),
+		cli.ReleaseCommand(".", defaultStoreDir),
 		cli.ProofCommand(defaultStoreDir),
 		cli.InitCommand("."),
 		cli.IntegrationsCommand("."),

@@ -79,7 +79,7 @@ func NewRelease(p ReleaseParams) (*Release, error) {
 	if err := p.ID.Validate(); err != nil {
 		errs = append(errs, flatten(err)...)
 	}
-	if err := p.Request.Validate(); err != nil {
+	if err := p.Request.ValidateIdentity(); err != nil {
 		errs = append(errs, flatten(err)...)
 	}
 	if p.CreatedAt.IsZero() {

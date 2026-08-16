@@ -363,29 +363,24 @@ func TestReleaseRequestCannotCarryKubernetesConfiguration(t *testing.T) {
 	}
 }
 
-// TestFixtureReleaseRequestIsValid keeps testdata/release-evidence.json honest: the
-// fixture must remain a structurally valid request as the type evolves.
-func TestFixtureReleaseRequestIsValid(t *testing.T) {
-	const path = "../../testdata/release-evidence.json"
+// TestFixtureReleaseIntentIsValid keeps testdata/release-request.json honest.
+func TestFixtureReleaseIntentIsValid(t *testing.T) {
+	const path = "../../testdata/release-request.json"
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)
 	}
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
-	var req release.ReleaseRequest
-	if err := dec.Decode(&req); err != nil {
+	var intent release.Intent
+	if err := dec.Decode(&intent); err != nil {
 		t.Fatalf("decode %s: %v", path, err)
 	}
-	if err := req.Validate(); err != nil {
+	if err := intent.Validate(); err != nil {
 		t.Fatalf("%s is not a valid Release Request: %v", path, err)
 	}
-	ref, err := req.ImageReference()
-	if err != nil {
-		t.Fatalf("fixture image reference: %v", err)
-	}
-	if ref.Registry != "ghcr.io" {
-		t.Errorf("fixture registry = %q, want ghcr.io", ref.Registry)
+	if intent.PullRequest != 1 {
+		t.Errorf("fixture pull_request = %d, want 1", intent.PullRequest)
 	}
 }
 

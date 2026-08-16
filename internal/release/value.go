@@ -41,6 +41,9 @@ func IsContentDigest(s string) bool {
 	return ok && algo == DigestAlgorithm && isLowerHex(hex, digestHexLen)
 }
 
+// IsDNSLabel reports whether s is a lowercase RFC 1123 DNS label.
+func IsDNSLabel(s string) bool { return isDNSLabel(s) }
+
 // isDNSLabel reports whether s is a lowercase RFC 1123 DNS label.
 //
 // Every value SafeLane substitutes into the Release Template is checked against a

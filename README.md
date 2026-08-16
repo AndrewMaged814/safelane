@@ -49,9 +49,9 @@ flowchart LR
     G --> H
 ```
 
-1. **Request.** You tell Claude Code, Codex, CI, or a human to release. That caller sends SafeLane
-   the application, target, reviewed change, CI result, and immutable image digest. It does not
-   send Kubernetes YAML.
+1. **Request.** You tell Claude Code, Codex, CI, or a human to release. That caller identifies the
+   merged pull request. It does not send evidence claims or Kubernetes YAML. SafeLane collects
+   GitHub and GHCR evidence from operator configuration.
 2. **Verify.** SafeLane checks GitHub and GHCR. It then renders the Kubernetes objects from an
    operator-owned Release Template. The caller cannot supply or change these objects. SafeLane
    does not scan that YAML.
@@ -111,13 +111,13 @@ SafeLane requires Go 1.26.5 or later.
 git clone https://github.com/AndrewMaged814/safelane.git
 cd safelane
 go test ./...
-go run ./cmd/safelane release --file testdata/release-evidence.json
+go run ./cmd/safelane release --pr 2
 ```
 
-The command uses the real GitHub and GHCR verification paths. The checked-in request contains
-placeholder demo evidence, so SafeLane records the attempt as ineligible or indeterminate. This is the
-expected fail-closed result. [`testdata/README.md`](testdata/README.md) lists the values that the live
-demo must provide.
+From an application repository after `safelane init --adapter codex`, that command loads
+`.safelane/project.yml`, collects GitHub and GHCR evidence, and records a Release. CI may instead
+pass `--file testdata/release-request.json` with the same identifiers. [`testdata/README.md`](testdata/README.md)
+describes the slim request and operator config.
 
 ## Prototype status
 
@@ -125,7 +125,7 @@ SafeLane is an active DevOpsDays Cairo 2026 hackathon prototype.
 
 **Works now**
 
-- `safelane release` accepts release identity and evidence only.
+- `safelane release --pr` accepts change identity only; SafeLane collects evidence.
 - SafeLane verifies the merged pull request, independent approval, required CI check, and GHCR
   digest against the real services.
 - SafeLane renders the bundle once from the Release Template and hashes every object.

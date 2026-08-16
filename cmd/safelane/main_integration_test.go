@@ -2,53 +2,53 @@ package main
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/AndrewMaged814/safelane/internal/cli"
 )
 
-// TestRelease_RealFixture_AgainstRealGitHubAndGHCR runs the whole wired
-// `safelane release` path -- real GitHub API, real GHCR anonymous flow, the
-// fixture Release Template -- against testdata/release-evidence.json. No
-// mocks anywhere in this test.
-//
-// The fixture's PR and GHCR digest are placeholders (see testdata/README.md):
-// the Podinfo fork does not exist yet. So this asserts the *shape* of a real
-// failure, not a green verification: GitHub 404s (the repository does not
-// exist) and GHCR's token endpoint 403s (the package is not public), and
-// both must land as unknown, never as a pass. Once #46 publishes real
-// evidence and the fixture is updated, this test should be revisited to
-// assert a verified outcome instead.
-//
-// Skipped in -short runs since it requires network access.
-func TestRelease_RealFixture_AgainstRealGitHubAndGHCR(t *testing.T) {
+// TestRelease_RealServices_AgainstIntent runs the wired `safelane release`
+// path against testdata/release-request.json with real GitHub and GHCR.
+// Outcome depends on live PR/package state; the test only asserts that
+// intake and orchestration produce a Release record rather than a template
+// or usage error.
+func TestRelease_RealServices_AgainstIntent(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires network access to api.github.com and ghcr.io")
 	}
 
-	commands := []cli.Command{cli.ReleaseCommand("../../internal/render/testdata/release-template", t.TempDir())}
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".safelane"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	project, err := os.ReadFile(filepath.Join("..", "..", "testdata", "project.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".safelane", "project.yml"), project, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	commands := []cli.Command{cli.ReleaseCommand(root, t.TempDir())}
 	var stdout, stderr bytes.Buffer
 
-	code := cli.Dispatch(t.Context(), []string{"release", "--file", "../../testdata/release-evidence.json"}, &stdout, &stderr, commands)
+	code := cli.Dispatch(t.Context(), []string{
+		"release",
+		"--file", "../../testdata/release-request.json",
+		"--template-dir", "../../internal/render/testdata/release-template",
+	}, &stdout, &stderr, commands)
 
-	if code != cli.ExitFail {
-		t.Fatalf("want ExitFail against placeholder fixture evidence, got %d\nstdout: %s\nstderr: %s", code, stdout.String(), stderr.String())
+	if code != cli.ExitOK && code != cli.ExitFail {
+		t.Fatalf("want a release attempt, got %d\nstdout: %s\nstderr: %s", code, stdout.String(), stderr.String())
 	}
-	out := stdout.String()
-	if !strings.Contains(out, "release_id: rel_") {
-		t.Fatalf("want a release id even for withheld evidence, got %q", out)
+	out := stdout.String() + stderr.String()
+	if strings.Contains(out, "could not load the Release Template") {
+		t.Fatalf("must not fail at template load after a valid intent, got %q", out)
 	}
-	if !strings.Contains(out, "evidence: unknown") {
-		t.Fatalf("want the placeholder PR/digest to land as unknown, not a pass, got %q", out)
-	}
-	if !strings.Contains(out, "eligibility: indeterminate") {
-		t.Fatalf("want placeholder evidence to be indeterminate, got %q", out)
-	}
-	if !strings.Contains(out, "retryable: true") {
-		t.Fatalf("want indeterminate to be retryable, got %q", out)
-	}
-	if strings.Contains(out, "rollout_envelope:") {
-		t.Fatalf("indeterminate must not attach an envelope, got %q", out)
+	if !strings.Contains(stdout.String(), "release_id: rel_") && !strings.Contains(stderr.String(), "rejected") {
+		t.Fatalf("want a release id or a typed rejection, got stdout %q stderr %q", stdout.String(), stderr.String())
 	}
 }

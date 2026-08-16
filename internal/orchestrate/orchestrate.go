@@ -15,10 +15,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
-	"github.com/AndrewMaged814/safelane/internal/intake"
 	"github.com/AndrewMaged814/safelane/internal/policy"
+	"github.com/AndrewMaged814/safelane/internal/project"
 	"github.com/AndrewMaged814/safelane/internal/release"
 	"github.com/AndrewMaged814/safelane/internal/render"
 	"github.com/AndrewMaged814/safelane/internal/verify/ghcr"
@@ -40,6 +41,11 @@ type Deps struct {
 	GHCR     ghcr.Resolver
 	Template render.Template
 	Store    Store
+	// Project is the operator-owned runtime configuration. Required.
+	Project project.Config
+	// Caller is stamped by the CLI or other transport. The zero value
+	// becomes safelane-cli / agent.
+	Caller release.CallerIdentity
 	// Policy is the operator-owned Release Policy. The zero value uses
 	// [policy.Default], the compiled phase-one policy.
 	Policy policy.Policy
@@ -72,7 +78,14 @@ func (d Deps) newID() (release.ReleaseID, error) {
 	return release.MintReleaseID()
 }
 
-// SubmitRelease runs one Release Request through intake, verification,
+func (d Deps) caller() release.CallerIdentity {
+	if d.Caller.Identity != "" {
+		return d.Caller
+	}
+	return release.CallerIdentity{Identity: "safelane-cli", Kind: release.CallerAgent, Tool: "safelane"}
+}
+
+// SubmitRelease runs one Release Intent through collection, verification,
 // rendering and persistence.
 //
 // # What produces a Release record, and what does not
@@ -96,13 +109,15 @@ func (d Deps) newID() (release.ReleaseID, error) {
 // itself enforces - SubmitRelease returns that error and persists nothing.
 // A broken operator template is a system misconfiguration to fix and
 // resubmit against, not a release outcome to record.
-func SubmitRelease(ctx context.Context, raw []byte, d Deps) (*release.Release, error) {
-	req, err := intake.Parse(raw)
-	if err != nil {
+func SubmitRelease(ctx context.Context, intent release.Intent, d Deps) (*release.Release, error) {
+	if err := intent.Validate(); err != nil {
+		return nil, err
+	}
+	if err := d.Project.Validate(); err != nil {
 		return nil, err
 	}
 
-	evidenceResult, verified := verifyEvidence(ctx, req, d)
+	req, evidenceResult, verified := collectAndVerify(ctx, intent, d)
 
 	var bundlePtr *release.RenderedBundle
 	if verified != nil {
@@ -117,6 +132,9 @@ func SubmitRelease(ctx context.Context, raw []byte, d Deps) (*release.Release, e
 	if err != nil {
 		return nil, err
 	}
+	req.Metadata.RequestID = "req_" + strings.TrimPrefix(string(id), "rel_")
+	req.Metadata.SubmittedAt = d.now()
+	req.Caller = d.caller()
 
 	elig, err := policy.Evaluate(d.policy(), evidenceResult)
 	if err != nil {
@@ -143,58 +161,126 @@ func SubmitRelease(ctx context.Context, raw []byte, d Deps) (*release.Release, e
 	return r, nil
 }
 
-// verifyEvidence checks GitHub and GHCR evidence and returns the combined
-// EvidenceResult for the Release record. The returned *release.ReleaseEvidence
-// is non-nil only when both checks verified; it is what Render renders
-// against.
-func verifyEvidence(ctx context.Context, req release.ReleaseRequest, d Deps) (release.EvidenceResult, *release.ReleaseEvidence) {
-	// req has already passed intake.Parse -> ReleaseRequest.Validate, which
-	// calls both of these successfully. A failure here would be a defect in
-	// that validation, not a caller problem.
-	repo, repoErr := req.Repository()
-	imageRef, imageErr := req.ImageReference()
-	if repoErr != nil || imageErr != nil {
-		return release.UnknownEvidence(release.Internal("unverifiable_request",
-			"the request passed intake validation but its repository or image reference could not be re-parsed")), nil
+func collectAndVerify(ctx context.Context, intent release.Intent, d Deps) (release.ReleaseRequest, release.EvidenceResult, *release.ReleaseEvidence) {
+	repoName := intent.Repository
+	if repoName == "" {
+		repoName = d.Project.Repository.Name
+	}
+	env := intent.Environment
+	if env == "" {
+		env = d.Project.Release.Environment
 	}
 
-	ghClaim := github.Claim{
-		Repository:              repo.String(),
-		PullRequestNumber:       req.Review.PullRequestNumber,
-		ExpectedMergeCommitSHA:  req.Source.MergeCommitSHA,
-		RequiredCheckName:       req.CI.CheckName,
-		ExpectedBaseRef:         req.Source.BaseBranch,
-		SkipIndependentApproval: !d.policy().IndependentPRApprovalRequired,
+	req := release.ReleaseRequest{
+		SchemaVersion: release.RequestSchemaVersion,
+		Target:        d.Project.ReleaseTarget(env),
+		Source: release.ClaimedSource{
+			Repository: repoName,
+			BaseBranch: d.Project.Repository.DefaultBranch,
+		},
+		Review: release.ClaimedReview{PullRequestNumber: intent.PullRequest},
+		CI:     release.ClaimedCI{CheckName: d.Project.Release.RequiredCheck, Workflow: d.Project.Release.RequiredCheck},
+		Caller: d.caller(),
+		Metadata: release.RequestMetadata{
+			RequestID:   "req_pending",
+			SubmittedAt: d.now(),
+		},
 	}
-	ghResult := github.Verify(ctx, d.GitHub, ghClaim, repo.Owner, repo.Name)
 
-	// #48 defines no operator config for "which registry repository should
-	// this application's artifact come from" - the only source of truth is
-	// the claim itself, so the expected registry/repository is derived from
-	// the same reference being verified. The binding check therefore cannot
-	// fail today; it exists so a later ticket that introduces a real
-	// per-application registry policy has somewhere to plug in an
-	// independent expectation without changing this call site.
-	ghcrClaim := ghcr.Claim{
-		ExpectedRegistry:   imageRef.Registry,
-		ExpectedRepository: imageRef.Repository,
-		Reference:          imageRef,
+	repo, err := release.ParseRepositoryRef(repoName)
+	if err != nil {
+		return req, release.UnknownEvidence(release.Invalid("malformed_repository", "repository",
+			fmt.Sprintf("%q is not a repository reference", repoName),
+			`Use "owner/name".`)), nil
 	}
-	ghcrResult := ghcr.Verify(ctx, d.GHCR, ghcrClaim)
+
+	facts, fetchErr := d.GitHub.FetchPullRequestFacts(ctx, repo.Owner, repo.Name, intent.PullRequest)
+	var ghResult github.Result
+	if fetchErr != nil {
+		reason := github.ReasonFetchFailed
+		if strings.Contains(strings.ToLower(fetchErr.Error()), "not found") {
+			reason = github.ReasonPullRequestNotFound
+		}
+		ghResult = github.Result{Status: github.StatusUnknown, Reason: reason, Detail: fetchErr.Error()}
+	} else {
+		req.Source.MergeCommitSHA = facts.MergeCommitSHA
+		req.Review.PullRequestURL = facts.URL
+		req.Review.Author = facts.AuthorLogin
+		if appr, ok := facts.IndependentApprover(); ok {
+			req.Review.Approver = appr.Reviewer
+		}
+		if check, ok := facts.CheckRun(d.Project.Release.RequiredCheck); ok {
+			req.CI.RunID = check.RunID
+			req.CI.RunURL = check.URL
+		}
+		ghResult = github.Evaluate(github.Claim{
+			Repository:              repo.String(),
+			PullRequestNumber:       intent.PullRequest,
+			ExpectedMergeCommitSHA:  facts.MergeCommitSHA,
+			RequiredCheckName:       d.Project.Release.RequiredCheck,
+			ExpectedBaseRef:         d.Project.Repository.DefaultBranch,
+			SkipIndependentApproval: !d.policy().IndependentPRApprovalRequired,
+		}, facts)
+	}
+
+	ghcrResult, imageRef := resolveArtifact(ctx, intent, d, req.Source.MergeCommitSHA)
+	if !imageRef.IsZero() {
+		req.Artifact.ImageReference = imageRef.String()
+	}
 
 	if ghResult.Status == github.StatusVerified && ghcrResult.Status == ghcr.StatusVerified {
 		evidence, err := buildReleaseEvidence(req, ghResult, ghcrResult, d.now())
 		if err != nil {
-			return evidenceResultFromError(err), nil
+			return req, evidenceResultFromError(err), nil
 		}
 		result, err := release.VerifiedEvidence(evidence)
 		if err != nil {
-			return release.UnknownEvidence(release.Internal("evidence_wrap_failed", err.Error())), nil
+			return req, release.UnknownEvidence(release.Internal("evidence_wrap_failed", err.Error())), nil
 		}
-		return result, &evidence
+		return req, result, &evidence
 	}
 
-	return combineNonVerified(ghResult, ghcrResult), nil
+	return req, combineNonVerified(ghResult, ghcrResult), nil
+}
+
+func resolveArtifact(ctx context.Context, intent release.Intent, d Deps, mergeSHA string) (ghcr.Result, release.ImageReference) {
+	registry, repository, err := project.ParseImageRepository(d.Project.Release.ImageRepository)
+	if err != nil {
+		return ghcr.Result{Status: ghcr.StatusUnknown, Reason: ghcr.ReasonResolveFailed, Detail: err.Error()}, release.ImageReference{}
+	}
+
+	var digest string
+	switch {
+	case intent.Image != "":
+		pin, pinErr := release.ParseImageReference(intent.Image)
+		if pinErr != nil {
+			return ghcr.Result{Status: ghcr.StatusRejected, Reason: ghcr.ReasonRepositoryMismatch, Detail: pinErr.Error()}, release.ImageReference{}
+		}
+		if pin.Registry != registry || pin.Repository != repository {
+			return ghcr.Result{
+				Status: ghcr.StatusRejected,
+				Reason: ghcr.ReasonRepositoryMismatch,
+				Detail: fmt.Sprintf("pinned image %s is not in configured repository %s/%s", pin, registry, repository),
+			}, release.ImageReference{}
+		}
+		digest = pin.Digest
+	case mergeSHA != "":
+		tag := project.ImageTag(d.Project.Release.ImageTag, mergeSHA)
+		resolved, resErr := d.GHCR.ResolveTag(ctx, repository, tag)
+		if resErr != nil {
+			return ghcr.Result{Status: ghcr.StatusUnknown, Reason: ghcr.ReasonResolveFailed, Detail: resErr.Error()}, release.ImageReference{}
+		}
+		digest = resolved
+	default:
+		return ghcr.Result{Status: ghcr.StatusUnknown, Reason: ghcr.ReasonResolveFailed, Detail: "no merge commit SHA to resolve an image tag"}, release.ImageReference{}
+	}
+
+	ref := release.ImageReference{Registry: registry, Repository: repository, Digest: digest}
+	return ghcr.Verify(ctx, d.GHCR, ghcr.Claim{
+		ExpectedRegistry:   registry,
+		ExpectedRepository: repository,
+		Reference:          ref,
+	}), ref
 }
 
 // buildReleaseEvidence assembles release.EvidenceInput from verified GitHub

@@ -17,6 +17,10 @@ import (
 // verification logic.
 type Resolver interface {
 	ResolveDigest(ctx context.Context, ref release.ImageReference) (string, error)
+	// ResolveTag returns the registry digest for a mutable tag. SafeLane
+	// uses this only to discover the digest published for a merge SHA;
+	// the Release still binds the immutable digest, never the tag.
+	ResolveTag(ctx context.Context, repository, tag string) (string, error)
 }
 
 // Client is the real Resolver, implementing the public GHCR anonymous flow:
@@ -88,12 +92,21 @@ const manifestAcceptHeaders = "application/vnd.oci.image.index.v1+json, " +
 // ResolveDigest performs the anonymous token → manifest HEAD flow and
 // returns the registry's reported docker-content-digest for ref.
 func (c *Client) ResolveDigest(ctx context.Context, ref release.ImageReference) (string, error) {
-	token, err := c.fetchToken(ctx, ref.Repository)
+	return c.resolveManifest(ctx, ref.Repository, ref.Digest, ref.String())
+}
+
+// ResolveTag performs the same anonymous flow against a tag reference.
+func (c *Client) ResolveTag(ctx context.Context, repository, tag string) (string, error) {
+	return c.resolveManifest(ctx, repository, tag, repository+":"+tag)
+}
+
+func (c *Client) resolveManifest(ctx context.Context, repository, reference, display string) (string, error) {
+	token, err := c.fetchToken(ctx, repository)
 	if err != nil {
 		return "", err
 	}
 
-	url := fmt.Sprintf("%s/v2/%s/manifests/%s", c.baseURL(), ref.Repository, ref.Digest)
+	url := fmt.Sprintf("%s/v2/%s/manifests/%s", c.baseURL(), repository, reference)
 	req, err := http.NewRequestWithContext(ctx, http.MethodHead, url, nil)
 	if err != nil {
 		return "", err
@@ -107,12 +120,12 @@ func (c *Client) ResolveDigest(ctx context.Context, ref release.ImageReference) 
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", fmt.Errorf("ghcr: manifest HEAD returned status %d for %s", resp.StatusCode, ref)
+		return "", fmt.Errorf("ghcr: manifest HEAD returned status %d for %s", resp.StatusCode, display)
 	}
 
 	digest := resp.Header.Get("Docker-Content-Digest")
 	if digest == "" {
-		return "", fmt.Errorf("ghcr: manifest response for %s had no Docker-Content-Digest header", ref)
+		return "", fmt.Errorf("ghcr: manifest response for %s had no Docker-Content-Digest header", display)
 	}
 	return digest, nil
 }

@@ -8,11 +8,13 @@ A request to release, deploy, promote, or roll back the protected application.
 
 ## Steps
 
-1. Gather release identity and evidence only: the merge commit on `main`, the configured review evidence, the required CI check for that commit, and the immutable image digest. Do not author or submit Kubernetes objects, patches, template selection, or Argo configuration. SafeLane renders the operator-owned Release Template.
+1. Identify the merged pull request. Do not author evidence claims. Do not search SafeLane fixtures, testdata, or internals for request fields, reviewers, check names, or digests. SafeLane collects and verifies evidence from GitHub and GHCR using operator configuration.
 
 2. Submit the Release Request with the SafeLane CLI:
 
-   `safelane release --file release-evidence.json`
+   `safelane release --pr <number>`
+
+   Optional: `--repo owner/name` and `--environment production`. For CI, `--file release-request.json` may carry the same identifiers only.
 
 3. Read the typed result.
    - If the result is eligible, follow the exact typed next action: `safelane execute <release-id>`. Eligibility permits that bounded execution; it does not declare the artifact safe or deployed.
