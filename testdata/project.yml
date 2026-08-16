@@ -9,7 +9,7 @@ repository:
 release:
   environment: production
   image_repository: ghcr.io/andrewmaged814/podinfo
-  image_tag: "sha-{{merge_sha_short8}}"
+  image_tag: "sha-{{merge_sha}}"
   required_check: publish / build-and-push
   template_path: .safelane/release-template
 

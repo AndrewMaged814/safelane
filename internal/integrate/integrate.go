@@ -188,6 +188,10 @@ func writeProject(root string) (Change, error) {
 		return Change{}, err
 	}
 
+	abs, err := filepath.Abs(root)
+	if err == nil {
+		root = abs
+	}
 	app := project.SanitizeApplication(root)
 	repo, _ := project.DetectGitHubRepo(root)
 	branch := project.DetectDefaultBranch(root)
