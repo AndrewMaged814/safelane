@@ -34,7 +34,7 @@ func TestLoad_ValidFixture(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if cfg.Application != "podinfo" || cfg.Release.RequiredCheck != "publish / build-and-push" {
+	if cfg.Application != "podinfo" || cfg.Release.RequiredCheck != "build-and-push" {
 		t.Fatalf("unexpected config: %+v", cfg)
 	}
 }

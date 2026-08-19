@@ -4,13 +4,13 @@ application: podinfo
 
 repository:
   name: AndrewMaged814/podinfo
-  default_branch: main
+  default_branch: master
 
 release:
   environment: production
   image_repository: ghcr.io/andrewmaged814/podinfo
   image_tag: "sha-{{merge_sha}}"
-  required_check: publish / build-and-push
+  required_check: build-and-push
   template_path: .safelane/release-template
 
 target:

@@ -16,7 +16,7 @@ _Avoid_: Evidence dossier, release-evidence.json, deployment request
 A change merged into the demo fork after approval by the other hackathon teammate and a passing required CI check. The approval and CI result are evidence inputs, not SafeLane-generated claims.
 
 **Release Evidence**:
-The linked evidence for one Release Request: the merge commit SHA on `main`, the required publish-workflow result for that exact commit, the immutable OCI image digest, and an independent pull-request approval when the Release Policy requires one. Trusted build provenance is a planned future addition to this set, not a current requirement.
+The linked evidence for one Release Request: the merge commit SHA on `master`, the required publish-workflow result for that exact commit, the immutable OCI image digest, and an independent pull-request approval when the Release Policy requires one. Trusted build provenance is a planned future addition to this set, not a current requirement.
 
 **Rendered Manifest Bundle**:
 The exact final Kubernetes object bytes SafeLane renders and intends to apply for one release: the Argo Rollout with its immutable-digest pod template, stable/canary Services, any active traffic-routing object, the AnalysisTemplate, and materially relevant non-secret referenced resources. SafeLane renders it from the operator-owned Release Template pinned to the verified digest; the caller never supplies it. Each rendered object is content-hashed and bound to the Release, and the same bundle is later applied. Runtime status and observed traffic are separate evidence.
