@@ -21,7 +21,10 @@ var ErrNotFound = errors.New("release not found")
 // Writes are atomic: the record is written to a temp file in Dir and then
 // renamed into place, so a crash mid-write cannot leave a corrupt or
 // partial record for a later read to trip over. Dir is created on first
-// Save if it does not already exist.
+// Save if it does not already exist. Save creates a record and refuses to
+// overwrite one; Update requires the record to already exist. Between the
+// two, every record's life cycle from first write to last recorded
+// transition goes through this store.
 type FileStore struct {
 	Dir string
 }
@@ -42,7 +45,31 @@ func (s *FileStore) Save(r *release.Release) error {
 	if _, err := os.Stat(dest); err == nil {
 		return fmt.Errorf("store: a release record already exists at %s", dest)
 	}
+	return s.write(r, dest)
+}
 
+// Update persists r over an existing record for the same ID, atomically. It
+// is the only way a release already on disk gains history: every later
+// transition (a granted advance, a refusal, Argo's own abort) lands via
+// Update, never Save. Unlike Save, it requires the record to already
+// exist — updating a release nothing wrote first would silently create a
+// record no earlier step produced, which is exactly the defect Save's own
+// refusal exists to catch.
+func (s *FileStore) Update(r *release.Release) error {
+	dest := s.path(r.ID)
+	if _, err := os.Stat(dest); err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("store: no release record for %s: %w", r.ID, ErrNotFound)
+		}
+		return fmt.Errorf("store: could not stat %s: %w", dest, err)
+	}
+	return s.write(r, dest)
+}
+
+// write encodes r and lands it at dest via the same temp-file-and-rename
+// sequence for both Save and Update: a crash mid-write cannot leave a
+// corrupt or partial record for a later read to trip over.
+func (s *FileStore) write(r *release.Release, dest string) error {
 	data, err := json.MarshalIndent(r, "", "  ")
 	if err != nil {
 		return fmt.Errorf("store: could not encode release %s: %w", r.ID, err)

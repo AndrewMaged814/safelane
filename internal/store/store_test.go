@@ -100,6 +100,61 @@ func TestFileStore_Save_RefusesToOverwrite(t *testing.T) {
 	}
 }
 
+func TestFileStore_SaveUpdateLoad_RoundTrips(t *testing.T) {
+	dir := t.TempDir()
+	s := &FileStore{Dir: dir}
+	r := fixtureRelease(t)
+
+	if err := s.Save(r); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	elig, err := release.Ineligible("2", "a_different_requirement_failed", "A later re-check found a different failure.")
+	if err != nil {
+		t.Fatalf("test setup: %v", err)
+	}
+	updated, err := release.NewRelease(release.ReleaseParams{
+		ID:          r.ID,
+		Request:     fixtureRequest(),
+		Evidence:    release.MissingEvidence(),
+		Eligibility: elig,
+		CreatedAt:   time.Now(),
+	})
+	if err != nil {
+		t.Fatalf("test setup: %v", err)
+	}
+
+	if err := s.Update(updated); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	loaded, err := s.Load(r.ID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if loaded.ID != r.ID {
+		t.Fatalf("want ID %s, got %s", r.ID, loaded.ID)
+	}
+	if got := loaded.Eligibility().ReasonCode(); got != "a_different_requirement_failed" {
+		t.Fatalf("want the update to have replaced the eligibility, got reason code %q", got)
+	}
+}
+
+func TestFileStore_Update_MissingRelease(t *testing.T) {
+	dir := t.TempDir()
+	s := &FileStore{Dir: dir}
+	r := fixtureRelease(t)
+
+	if err := s.Update(r); err == nil {
+		t.Fatal("want an error updating a release that was never saved")
+	} else if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("want ErrNotFound, got %v", err)
+	}
+	if _, err := s.Load(r.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatal("want Update to leave no record behind when the release did not already exist")
+	}
+}
+
 func TestFileStore_Load_MissingRelease(t *testing.T) {
 	dir := t.TempDir()
 	s := &FileStore{Dir: dir}
