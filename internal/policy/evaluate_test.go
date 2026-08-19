@@ -17,11 +17,35 @@ var testTime = time.Date(2026, 8, 15, 9, 30, 0, 0, time.UTC)
 
 func phaseOnePolicy() policy.Policy {
 	return policy.Policy{
-		Version:                       "1",
+		Version:                       "2",
 		IndependentPRApprovalRequired: true,
-		Stages:                        []int{5, 25, 50, 100},
-		NextAction:                    "start",
+		Lanes: map[string]policy.Lane{
+			"fast":     {Weights: []int{5, 100}},
+			"standard": {Weights: []int{5, 25, 50, 100}},
+			"guarded":  {Weights: []int{1, 5, 25, 50, 100}},
+		},
+		RiskToLane: map[string]string{
+			"low": "fast", "medium": "standard", "high": "guarded",
+		},
+		DefaultLane: "guarded",
 	}
+}
+
+// testEnvelope resolves risk against phaseOnePolicy() and builds the
+// RolloutEnvelope Evaluate expects to have already been resolved --
+// standing in for what SubmitRelease does with Policy.LaneFor before
+// calling Evaluate.
+func testEnvelope(t *testing.T, risk string) release.RolloutEnvelope {
+	t.Helper()
+	_, lane, err := phaseOnePolicy().LaneFor(risk)
+	if err != nil {
+		t.Fatalf("LaneFor(%q): %v", risk, err)
+	}
+	env, err := release.NewRolloutEnvelope(lane.Weights, "start")
+	if err != nil {
+		t.Fatalf("NewRolloutEnvelope: %v", err)
+	}
+	return env
 }
 
 func verifiedEvidence(t *testing.T) release.EvidenceResult {
@@ -61,7 +85,7 @@ func TestEvaluate_MissingRequiredEvidence_IsIneligibleNotIndeterminate(t *testin
 		"pull request has no independent approval",
 		"Obtain an approving review from someone other than the author."))
 
-	got, err := policy.Evaluate(phaseOnePolicy(), evidence)
+	got, err := policy.Evaluate(phaseOnePolicy(), evidence, testEnvelope(t, "high"))
 	if err != nil {
 		t.Fatalf("Evaluate: %v", err)
 	}
@@ -83,7 +107,7 @@ func TestEvaluate_UnreachableDependency_IsIndeterminateAndRetryable(t *testing.T
 		"GitHub did not answer",
 		"Re-run verification once GitHub is reachable."))
 
-	got, err := policy.Evaluate(phaseOnePolicy(), evidence)
+	got, err := policy.Evaluate(phaseOnePolicy(), evidence, testEnvelope(t, "high"))
 	if err != nil {
 		t.Fatalf("Evaluate: %v", err)
 	}
@@ -108,7 +132,7 @@ func TestEvaluate_FailedRequirement_IsIneligibleWithoutEnvelope(t *testing.T) {
 		"required check publish / build-and-push concluded failure",
 		"Correct the publish workflow on the merge commit and resubmit."))
 
-	got, err := policy.Evaluate(phaseOnePolicy(), evidence)
+	got, err := policy.Evaluate(phaseOnePolicy(), evidence, testEnvelope(t, "high"))
 	if err != nil {
 		t.Fatalf("Evaluate: %v", err)
 	}
@@ -125,13 +149,13 @@ func TestEvaluate_FailedRequirement_IsIneligibleWithoutEnvelope(t *testing.T) {
 	if got.ReasonCode() == "" || got.Message() == "" {
 		t.Error("ineligible must record a reason code and actionable message")
 	}
-	if got.PolicyVersion() != "1" {
-		t.Errorf("policy version = %q, want 1", got.PolicyVersion())
+	if got.PolicyVersion() != "2" {
+		t.Errorf("policy version = %q, want 2", got.PolicyVersion())
 	}
 }
 
-func TestEvaluate_VerifiedMandatoryEvidence_IsEligibleWithStaticEnvelope(t *testing.T) {
-	got, err := policy.Evaluate(phaseOnePolicy(), verifiedEvidence(t))
+func TestEvaluate_VerifiedMandatoryEvidence_IsEligibleWithTheResolvedEnvelope(t *testing.T) {
+	got, err := policy.Evaluate(phaseOnePolicy(), verifiedEvidence(t), testEnvelope(t, "medium"))
 	if err != nil {
 		t.Fatalf("Evaluate: %v", err)
 	}
@@ -139,24 +163,45 @@ func TestEvaluate_VerifiedMandatoryEvidence_IsEligibleWithStaticEnvelope(t *test
 	if got.Status() != release.EligibilityEligible {
 		t.Fatalf("status = %s, want eligible", got.Status())
 	}
-	if got.PolicyVersion() != "1" {
-		t.Errorf("policy version = %q, want 1", got.PolicyVersion())
+	if got.PolicyVersion() != "2" {
+		t.Errorf("policy version = %q, want 2", got.PolicyVersion())
 	}
 	if got.Retryable() {
 		t.Error("an eligible release is not retryable")
 	}
 	env, ok := got.Envelope()
 	if !ok {
-		t.Fatal("eligible must attach the operator envelope")
+		t.Fatal("eligible must attach the resolved rollout envelope")
 	}
 	if want := []int{5, 25, 50, 100}; !intSlicesEqual(env.Stages(), want) {
-		t.Errorf("stages = %v, want %v", env.Stages(), want)
+		t.Errorf("stages = %v, want %v (the standard lane, for risk medium)", env.Stages(), want)
 	}
 	if env.NextAction() != "start" {
 		t.Errorf("next action = %q, want start", env.NextAction())
 	}
 	if got.ReasonCode() == "" || got.Message() == "" {
 		t.Error("eligible still records a reason code and message")
+	}
+}
+
+// TestEvaluate_NoRiskAvailable_UsesTheDefaultLane is Appendix C1's third
+// rule made concrete for the eligibility path: missing, malformed, or
+// failed assessment resolves to the operator's most cautious configured
+// lane, and this is not itself a reason to withhold eligibility.
+func TestEvaluate_NoRiskAvailable_UsesTheDefaultLane(t *testing.T) {
+	got, err := policy.Evaluate(phaseOnePolicy(), verifiedEvidence(t), testEnvelope(t, ""))
+	if err != nil {
+		t.Fatalf("Evaluate: %v", err)
+	}
+	if got.Status() != release.EligibilityEligible {
+		t.Fatalf("status = %s, want eligible: no risk available must never block a release", got.Status())
+	}
+	env, ok := got.Envelope()
+	if !ok {
+		t.Fatal("eligible must still attach an envelope")
+	}
+	if want := []int{1, 5, 25, 50, 100}; !intSlicesEqual(env.Stages(), want) {
+		t.Errorf("stages = %v, want %v (guarded, the default lane)", env.Stages(), want)
 	}
 }
 

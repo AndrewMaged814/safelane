@@ -1,37 +1,38 @@
 package policy_test
 
 import (
-	"os"
 	"path/filepath"
-	"strings"
+	"reflect"
 	"testing"
 
 	"github.com/AndrewMaged814/safelane/internal/policy"
 )
 
+// TestDefault_MatchesOperatorPolicyFile loads the actual shipped
+// policy.yml through the real Load path and checks it against
+// policy.Default() structurally, rather than by substring: a load that
+// silently drops a lane or mis-maps a risk level would fail this even
+// if the raw text still "looked right".
 func TestDefault_MatchesOperatorPolicyFile(t *testing.T) {
-	raw, err := os.ReadFile(filepath.Join("..", "..", "docs", "policy", "safelane-policy.yml"))
+	loaded, err := policy.Load(filepath.Join("..", "..", "docs", "policy", "safelane-policy.yml"))
 	if err != nil {
-		t.Fatalf("read operator policy: %v", err)
+		t.Fatalf("Load: %v", err)
 	}
-	text := string(raw)
-	p := policy.Default()
-	if p.Version != "1" {
-		t.Errorf("version = %q, want 1", p.Version)
+	want := policy.Default()
+
+	if loaded.Version != want.Version {
+		t.Errorf("version = %q, want %q", loaded.Version, want.Version)
 	}
-	if p.IndependentPRApprovalRequired {
+	if loaded.IndependentPRApprovalRequired != want.IndependentPRApprovalRequired {
 		t.Error("phase one does not require independent PR approval; that gate is deferred")
 	}
-	if !strings.Contains(text, "stages: [5, 25, 50, 100]") {
-		t.Error("operator policy file must declare stages: [5, 25, 50, 100]")
+	if !reflect.DeepEqual(loaded.Lanes, want.Lanes) {
+		t.Errorf("lanes = %+v, want %+v", loaded.Lanes, want.Lanes)
 	}
-	if !strings.Contains(text, "next_action: start") {
-		t.Error("operator policy file must declare next_action: start")
+	if !reflect.DeepEqual(loaded.RiskToLane, want.RiskToLane) {
+		t.Errorf("risk_to_lane = %+v, want %+v", loaded.RiskToLane, want.RiskToLane)
 	}
-	if !strings.Contains(text, "independent_pr_approval:") {
-		t.Error("operator policy file must declare independent_pr_approval")
-	}
-	if !strings.Contains(text, "required: false") {
-		t.Error("operator policy file must leave independent_pr_approval.required false")
+	if loaded.DefaultLane != want.DefaultLane {
+		t.Errorf("default_lane = %q, want %q", loaded.DefaultLane, want.DefaultLane)
 	}
 }

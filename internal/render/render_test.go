@@ -22,6 +22,11 @@ const (
 	mergeSHA = "4f0c1b9e7ac2d5386b1d9f4a5c8e2b7d3a6f0e91"
 )
 
+// testWeights matches the four stages the fixture Rollout template
+// rendered before lanes existed, so every existing byte/hash assertion
+// in this file keeps holding unchanged.
+var testWeights = []int{5, 25, 50, 100}
+
 func testTarget() release.Target {
 	return release.Target{
 		Application: "podinfo",
@@ -79,7 +84,7 @@ func loadFixture(t *testing.T) render.Template {
 
 func renderFixture(t *testing.T, digest string) release.RenderedBundle {
 	t.Helper()
-	bundle, err := render.Render(loadFixture(t), testTarget(), testEvidence(t, digest))
+	bundle, err := render.Render(loadFixture(t), testTarget(), testEvidence(t, digest), testWeights)
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
@@ -297,7 +302,7 @@ func TestRenderRecordsResourceIdentityFromRenderedBytes(t *testing.T) {
 // not expressible: the zero ReleaseEvidence is the only value a caller outside the
 // release package can fabricate, and it is refused.
 func TestRenderRequiresVerifiedEvidence(t *testing.T) {
-	_, err := render.Render(loadFixture(t), testTarget(), release.ReleaseEvidence{})
+	_, err := render.Render(loadFixture(t), testTarget(), release.ReleaseEvidence{}, testWeights)
 	if err == nil {
 		t.Fatal("expected rendering without verified evidence to fail")
 	}
@@ -309,7 +314,7 @@ func TestRenderRequiresVerifiedEvidence(t *testing.T) {
 func TestRenderRejectsInvalidTarget(t *testing.T) {
 	bad := testTarget()
 	bad.Namespace = "Not A Namespace"
-	if _, err := render.Render(loadFixture(t), bad, testEvidence(t, digestA)); err == nil {
+	if _, err := render.Render(loadFixture(t), bad, testEvidence(t, digestA), testWeights); err == nil {
 		t.Fatal("expected an invalid target to be rejected")
 	}
 }
@@ -326,7 +331,7 @@ func TestRenderRejectsTemplateThatDoesNotPinTheDigest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadFS: %v", err)
 	}
-	_, err = render.Render(tmpl, testTarget(), testEvidence(t, digestA))
+	_, err = render.Render(tmpl, testTarget(), testEvidence(t, digestA), testWeights)
 	if err == nil {
 		t.Fatal("expected a template that does not pin the digest to be rejected")
 	}
@@ -344,7 +349,7 @@ func TestRenderRejectsMultiDocumentTemplateFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadFS: %v", err)
 	}
-	if _, err := render.Render(tmpl, testTarget(), testEvidence(t, digestA)); err == nil ||
+	if _, err := render.Render(tmpl, testTarget(), testEvidence(t, digestA), testWeights); err == nil ||
 		!strings.Contains(err.Error(), "multi_document_template") {
 		t.Errorf("error = %v, want multi_document_template", err)
 	}
@@ -359,7 +364,7 @@ func TestRenderRejectsUnidentifiableResource(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadFS: %v", err)
 	}
-	if _, err := render.Render(tmpl, testTarget(), testEvidence(t, digestA)); err == nil ||
+	if _, err := render.Render(tmpl, testTarget(), testEvidence(t, digestA), testWeights); err == nil ||
 		!strings.Contains(err.Error(), "missing_kind") {
 		t.Errorf("error = %v, want missing_kind", err)
 	}
@@ -376,7 +381,7 @@ func TestRenderRejectsUnknownTemplateValue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadFS: %v", err)
 	}
-	if _, err := render.Render(tmpl, testTarget(), testEvidence(t, digestA)); err == nil ||
+	if _, err := render.Render(tmpl, testTarget(), testEvidence(t, digestA), testWeights); err == nil ||
 		!strings.Contains(err.Error(), "template_execute_failed") {
 		t.Errorf("error = %v, want template_execute_failed", err)
 	}
@@ -393,7 +398,7 @@ func TestTemplateFunctionsAreUnavailable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadFS: %v", err)
 	}
-	if _, err := render.Render(tmpl, testTarget(), testEvidence(t, digestA)); err == nil ||
+	if _, err := render.Render(tmpl, testTarget(), testEvidence(t, digestA), testWeights); err == nil ||
 		!strings.Contains(err.Error(), "template_parse_failed") {
 		t.Errorf("error = %v, want template_parse_failed", err)
 	}
@@ -418,11 +423,11 @@ func TestTemplateDigestIsNewlineNormalized(t *testing.T) {
 	}
 
 	ev := testEvidence(t, digestA)
-	ra, err := render.Render(a, testTarget(), ev)
+	ra, err := render.Render(a, testTarget(), ev, testWeights)
 	if err != nil {
 		t.Fatalf("render LF: %v", err)
 	}
-	rb, err := render.Render(b, testTarget(), ev)
+	rb, err := render.Render(b, testTarget(), ev, testWeights)
 	if err != nil {
 		t.Fatalf("render CRLF: %v", err)
 	}
@@ -471,6 +476,131 @@ func TestLoadRejectsTemplateWithNoResourceFiles(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "no_resource_templates") {
 		t.Errorf("error = %v, want no_resource_templates", err)
 	}
+}
+
+// TestLaneWeightsChangeOnlyTheRolloutHash is ticket 07's core render
+// property: rendering the same target and evidence under two different
+// lanes (the "low" risk fast lane vs the "high" risk guarded lane) must
+// change exactly one resource's hash -- the Rollout, since it is the
+// only resource whose bytes carry `steps:`. Nothing else in the bundle
+// may depend on which lane was selected.
+func TestLaneWeightsChangeOnlyTheRolloutHash(t *testing.T) {
+	fast := []int{5, 100}               // "low" risk lane: 1 gate
+	guarded := []int{1, 5, 25, 50, 100} // "high" risk lane: 4 gates
+
+	tmpl := loadFixture(t)
+	ev := testEvidence(t, digestA)
+
+	a, err := render.Render(tmpl, testTarget(), ev, fast)
+	if err != nil {
+		t.Fatalf("Render(fast): %v", err)
+	}
+	b, err := render.Render(tmpl, testTarget(), ev, guarded)
+	if err != nil {
+		t.Fatalf("Render(guarded): %v", err)
+	}
+
+	resA, resB := a.Resources(), b.Resources()
+	if len(resA) != len(resB) {
+		t.Fatalf("resource count changed: %d vs %d", len(resA), len(resB))
+	}
+
+	var changed []string
+	for i := range resA {
+		if resA[i].Ref() != resB[i].Ref() {
+			t.Fatalf("resource %d identity differs: %+v vs %+v", i, resA[i].Ref(), resB[i].Ref())
+		}
+		if resA[i].Hash() != resB[i].Hash() {
+			changed = append(changed, resA[i].Ref().String())
+		}
+	}
+	if len(changed) != 1 || !strings.HasPrefix(changed[0], "Rollout/") {
+		t.Errorf("changed resources = %v, want exactly the Rollout", changed)
+	}
+}
+
+// TestGateCountingIsWeightsMinusOne is the other half of ticket 07's gate
+// arithmetic: N configured weights render N-1 explicit (setWeight, pause)
+// step pairs, never N -- the final weight is reached automatically once
+// the rollout runs out of steps, and is never itself a step.
+func TestGateCountingIsWeightsMinusOne(t *testing.T) {
+	tests := []struct {
+		weights   []int
+		wantGates int
+	}{
+		{[]int{5, 100}, 1},
+		{[]int{5, 25, 50, 100}, 3},
+		{[]int{1, 5, 25, 50, 100}, 4},
+	}
+	tmpl := loadFixture(t)
+	ev := testEvidence(t, digestA)
+	for _, tc := range tests {
+		bundle, err := render.Render(tmpl, testTarget(), ev, tc.weights)
+		if err != nil {
+			t.Fatalf("Render(%v): %v", tc.weights, err)
+		}
+		var rollout release.RenderedResource
+		for _, res := range bundle.Resources() {
+			if res.Ref().Kind == "Rollout" {
+				rollout = res
+			}
+		}
+		if rollout.IsZero() {
+			t.Fatalf("no Rollout resource in the rendered bundle")
+		}
+		gotGates := strings.Count(string(rollout.Bytes()), "- pause:")
+		if gotGates != tc.wantGates {
+			t.Errorf("weights %v: %d pause entries, want %d gates", tc.weights, gotGates, tc.wantGates)
+		}
+		gotWeights := strings.Count(string(rollout.Bytes()), "- setWeight:")
+		if wantSteps := len(tc.weights) - 1; gotWeights != wantSteps {
+			t.Errorf("weights %v: %d explicit setWeight steps, want %d (all but the final, implicit weight)",
+				tc.weights, gotWeights, wantSteps)
+		}
+	}
+}
+
+// TestDeriveEnvelope_RoundTripsThroughTheRealTemplate is ticket 07's
+// full round trip against the actual fixture Release Template, not a
+// hand-built stand-in: for both a narrow and a wide lane, the envelope
+// read back out of the rendered bytes must equal the lane that was
+// selected, exactly.
+func TestDeriveEnvelope_RoundTripsThroughTheRealTemplate(t *testing.T) {
+	tmpl := loadFixture(t)
+	ev := testEvidence(t, digestA)
+
+	for _, weights := range [][]int{
+		{5, 100},
+		{5, 25, 50, 100},
+		{1, 5, 25, 50, 100},
+	} {
+		bundle, err := render.Render(tmpl, testTarget(), ev, weights)
+		if err != nil {
+			t.Fatalf("Render(%v): %v", weights, err)
+		}
+		env, templateDigest, err := release.DeriveEnvelope(bundle)
+		if err != nil {
+			t.Fatalf("DeriveEnvelope(%v): %v", weights, err)
+		}
+		if got := env.Stages(); !intSlicesEqual(got, weights) {
+			t.Errorf("weights %v: derived stages = %v, want exactly the selected lane", weights, got)
+		}
+		if templateDigest != bundle.Template().ContentDigest {
+			t.Errorf("weights %v: derived template digest = %q, want %q", weights, templateDigest, bundle.Template().ContentDigest)
+		}
+	}
+}
+
+func intSlicesEqual(a, b []int) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // TestFixtureTemplateIdentityIsRecorded checks the fixture's metadata reaches the

@@ -195,7 +195,7 @@ func TestProofCommand_ConciseAndDetails_FromPersistedEligibleRelease(t *testing.
 	}
 	shared := []string{
 		"eligibility: eligible",
-		"rollout_envelope: 5 → 25 → 50 → 100",
+		"rollout_envelope: 1 → 5 → 25 → 50 → 100",
 		"next_action: start",
 		proofFixtureDigest,
 	}

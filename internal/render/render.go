@@ -50,6 +50,15 @@ type TemplateData struct {
 	CanaryServiceName    string // <application>-canary
 	AnalysisTemplateName string // <application>-success-rate
 	IngressName          string // <application>
+
+	// Steps are the explicit canary steps to render: one setWeight
+	// followed by a 60s pause per entry. This is weights[:len(weights)-1]
+	// from the selected lane -- the final weight (conventionally 100) is
+	// never an explicit step. A canary rollout that runs out of steps
+	// promotes fully on its own; that is how Argo Rollouts reaches its
+	// last weight, and it is why N configured weights make N-1 gates
+	// (Appendix C5), not N.
+	Steps []int
 }
 
 // Render produces the single Rendered Manifest Bundle for one Release.
@@ -63,7 +72,13 @@ type TemplateData struct {
 // contain that digest anywhere, which is the guard that catches a real Release Template
 // whose pod template forgot to reference the image: SafeLane would rather refuse to
 // release than record a bundle that is not pinned to the verified artifact.
-func Render(t Template, target release.Target, evidence release.ReleaseEvidence) (release.RenderedBundle, error) {
+//
+// weights is the selected lane's rollout envelope (Appendix C3's
+// lanes.<name>.weights), in order. It is the operator's declared lane, resolved
+// once by the caller before rendering -- Render does not pick a lane and does
+// not know what "risk" means. weights must be non-empty: every lane declares at
+// least one weight, its final one, which [DeriveEnvelope] always reconstructs.
+func Render(t Template, target release.Target, evidence release.ReleaseEvidence, weights []int) (release.RenderedBundle, error) {
 	if t.IsZero() {
 		return release.RenderedBundle{}, release.RenderError("template_not_loaded", "template",
 			"no Release Template was loaded",
@@ -77,8 +92,13 @@ func Render(t Template, target release.Target, evidence release.ReleaseEvidence)
 	if err := target.Validate(); err != nil {
 		return release.RenderedBundle{}, err
 	}
+	if len(weights) == 0 {
+		return release.RenderedBundle{}, release.RenderError("empty_envelope", "weights",
+			"no rollout envelope weights were given to render",
+			"Resolve a lane with at least one weight before rendering.")
+	}
 
-	data, err := newTemplateData(target, evidence)
+	data, err := newTemplateData(target, evidence, weights)
 	if err != nil {
 		return release.RenderedBundle{}, err
 	}
@@ -130,15 +150,22 @@ func Render(t Template, target release.Target, evidence release.ReleaseEvidence)
 // interpolated into YAML by text/template, which performs no escaping: a value
 // containing a newline or a quote would not merely look wrong, it would change the
 // structure of an object SafeLane is about to apply.
-func newTemplateData(target release.Target, evidence release.ReleaseEvidence) (TemplateData, error) {
+func newTemplateData(target release.Target, evidence release.ReleaseEvidence, weights []int) (TemplateData, error) {
 	ref := evidence.Artifact().Reference
 	repo := evidence.Repository()
+
+	// The final weight (conventionally 100) is never rendered as its own
+	// step; a canary that runs out of steps promotes fully on its own.
+	// See the Steps field's doc comment.
+	steps := make([]int, len(weights)-1)
+	copy(steps, weights[:len(weights)-1])
 
 	data := TemplateData{
 		Application: target.Application,
 		Environment: target.Environment,
 		Cluster:     target.Cluster,
 		Namespace:   target.Namespace,
+		Steps:       steps,
 
 		ImageReference:  ref.String(),
 		ImageRegistry:   ref.Registry,

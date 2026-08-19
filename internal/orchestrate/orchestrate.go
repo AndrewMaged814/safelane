@@ -119,9 +119,20 @@ func SubmitRelease(ctx context.Context, intent release.Intent, d Deps) (*release
 
 	req, evidenceResult, verified := collectAndVerify(ctx, intent, d)
 
+	// No assessment is wired into this path yet -- collecting Change
+	// Facts and running the heuristic/model assessors is a later
+	// ticket's caller. An empty risk resolves to the policy's
+	// DefaultLane, which is deliberately the most cautious configured
+	// lane (Appendix C1's third rule): "no assessment available" is an
+	// expected, legitimate case here, not a defect.
+	_, lane, err := d.policy().LaneFor("")
+	if err != nil {
+		return nil, err
+	}
+
 	var bundlePtr *release.RenderedBundle
 	if verified != nil {
-		bundle, err := render.Render(d.Template, req.Target, *verified)
+		bundle, err := render.Render(d.Template, req.Target, *verified, lane.Weights)
 		if err != nil {
 			return nil, err
 		}
@@ -136,7 +147,14 @@ func SubmitRelease(ctx context.Context, intent release.Intent, d Deps) (*release
 	req.Metadata.SubmittedAt = d.now()
 	req.Caller = d.caller()
 
-	elig, err := policy.Evaluate(d.policy(), evidenceResult)
+	// The same weights just rendered are what gets recorded: one lane
+	// resolution feeds both, so the enforced envelope cannot silently
+	// disagree with what was actually rendered and hashed.
+	envelope, err := release.NewRolloutEnvelope(lane.Weights, "start")
+	if err != nil {
+		return nil, err
+	}
+	elig, err := policy.Evaluate(d.policy(), evidenceResult, envelope)
 	if err != nil {
 		return nil, err
 	}

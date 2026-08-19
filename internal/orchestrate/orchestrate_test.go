@@ -183,13 +183,16 @@ func TestSubmitRelease_ValidFixture_ProducesVerifiedPersistedRelease(t *testing.
 	}
 	env, ok := r.Eligibility().Envelope()
 	if !ok {
-		t.Fatal("eligible release must carry the static envelope")
+		t.Fatal("eligible release must carry the resolved envelope")
 	}
 	if env.NextAction() != "start" {
 		t.Errorf("next action = %q, want start", env.NextAction())
 	}
-	if got := env.Stages(); len(got) != 4 || got[0] != 5 || got[3] != 100 {
-		t.Errorf("stages = %v, want 5 → 25 → 50 → 100", got)
+	// No assessment is wired into SubmitRelease yet, so this resolves to
+	// the default policy's DefaultLane (guarded) -- the most cautious
+	// configured lane, per Appendix C1's third rule.
+	if got := env.Stages(); len(got) != 5 || got[0] != 1 || got[4] != 100 {
+		t.Errorf("stages = %v, want 1 → 5 → 25 → 50 → 100", got)
 	}
 	if r.Eligibility().Retryable() {
 		t.Error("eligible is not retryable")

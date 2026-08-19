@@ -191,8 +191,8 @@ func TestFrom_EligibleRelease_JSONDecisionAndPendingSections(t *testing.T) {
 	if got := decision["eligibility"]; got != "eligible" {
 		t.Errorf("eligibility = %v, want eligible", got)
 	}
-	if got := decision["policy_version"]; got != "1" {
-		t.Errorf("policy_version = %v, want 1", got)
+	if got := decision["policy_version"]; got != "2" {
+		t.Errorf("policy_version = %v, want 2", got)
 	}
 	if got := decision["reason_code"]; got != "all_mandatory_evidence_verified" {
 		t.Errorf("reason_code = %v, want all_mandatory_evidence_verified", got)
@@ -202,8 +202,8 @@ func TestFrom_EligibleRelease_JSONDecisionAndPendingSections(t *testing.T) {
 	}
 	env := object(t, decision, "rollout_envelope")
 	stages, _ := env["stages"].([]any)
-	if len(stages) != 4 || stages[0] != float64(5) || stages[1] != float64(25) || stages[2] != float64(50) || stages[3] != float64(100) {
-		t.Errorf("stages = %v, want [5 25 50 100]", stages)
+	if len(stages) != 5 || stages[0] != float64(1) || stages[1] != float64(5) || stages[2] != float64(25) || stages[3] != float64(50) || stages[4] != float64(100) {
+		t.Errorf("stages = %v, want [1 5 25 50 100] (the default policy's guarded lane, no assessment wired here yet)", stages)
 	}
 	if got := env["next_action"]; got != "start" {
 		t.Errorf("next_action = %v, want start", got)
@@ -361,9 +361,9 @@ func TestFrom_EligibleRelease_ConciseMatchesJSON(t *testing.T) {
 		fixtureMergeSHA,
 		fixtureDigest,
 		"eligibility: eligible",
-		"policy_version: 1",
+		"policy_version: 2",
 		"All configured mandatory evidence verified",
-		"rollout_envelope: 5 → 25 → 50 → 100",
+		"rollout_envelope: 1 → 5 → 25 → 50 → 100",
 		"next_action: start",
 		"execution: pending",
 		"boundary: pending",
@@ -408,7 +408,7 @@ func TestFrom_EligibleRelease_DetailsHasFourSections(t *testing.T) {
 		fixtureMergeSHA,
 		fixtureDigest,
 		"eligibility: eligible",
-		"5 → 25 → 50 → 100",
+		"1 → 5 → 25 → 50 → 100",
 		"github",
 		"ghcr",
 		"safelane",
