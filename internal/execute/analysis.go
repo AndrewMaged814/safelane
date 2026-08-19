@@ -21,6 +21,10 @@ type AnalysisMetric struct {
 	Condition  string
 	Count      int
 	Successful int
+	// FailureLimit is the metric's own `failureLimit` (Appendix C3's
+	// fixture template sets 1): how many failed measurements Argo
+	// Rollouts tolerates before it aborts the rollout on its own (A3.4).
+	FailureLimit int
 }
 
 // AnalysisRun is the subset of `kubectl get analysisrun -o json` Appendix
@@ -49,6 +53,7 @@ type analysisRunDoc struct {
 		Metrics []struct {
 			Name             string `json:"name"`
 			SuccessCondition string `json:"successCondition"`
+			FailureLimit     int    `json:"failureLimit"`
 		} `json:"metrics"`
 	} `json:"spec"`
 }
@@ -85,6 +90,7 @@ func parseAnalysisRun(raw []byte) (AnalysisRun, error) {
 	for _, m := range doc.Spec.Metrics {
 		if m.Name == mr.Name {
 			metric.Condition = successConditionThreshold(m.SuccessCondition)
+			metric.FailureLimit = m.FailureLimit
 			break
 		}
 	}

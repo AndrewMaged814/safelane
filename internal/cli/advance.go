@@ -83,20 +83,27 @@ func runRolloutAdvance(ctx context.Context, args []string, stdout, stderr io.Wri
 		return ExitTimeout
 	}
 	if err != nil {
+		// A refusal (and any catch-up grant it followed) still belongs in
+		// the record even though the call itself failed: [advanceRollout]
+		// already appended it to result.release when there was one.
+		if result.release != nil {
+			if serr := st.Update(result.release); serr != nil {
+				fmt.Fprintf(stderr, "safelane rollout advance: %v could not be recorded: %v\n", err, serr)
+				return ExitFail
+			}
+		}
 		printRolloutRejection(stderr, err)
 		return ExitFail
 	}
 
-	if result.outcome == outcomeNoChange {
-		fmt.Fprint(stdout, result.Render())
-		return ExitOK
-	}
-
 	if err := st.Update(result.release); err != nil {
-		fmt.Fprintf(stderr, "safelane rollout advance: the advance was granted but could not be persisted: %v\n", err)
+		fmt.Fprintf(stderr, "safelane rollout advance: the outcome was decided but could not be persisted: %v\n", err)
 		return ExitFail
 	}
 	fmt.Fprint(stdout, result.Render())
+	if result.outcome == outcomeArgoAborted {
+		return ExitFail
+	}
 	return ExitOK
 }
 
@@ -149,6 +156,12 @@ const (
 	outcomeNoChange advanceOutcome = iota
 	outcomePromotedComplete
 	outcomePromotedAtGate
+	// outcomeArgoAborted is A3.4's payoff: WaitForGate stopped at
+	// StateDegraded or StateAborted -- a deliberately failing analysis
+	// tripped its failureLimit and Argo Rollouts aborted the rollout on
+	// its own. This is not a SafeLane refusal (there is no *release.Error
+	// for it); it is a fact to report and record, exit 1 regardless.
+	outcomeArgoAborted
 )
 
 // advanceResult is the whole `rollout advance` outcome, before any of it
@@ -217,11 +230,41 @@ func advanceRollout(ctx context.Context, r *release.Release, ex *execute.Executo
 		History:  history,
 		Now:      now(),
 	})
-	if rerr != nil {
-		return advanceResult{}, rerr
+
+	// A catch-up grant belongs in the record regardless of what this call
+	// goes on to decide with it -- a refusal that follows, an error that
+	// follows, or an ordinary promotion. Apply it once, up front, and
+	// thread the result through every return path below.
+	updated := r
+	if plan.catchUp != nil {
+		updated, err = updated.WithExecution(*plan.catchUp)
+		if err != nil {
+			return advanceResult{}, err
+		}
 	}
 
-	result := advanceResult{release: r, weights: weights, requestedWeight: plan.requestedWeight,
+	if rerr != nil {
+		result := advanceResult{release: updated}
+		// requestedWeight is 0 only for the two refusals decideAdvance
+		// returns before it ever computes one (rollout_not_started,
+		// rollout_closed) -- there is no transition to record against
+		// those. Every other refusal names the weight it turned down,
+		// and Appendix C2's own record shows a refusal belongs in the
+		// log: A3.5's proof reads it back.
+		if plan.requestedWeight != 0 {
+			updated, err = updated.WithExecution(release.ExecutionEntry{
+				At: now(), Verb: release.VerbAdvance, RequestedWeight: plan.requestedWeight,
+				Outcome: release.OutcomeRefused, ReasonCode: rerr.Code,
+			})
+			if err != nil {
+				return advanceResult{}, err
+			}
+			result.release = updated
+		}
+		return result, rerr
+	}
+
+	result := advanceResult{release: updated, weights: weights, requestedWeight: plan.requestedWeight,
 		observedWeight: plan.observedWeight, grantedAt: plan.grantedAt, nextAllowed: plan.nextAllowed, timeout: timeout}
 
 	if plan.kind == planNoChange {
@@ -241,18 +284,36 @@ func advanceRollout(ctx context.Context, r *release.Release, ex *execute.Executo
 	if waitErr != nil {
 		return result, waitErr
 	}
+
+	// A3.4's payoff: a deliberately failing analysis tripped its own
+	// failureLimit and Argo Rollouts aborted the rollout on its own. This
+	// is not a SafeLane refusal -- there is no *release.Error for it --
+	// but the record must still show it happened and why.
+	if final.State == execute.StateDegraded || final.State == execute.StateAborted {
+		entry := release.ExecutionEntry{At: now(), Verb: release.VerbArgoAbort, Outcome: release.OutcomeAborted, ReasonCode: "analysis_failed"}
+		if realName := backgroundAnalysisRunName(ex.Rollout, final); realName != "" {
+			run, err := ex.GetAnalysisRun(ctx, realName)
+			if err != nil {
+				return result, err
+			}
+			result.analysisRun = run
+			result.friendlyName = analysisDisplayName(application, realName)
+			entry.Analysis = fmt.Sprintf("%s %s", result.friendlyName, run.Phase)
+			entry.Detail = fmt.Sprintf("%s measured %.2f, condition %s", run.Metric.Name, run.Metric.Measured, run.Metric.Condition)
+		}
+		updated, err = updated.WithExecution(entry)
+		if err != nil {
+			return result, err
+		}
+		result.release = updated
+		result.outcome = outcomeArgoAborted
+		return result, nil
+	}
+
 	if final.State != execute.StateAtGate && final.State != execute.StateComplete {
 		return result, release.Invalid("rollout_did_not_reach_a_gate", "",
 			fmt.Sprintf("the rollout reached state %q instead of a gate or completion", final.State),
 			"Read `safelane status` for detail.")
-	}
-
-	updated := r
-	if plan.catchUp != nil {
-		updated, err = updated.WithExecution(*plan.catchUp)
-		if err != nil {
-			return result, err
-		}
 	}
 
 	grantedAt := now()
@@ -344,6 +405,12 @@ func decideAdvance(p advanceParams) (advancePlan, *release.Error) {
 	}
 
 	observed := p.Observed.CurrentWeight
+
+	// If Argo is already ahead of the last grant this release's own
+	// record knows about, that gap is caught up here, before anything
+	// else is decided -- Appendix C7's first branch. It is recorded
+	// regardless of what the rest of this call goes on to do, including a
+	// refusal: the gap is real whether or not this specific request is.
 	var catchUp *release.ExecutionEntry
 	if observed > granted {
 		entry := release.ExecutionEntry{At: p.Now, Verb: release.VerbAdvance, RequestedWeight: observed, Outcome: release.OutcomeGranted}
@@ -351,45 +418,60 @@ func decideAdvance(p advanceParams) (advancePlan, *release.Error) {
 		granted, grantedAt = observed, p.Now
 	}
 
+	// nextAllowed is read off the *true* current position -- the
+	// caught-up one, when a catch-up just happened -- since that is what
+	// any further request, explicit or default, must be judged against.
 	nextAllowed, hasNext := nextAllowedAfter(p.Weights, granted)
 
 	var requested int
 	switch {
 	case p.ToFlag != nil:
 		requested = *p.ToFlag
+	case catchUp != nil:
+		// No explicit target, and Argo already moved past what this
+		// release's record had last granted: an agent that did not see
+		// the response to whichever call got it there is, from its own
+		// point of view, still only trying to reach *that* weight. It
+		// has already arrived. This call's job is to notice and stop --
+		// not to also push one step further in the same breath. A
+		// further step needs its own call.
+		requested = observed
 	case hasNext:
 		requested = nextAllowed
 	default:
-		return advancePlan{}, release.Invalid("rollout_closed", "",
+		return advancePlan{catchUp: catchUp}, release.Invalid("rollout_closed", "",
 			"this release has already reached its final weight",
 			"nothing further may advance")
 	}
 
 	if observed == requested {
 		return advancePlan{kind: planNoChange, requestedWeight: requested, observedWeight: observed,
-			nextAllowed: nextAllowed, grantedAt: grantedAt}, nil
+			nextAllowed: nextAllowed, grantedAt: grantedAt, catchUp: catchUp}, nil
 	}
 	if requested < observed {
-		return advancePlan{}, release.Invalid("transition_not_permitted", "to",
-			fmt.Sprintf("weight %d is behind the current weight %d\n      the envelope moves forward only; use abort to withdraw",
-				requested, observed),
-			"")
+		return advancePlan{requestedWeight: requested, observedWeight: observed, catchUp: catchUp},
+			release.Invalid("transition_not_permitted", "to",
+				fmt.Sprintf("weight %d is behind the current weight %d\n      the envelope moves forward only; use abort to withdraw",
+					requested, observed),
+				"")
 	}
 	if !hasNext || requested > nextAllowed {
-		return advancePlan{}, release.Invalid("transition_exceeds_envelope", "to",
-			fmt.Sprintf("you requested weight %d; the envelope permits %d next\n"+
-				"      current weight %d, granted %s\n"+
-				"      envelope %s (lane %q,\n"+
-				"               digest %s)",
-				requested, nextAllowed,
-				observed, grantedAt.UTC().Format("15:04:05")+"Z",
-				weightLadder(p.Weights), p.Lane, p.Digest),
-			fmt.Sprintf("request %d, or run advance with no --to flag", nextAllowed))
+		return advancePlan{requestedWeight: requested, observedWeight: observed, catchUp: catchUp},
+			release.Invalid("transition_exceeds_envelope", "to",
+				fmt.Sprintf("you requested weight %d; the envelope permits %d next\n"+
+					"      current weight %d, granted %s\n"+
+					"      envelope %s (lane %q,\n"+
+					"               digest %s)",
+					requested, nextAllowed,
+					observed, grantedAt.UTC().Format("15:04:05")+"Z",
+					weightLadder(p.Weights), p.Lane, p.Digest),
+				fmt.Sprintf("request %d, or run advance with no --to flag", nextAllowed))
 	}
 	if p.Observed.State != execute.StateAtGate {
-		return advancePlan{}, release.Invalid("rollout_not_at_gate", "",
-			fmt.Sprintf("the Rollout is %s toward weight %d; it is not at a gate", argoStateWord(p.Observed.State), requested),
-			"wait for the gate, then retry")
+		return advancePlan{requestedWeight: requested, observedWeight: observed, catchUp: catchUp},
+			release.Invalid("rollout_not_at_gate", "",
+				fmt.Sprintf("the Rollout is %s toward weight %d; it is not at a gate", argoStateWord(p.Observed.State), requested),
+				"wait for the gate, then retry")
 	}
 
 	return advancePlan{kind: planPromote, requestedWeight: requested, observedWeight: observed,
@@ -494,6 +576,8 @@ func (r advanceResult) Render() string {
 		return r.renderNoChange()
 	case outcomePromotedComplete:
 		return r.renderComplete()
+	case outcomeArgoAborted:
+		return r.renderArgoAbort()
 	default:
 		return r.renderAtGate()
 	}
@@ -570,6 +654,54 @@ func (r advanceResult) renderAtGate() string {
 	} else {
 		fmt.Fprintln(&b, "next action   none. This release is closed.")
 	}
+	return b.String()
+}
+
+// renderArgoAbort is A3.4's payoff, copied verbatim from Appendix A: the
+// promotion that reached requestedWeight tripped a deliberately failing
+// analysis and Argo Rollouts aborted the rollout on its own, not SafeLane.
+//
+// The stable digest printed here is this release's own verified, pinned
+// artifact digest -- the only digest SafeLane's own record actually
+// carries. Reading back the *previous* ReplicaSet's own image would need
+// a kubectl call Appendix C5 never lists (there is no stable-image lookup
+// in its exact invocations); this is the closest fact SafeLane can
+// honestly stand behind rather than a literal claim about which exact
+// image traffic reverted to.
+func (r advanceResult) renderArgoAbort() string {
+	var b strings.Builder
+	fmt.Fprintln(&b)
+	fmt.Fprintf(&b, "Promoting %d → %d…\n", r.observedWeight, r.requestedWeight)
+	fmt.Fprintf(&b, "Argo Rollouts: Progressing → weight %d\n", r.requestedWeight)
+	if r.friendlyName != "" {
+		fmt.Fprintf(&b, "Argo Rollouts: AnalysisRun %s → %s\n", r.friendlyName, r.analysisRun.Phase)
+		fmt.Fprintf(&b, "%s%s  measured %.2f, condition %s\n",
+			strings.Repeat(" ", analysisDetailIndent), r.analysisRun.Metric.Name, r.analysisRun.Metric.Measured, r.analysisRun.Metric.Condition)
+		fmt.Fprintf(&b, "%s(%d of %d measurements below threshold, failureLimit %d)\n",
+			strings.Repeat(" ", analysisDetailIndent),
+			r.analysisRun.Metric.Count-r.analysisRun.Metric.Successful, r.analysisRun.Metric.Count, r.analysisRun.Metric.FailureLimit)
+	}
+	fmt.Fprintln(&b, "Argo Rollouts: Degraded → automatic abort → weight 0")
+	fmt.Fprintln(&b)
+	fmt.Fprintln(&b, "The rollout was aborted by Argo Rollouts, not by SafeLane.")
+	digest := ""
+	if bundle, ok := r.release.Bundle(); ok {
+		digest = shortDigest(bundle.PinnedDigest())
+	}
+	fmt.Fprintf(&b, "Stable traffic is restored to %s.\n", digest)
+	fmt.Fprintln(&b)
+
+	lane := ""
+	if a, ok := r.release.Assessment(); ok {
+		lane = a.Lane
+	}
+	last := 0
+	if len(r.weights) > 0 {
+		last = r.weights[len(r.weights)-1]
+	}
+	fmt.Fprintf(&b, "lane          %s\n", lane)
+	fmt.Fprintf(&b, "reached       %d of %d\n", r.requestedWeight, last)
+	fmt.Fprintln(&b, "next action   none. This release is closed.")
 	return b.String()
 }
 

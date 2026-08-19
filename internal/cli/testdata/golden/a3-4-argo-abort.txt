@@ -1,0 +1,14 @@
+
+Promoting 1 → 5…
+Argo Rollouts: Progressing → weight 5
+Argo Rollouts: AnalysisRun podinfo-success-rate-4 → Failed
+                 request-success-rate  measured 0.71, condition >= 0.99
+                 (2 of 3 measurements below threshold, failureLimit 1)
+Argo Rollouts: Degraded → automatic abort → weight 0
+
+The rollout was aborted by Argo Rollouts, not by SafeLane.
+Stable traffic is restored to sha256:11bd6a44…7742.
+
+lane          guarded
+reached       5 of 100
+next action   none. This release is closed.

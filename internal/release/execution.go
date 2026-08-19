@@ -17,6 +17,14 @@ const (
 	// -- a failed AnalysisRun, most often -- which SafeLane observes but
 	// never causes (#57).
 	VerbArgoAbort ExecutionVerb = "argo_abort"
+	// VerbPause is a caller's own `rollout pause` -- narrowing a release
+	// by stopping it exactly where it is. Never refused (ticket 11).
+	VerbPause ExecutionVerb = "pause"
+	// VerbAbort is a caller's own `rollout abort --reason`, distinct from
+	// [VerbArgoAbort]: this one SafeLane performed at the caller's own
+	// request, not one Argo Rollouts decided on its own. Never refused
+	// (ticket 11).
+	VerbAbort ExecutionVerb = "abort"
 )
 
 // ExecutionOutcome is what came of one execution verb.
@@ -58,7 +66,7 @@ func (e ExecutionEntry) Validate() error {
 			"an execution entry must record when it happened"))
 	}
 	switch e.Verb {
-	case VerbStart, VerbAdvance, VerbArgoAbort:
+	case VerbStart, VerbAdvance, VerbArgoAbort, VerbPause, VerbAbort:
 	default:
 		errs = append(errs, Internal("invalid_execution_verb",
 			fmt.Sprintf("%q is not a recognised execution verb", e.Verb)))

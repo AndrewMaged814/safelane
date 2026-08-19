@@ -282,3 +282,86 @@ func TestClassifyRunError_OtherFailureIsClusterUnreachable(t *testing.T) {
 		t.Errorf("code = %q, want cluster_unreachable", rerr.Code)
 	}
 }
+
+func TestPause_IsArgoRolloutsPauseWithTheControllerFlags(t *testing.T) {
+	fr := &fakeRunner{}
+	fr.enqueue("rollout.argoproj.io/podinfo paused\n", nil)
+	ex := execute.New(execute.Config{
+		Namespace: "podinfo", Rollout: "podinfo",
+		ControllerKubeconfig: "controller.kubeconfig", ControllerContext: "safelane-controller",
+	})
+	ex.Run = fr.run
+
+	if err := ex.Pause(context.Background()); err != nil {
+		t.Fatalf("Pause: %v", err)
+	}
+	got := strings.Join(fr.calls[0], " ")
+	want := "argo rollouts pause podinfo -n podinfo --kubeconfig controller.kubeconfig --context safelane-controller"
+	if got != want {
+		t.Errorf("pause args = %q, want %q", got, want)
+	}
+}
+
+func TestPause_ClassifiesAFailureLikeEveryOtherCall(t *testing.T) {
+	fr := &fakeRunner{}
+	fr.enqueue("", &exec.Error{Name: "kubectl", Err: exec.ErrNotFound})
+	ex := newTestExecutor(fr)
+
+	err := ex.Pause(context.Background())
+	var rerr *release.Error
+	if !errors.As(err, &rerr) || rerr.Code != "kubectl_missing" {
+		t.Fatalf("err = %v, want a kubectl_missing *release.Error", err)
+	}
+}
+
+func TestAbort_IsArgoRolloutsAbortWithTheControllerFlags(t *testing.T) {
+	fr := &fakeRunner{}
+	fr.enqueue("rollout.argoproj.io/podinfo aborted\n", nil)
+	ex := execute.New(execute.Config{
+		Namespace: "podinfo", Rollout: "podinfo",
+		ControllerKubeconfig: "controller.kubeconfig", ControllerContext: "safelane-controller",
+	})
+	ex.Run = fr.run
+
+	if err := ex.Abort(context.Background()); err != nil {
+		t.Fatalf("Abort: %v", err)
+	}
+	got := strings.Join(fr.calls[0], " ")
+	want := "argo rollouts abort podinfo -n podinfo --kubeconfig controller.kubeconfig --context safelane-controller"
+	if got != want {
+		t.Errorf("abort args = %q, want %q", got, want)
+	}
+}
+
+func TestAbort_ClassifiesAFailureLikeEveryOtherCall(t *testing.T) {
+	fr := &fakeRunner{}
+	fr.enqueue("", &exec.Error{Name: "kubectl", Err: exec.ErrNotFound})
+	ex := newTestExecutor(fr)
+
+	err := ex.Abort(context.Background())
+	var rerr *release.Error
+	if !errors.As(err, &rerr) || rerr.Code != "kubectl_missing" {
+		t.Fatalf("err = %v, want a kubectl_missing *release.Error", err)
+	}
+}
+
+func TestPauseAndAbort_NeverGenerateFull(t *testing.T) {
+	fr := &fakeRunner{}
+	fr.enqueue("rollout.argoproj.io/podinfo paused\n", nil)
+	fr.enqueue("rollout.argoproj.io/podinfo aborted\n", nil)
+	ex := newTestExecutor(fr)
+
+	if err := ex.Pause(context.Background()); err != nil {
+		t.Fatalf("Pause: %v", err)
+	}
+	if err := ex.Abort(context.Background()); err != nil {
+		t.Fatalf("Abort: %v", err)
+	}
+	for _, call := range fr.calls {
+		for _, a := range call {
+			if a == "--full" {
+				t.Fatalf("generated argument list %v contains --full", call)
+			}
+		}
+	}
+}

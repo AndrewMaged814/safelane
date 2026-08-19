@@ -28,10 +28,10 @@ const defaultGateTimeout = 5 * time.Minute
 func RolloutCommand(root, defaultStoreDir string) Command {
 	return Command{
 		Name:    "rollout",
-		Summary: "start or advance a release's canary rollout, waiting for the next gate",
+		Summary: "start, advance, pause, or abort a release's canary rollout",
 		Run: func(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 			if len(args) == 0 {
-				fmt.Fprintln(stderr, "safelane rollout: a subcommand is required (start, advance)")
+				fmt.Fprintln(stderr, "safelane rollout: a subcommand is required (start, advance, pause, abort)")
 				return ExitUsage
 			}
 			switch args[0] {
@@ -39,8 +39,12 @@ func RolloutCommand(root, defaultStoreDir string) Command {
 				return runRolloutStart(ctx, args[1:], stdout, stderr, root, defaultStoreDir)
 			case "advance":
 				return runRolloutAdvance(ctx, args[1:], stdout, stderr, root, defaultStoreDir)
+			case "pause":
+				return runRolloutPause(ctx, args[1:], stdout, stderr, root, defaultStoreDir)
+			case "abort":
+				return runRolloutAbort(ctx, args[1:], stdout, stderr, root, defaultStoreDir)
 			default:
-				fmt.Fprintf(stderr, "safelane rollout: unknown subcommand %q (supported: start, advance)\n", args[0])
+				fmt.Fprintf(stderr, "safelane rollout: unknown subcommand %q (supported: start, advance, pause, abort)\n", args[0])
 				return ExitUsage
 			}
 		},

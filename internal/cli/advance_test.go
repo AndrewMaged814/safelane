@@ -118,6 +118,23 @@ const analysisRunJSON = `{"status":{"phase":"Successful","metricResults":[{"name
 	`"successful":3,"measurements":[{"value":"[1]"},{"value":"[1]"},{"value":"[1]"}]}]},` +
 	`"spec":{"metrics":[{"name":"request-success-rate","successCondition":"len(result) > 0 && result[0] >= 0.99"}]}}`
 
+// failingAnalysisRunJSON is A3.4's own AnalysisRun: 2 of 3 measurements
+// below threshold, failureLimit 1 tripped -- the deliberately failing
+// analysis that ends a rollout with Argo's own abort, not SafeLane's.
+const failingAnalysisRunJSON = `{"status":{"phase":"Failed","metricResults":[{"name":"request-success-rate","count":3,` +
+	`"successful":1,"measurements":[{"value":"[1]"},{"value":"[0]"},{"value":"[0.71]"}]}]},` +
+	`"spec":{"metrics":[{"name":"request-success-rate","successCondition":"len(result) > 0 && result[0] >= 0.99","failureLimit":1}]}}`
+
+// degradedAbortStatus is Argo's own status once a background analysis
+// trips its failureLimit: Abort is set (classifyState reports this as
+// StateAborted, ahead of Degraded, per its own priority order), and the
+// background AnalysisRun's real name is still on the Rollout's status.
+func degradedAbortStatus(weights []int, revision string) string {
+	return fmt.Sprintf(`{"status":{"phase":"Degraded","abort":true,`+
+		`"canary":{"currentBackgroundAnalysisRunStatus":{"name":"podinfo-5f9b48bf7c-%s","status":"Failed"}}},`+
+		`"spec":{"strategy":{"canary":{"steps":[%s]}}}}`, revision, stepsJSON(weights))
+}
+
 func TestRolloutAdvance_ToCompletion_MatchesA23(t *testing.T) {
 	rel := fastLaneStarted(t)
 
@@ -205,7 +222,7 @@ func TestRolloutAdvance_OverWideRequest_MatchesA33(t *testing.T) {
 	ex := execute.New(execute.Config{Namespace: "podinfo", Rollout: "podinfo"})
 	ex.Run = q.run
 
-	_, err := advanceRollout(context.Background(), rel, ex, "podinfo", &to, time.Minute, time.Now)
+	result, err := advanceRollout(context.Background(), rel, ex, "podinfo", &to, time.Minute, time.Now)
 	if err == nil {
 		t.Fatal("want a refusal, got nil error")
 	}
@@ -227,6 +244,19 @@ func TestRolloutAdvance_OverWideRequest_MatchesA33(t *testing.T) {
 		if call[0] != "get" {
 			t.Errorf("a refused advance must never do anything but read status, got: %v", call)
 		}
+	}
+
+	// A refusal belongs in the record too (Appendix C2's own example
+	// shows one): result.release carries it even though the call itself
+	// returned an error, so the caller can still persist it.
+	if result.release == nil {
+		t.Fatal("a refusal with a named requested weight must still return a release to persist")
+	}
+	entries := result.release.Execution()
+	last := entries[len(entries)-1]
+	if last.Verb != release.VerbAdvance || last.RequestedWeight != 100 ||
+		last.Outcome != release.OutcomeRefused || last.ReasonCode != "transition_exceeds_envelope" {
+		t.Errorf("last entry = %+v, want a refused advance to weight 100 (transition_exceeds_envelope)", last)
 	}
 }
 
@@ -348,6 +378,97 @@ func TestRolloutAdvance_Timeout_MatchesN12(t *testing.T) {
 			continue
 		}
 		t.Errorf("a timed-out wait must never do anything but poll (after one promote), got: %v", call)
+	}
+}
+
+// TestRolloutAdvance_Idempotent_MatchesN12 is ticket 11's idempotency
+// contract: an agent that promoted 1 -> 5 successfully never saw the
+// response and retries bare `advance` with no idea it already worked.
+// This release's own record still shows only the start grant (weight 1);
+// Argo, live, is already at gate 2 (weight 5) -- exactly the transition
+// the earlier call must have made. The retry must catch up to that
+// reality and stop there: one recorded grant, no second promotion.
+func TestRolloutAdvance_Idempotent_MatchesN12(t *testing.T) {
+	rel := guardedLaneStarted(t)
+
+	q := &queueRunner{}
+	q.enqueue(atGateStatus(guardedWeights, 5), nil) // GetStatus before deciding: Argo is already at 5
+
+	ex := execute.New(execute.Config{Namespace: "podinfo", Rollout: "podinfo"})
+	ex.Run = q.run
+	now := time.Date(2026, 8, 20, 14, 26, 48, 0, time.UTC)
+
+	result, err := advanceRollout(context.Background(), rel, ex, "podinfo", nil, time.Minute, func() time.Time { return now })
+	if err != nil {
+		t.Fatalf("advanceRollout: %v", err)
+	}
+	if result.outcome != outcomeNoChange {
+		t.Fatalf("outcome = %v, want outcomeNoChange", result.outcome)
+	}
+	assertGolden(t, "n12-advance-idempotent.txt", result.Render())
+
+	entries := result.release.Execution()
+	if len(entries) != 2 {
+		t.Fatalf("execution history = %+v, want 2 entries (start, catch-up advance)", entries)
+	}
+	last := entries[1]
+	if last.Verb != release.VerbAdvance || last.RequestedWeight != 5 || last.Outcome != release.OutcomeGranted {
+		t.Errorf("last entry = %+v, want a granted catch-up advance to weight 5", last)
+	}
+
+	for _, call := range q.calls {
+		if call[0] != "get" {
+			t.Errorf("a no-change retry must never do anything but read status, got: %v", call)
+		}
+	}
+}
+
+// TestRolloutAdvance_ArgoAborts_MatchesA34 is A3.4's payoff: a
+// deliberately failing analysis trips its own failureLimit and Argo
+// Rollouts aborts the rollout on its own, mid-promotion. This is not a
+// SafeLane refusal -- the output must say plainly that Argo did this, not
+// SafeLane -- and the execution log must still name the AnalysisRun and
+// the measurement that failed.
+func TestRolloutAdvance_ArgoAborts_MatchesA34(t *testing.T) {
+	rel := guardedLaneStarted(t)
+
+	q := &queueRunner{}
+	q.enqueue(atGateStatus(guardedWeights, 1), nil) // GetStatus before deciding
+	q.enqueue("", nil)                              // promote
+	q.enqueue(degradedAbortStatus(guardedWeights, "4"), nil)
+	q.enqueue(failingAnalysisRunJSON, nil) // GetAnalysisRun
+
+	ex := execute.New(execute.Config{Namespace: "podinfo", Rollout: "podinfo"})
+	ex.Run = q.run
+	ex.Sleep = func(time.Duration) {}
+
+	result, err := advanceRollout(context.Background(), rel, ex, "podinfo", nil, time.Minute, time.Now)
+	if err != nil {
+		t.Fatalf("advanceRollout: %v", err)
+	}
+	if result.outcome != outcomeArgoAborted {
+		t.Fatalf("outcome = %v, want outcomeArgoAborted", result.outcome)
+	}
+	assertGolden(t, "a3-4-argo-abort.txt", result.Render())
+
+	entries := result.release.Execution()
+	last := entries[len(entries)-1]
+	if last.Verb != release.VerbArgoAbort || last.Outcome != release.OutcomeAborted || last.ReasonCode != "analysis_failed" {
+		t.Errorf("last entry = %+v, want a recorded argo_abort/aborted/analysis_failed", last)
+	}
+	if last.Analysis == "" {
+		t.Error("an Argo-own abort must name the AnalysisRun it observed")
+	}
+	if last.Detail == "" {
+		t.Error("an Argo-own abort must record the measurement that failed")
+	}
+
+	for _, call := range q.calls {
+		for _, a := range call {
+			if a == "--full" {
+				t.Fatalf("generated argument list %v contains --full", call)
+			}
+		}
 	}
 }
 

@@ -206,6 +206,27 @@ func (e *Executor) Promote(ctx context.Context) error {
 	return err
 }
 
+// Pause runs `kubectl argo rollouts pause` (Appendix C5), holding the
+// Rollout exactly where it is. Like Promote, it is a privileged call and
+// never generates `--full` -- there is nothing for that flag to mean here,
+// but it goes through the same run helper as every other call regardless.
+func (e *Executor) Pause(ctx context.Context) error {
+	args := append([]string{"argo", "rollouts", "pause", e.Rollout, "-n", e.Namespace}, e.privilegedFlags()...)
+	_, err := e.run(ctx, "kubectl argo rollouts pause", args, nil)
+	return err
+}
+
+// Abort runs `kubectl argo rollouts abort` (Appendix C5): the caller's own
+// abort, distinct from Argo Rollouts deciding to abort on its own after a
+// failed analysis (which SafeLane only ever observes, never issues). It
+// restores stable traffic; SafeLane's own job is recording who asked and
+// why, not the traffic shift itself.
+func (e *Executor) Abort(ctx context.Context) error {
+	args := append([]string{"argo", "rollouts", "abort", e.Rollout, "-n", e.Namespace}, e.privilegedFlags()...)
+	_, err := e.run(ctx, "kubectl argo rollouts abort", args, nil)
+	return err
+}
+
 // lastField returns the last whitespace-separated token of a line, which
 // is where every kubectl apply outcome word ("unchanged", "created",
 // "configured") lands regardless of the resource-type prefix before it.

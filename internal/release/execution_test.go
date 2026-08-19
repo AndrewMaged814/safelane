@@ -41,7 +41,7 @@ func TestExecutionEntry_ValidatesVerbAndOutcome(t *testing.T) {
 	}
 
 	bad := base
-	bad.Verb = "promote" // not one of start/advance/argo_abort
+	bad.Verb = "promote" // not one of start/advance/argo_abort/pause/abort
 	if err := bad.Validate(); err == nil {
 		t.Error("want an error for an unrecognised verb")
 	}
@@ -56,6 +56,22 @@ func TestExecutionEntry_ValidatesVerbAndOutcome(t *testing.T) {
 	bad.At = time.Time{}
 	if err := bad.Validate(); err == nil {
 		t.Error("want an error for a missing timestamp")
+	}
+}
+
+// TestExecutionEntry_ValidatesPauseAndAbort covers the two verbs ticket 11
+// added: a caller's own `rollout pause` and `rollout abort --reason`,
+// neither of which is ever refused so both only ever carry
+// [release.OutcomeGranted] / [release.OutcomeAborted].
+func TestExecutionEntry_ValidatesPauseAndAbort(t *testing.T) {
+	pause := release.ExecutionEntry{At: testTime, Verb: release.VerbPause, Outcome: release.OutcomeGranted}
+	if err := pause.Validate(); err != nil {
+		t.Errorf("a well-formed pause entry must validate, got %v", err)
+	}
+
+	abort := release.ExecutionEntry{At: testTime, Verb: release.VerbAbort, Outcome: release.OutcomeAborted, Detail: "bad canary"}
+	if err := abort.Validate(); err != nil {
+		t.Errorf("a well-formed abort entry must validate, got %v", err)
 	}
 }
 
