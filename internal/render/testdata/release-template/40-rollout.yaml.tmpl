@@ -33,8 +33,7 @@ spec:
       steps:
 {{- range .Steps }}
         - setWeight: {{ . }}
-        - pause:
-            duration: 60s
+        - pause: {}
 {{- end }}
   template:
     metadata:

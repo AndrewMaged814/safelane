@@ -30,6 +30,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	commands := []cli.Command{
 		versionCommand(),
 		cli.ReleaseCommand(".", defaultStoreDir),
+		cli.RolloutCommand(".", defaultStoreDir),
 		cli.ProofCommand(defaultStoreDir),
 		cli.InitCommand("."),
 		cli.IntegrationsCommand("."),

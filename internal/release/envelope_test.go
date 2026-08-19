@@ -70,17 +70,13 @@ func TestDeriveEnvelope_ParsesExplicitStepsAndAppendsTheImplicitFinalWeight(t *t
 	digest := hexDigest("c3d4")
 	rollout := rolloutResource(t, "      steps:\n"+
 		"        - setWeight: 1\n"+
-		"        - pause:\n"+
-		"            duration: 60s\n"+
+		"        - pause: {}\n"+
 		"        - setWeight: 5\n"+
-		"        - pause:\n"+
-		"            duration: 60s\n"+
+		"        - pause: {}\n"+
 		"        - setWeight: 25\n"+
-		"        - pause:\n"+
-		"            duration: 60s\n"+
+		"        - pause: {}\n"+
 		"        - setWeight: 50\n"+
-		"        - pause:\n"+
-		"            duration: 60s\n")
+		"        - pause: {}\n")
 
 	bundle, err := release.NewRenderedBundle(testTemplateIdentity(), testEnvelopeTarget(), digest,
 		[]release.RenderedResource{serviceResource(t, digest), rollout})
@@ -108,8 +104,7 @@ func TestDeriveEnvelope_FastLane_OneGate(t *testing.T) {
 	digest := hexDigest("e5f6")
 	rollout := rolloutResource(t, "      steps:\n"+
 		"        - setWeight: 5\n"+
-		"        - pause:\n"+
-		"            duration: 60s\n")
+		"        - pause: {}\n")
 	bundle, err := release.NewRenderedBundle(testTemplateIdentity(), testEnvelopeTarget(), digest,
 		[]release.RenderedResource{serviceResource(t, digest), rollout})
 	if err != nil {

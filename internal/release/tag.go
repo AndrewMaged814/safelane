@@ -99,4 +99,17 @@ var codeTags = map[string]string{
 	// assess: the two assessors.
 	"heuristic_failed":  TagAssess,
 	"model_unavailable": TagAssess,
+
+	// state: what the persisted release or the live Rollout says about
+	// itself, as opposed to a decision about it.
+	"rollout_not_started": TagState,
+	"rollout_not_at_gate": TagState,
+	"rollout_closed":      TagState,
+
+	// execute: the kubectl/Argo path itself, rather than any decision
+	// SafeLane made about what it found there.
+	"kubectl_missing":     TagExecute,
+	"cluster_unreachable": TagExecute,
+	"analysis_failed":     TagExecute,
+	"gate_wait_timeout":   TagExecute,
 }

@@ -39,6 +39,11 @@ type ReleaseParams struct {
 	// present only for an eligible release: assessment is a question about a
 	// change that may ship at all. The zero value means "not assessed".
 	Assessment assess.Assessment
+	// Execution is the ordered history of what happened after eligibility:
+	// a granted start, a refused advance, Argo's own abort. It is present
+	// only for an eligible release -- nothing may start against a release
+	// that never earned a lane and an envelope. Nil means "never started".
+	Execution []ExecutionEntry
 	// CreatedAt is SafeLane's own timestamp, distinct from the caller's claimed
 	// metadata.submitted_at.
 	CreatedAt time.Time
@@ -77,6 +82,7 @@ type Release struct {
 	bundle      *RenderedBundle
 	eligibility Eligibility
 	assessment  assess.Assessment
+	execution   []ExecutionEntry
 }
 
 // NewRelease validates and assembles the Release record.
@@ -164,6 +170,19 @@ func NewRelease(p ReleaseParams) (*Release, error) {
 			"an assessment must record the lane its risk resolved to"))
 	}
 
+	// The execution invariant mirrors the assessment one just above: a
+	// rollout cannot have started against a release that never earned a
+	// lane and an envelope.
+	if len(p.Execution) > 0 && p.Eligibility.Status() != EligibilityEligible {
+		errs = append(errs, Internal("execution_without_eligibility",
+			fmt.Sprintf("execution history was attached to a %s release; nothing may start against a release that is not eligible", p.Eligibility.Status())))
+	}
+	for _, entry := range p.Execution {
+		if err := entry.Validate(); err != nil {
+			errs = append(errs, flatten(err)...)
+		}
+	}
+
 	if p.Bundle != nil {
 		if p.Bundle.IsZero() {
 			errs = append(errs, Internal("unset_bundle",
@@ -199,6 +218,9 @@ func NewRelease(p ReleaseParams) (*Release, error) {
 		evidence:    p.Evidence,
 		eligibility: p.Eligibility,
 		assessment:  p.Assessment,
+	}
+	if len(p.Execution) > 0 {
+		r.execution = append([]ExecutionEntry{}, p.Execution...)
 	}
 	if p.Bundle != nil {
 		bundle := *p.Bundle
@@ -269,6 +291,39 @@ func (r *Release) Assessment() (assess.Assessment, bool) {
 	return r.assessment, true
 }
 
+// Execution returns the release's execution history, in order. It is empty
+// for a release that never started.
+func (r *Release) Execution() []ExecutionEntry {
+	if len(r.execution) == 0 {
+		return nil
+	}
+	return append([]ExecutionEntry{}, r.execution...)
+}
+
+// WithExecution returns a new Release with entry appended to the execution
+// history. r itself is not mutated: a Release is otherwise immutable once
+// built, and every later transition -- a granted start, a refused advance,
+// Argo's own abort -- produces a new value that goes back through
+// [NewRelease], so every invariant is re-checked rather than assumed still
+// to hold.
+func (r *Release) WithExecution(entry ExecutionEntry) (*Release, error) {
+	execution := append(append([]ExecutionEntry{}, r.execution...), entry)
+	var bundlePtr *RenderedBundle
+	if b, ok := r.Bundle(); ok {
+		bundlePtr = &b
+	}
+	return NewRelease(ReleaseParams{
+		ID:          r.ID,
+		Request:     r.request,
+		Evidence:    r.evidence,
+		Bundle:      bundlePtr,
+		Eligibility: r.eligibility,
+		Assessment:  r.assessment,
+		Execution:   execution,
+		CreatedAt:   r.CreatedAt,
+	})
+}
+
 // TemplateIdentity returns the pinned Release Template identity, if a bundle exists.
 func (r *Release) TemplateIdentity() (TemplateIdentity, bool) {
 	if r.bundle == nil {
@@ -295,6 +350,7 @@ type releaseJSON struct {
 	Bundle        *RenderedBundle   `json:"bundle"`
 	Eligibility   Eligibility       `json:"eligibility"`
 	Assessment    assess.Assessment `json:"assessment,omitempty"`
+	Execution     []ExecutionEntry  `json:"execution,omitempty"`
 }
 
 // MarshalJSON writes the persisted record.
@@ -308,6 +364,7 @@ func (r *Release) MarshalJSON() ([]byte, error) {
 		Bundle:        r.bundle,
 		Eligibility:   r.eligibility,
 		Assessment:    r.assessment,
+		Execution:     r.execution,
 	})
 }
 
@@ -334,6 +391,7 @@ func (r *Release) UnmarshalJSON(data []byte) error {
 		Bundle:      w.Bundle,
 		Eligibility: w.Eligibility,
 		Assessment:  w.Assessment,
+		Execution:   w.Execution,
 		CreatedAt:   w.CreatedAt,
 	})
 	if err != nil {

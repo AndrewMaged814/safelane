@@ -1,0 +1,16 @@
+
+Applying the Rendered Manifest Bundle…
+  podinfo-stable        Service           unchanged
+  podinfo-canary        Service           unchanged
+  podinfo-success-rate  AnalysisTemplate  unchanged
+  podinfo               Ingress           unchanged
+  podinfo               Rollout           patched → sha256:1f4827c4…30f5f
+
+Argo Rollouts: Progressing → weight 5
+Argo Rollouts: Paused at gate 1 of 1
+
+  weight    5 █░░░░░░░░░░░░░░░░░░░  granted   14:21:44Z
+          100 ░░░░░░░░░░░░░░░░░░░░  next allowed
+
+lane          fast
+next action   advance (100)

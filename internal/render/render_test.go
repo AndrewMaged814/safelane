@@ -560,6 +560,36 @@ func TestGateCountingIsWeightsMinusOne(t *testing.T) {
 	}
 }
 
+// TestPausesAreIndefinite is ticket 09's checklist item made executable:
+// nothing about the Rollout self-resumes. A `pause: { duration: ... }`
+// step resumes on its own after the clock runs out; only `pause: {}` waits
+// for an explicit `argo rollouts promote`, which is the whole point of a
+// gate SafeLane controls.
+func TestPausesAreIndefinite(t *testing.T) {
+	tmpl := loadFixture(t)
+	ev := testEvidence(t, digestA)
+	bundle, err := render.Render(tmpl, testTarget(), ev, []int{1, 5, 25, 50, 100})
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	var rollout release.RenderedResource
+	for _, res := range bundle.Resources() {
+		if res.Ref().Kind == "Rollout" {
+			rollout = res
+		}
+	}
+	if rollout.IsZero() {
+		t.Fatal("no Rollout resource in the rendered bundle")
+	}
+	body := string(rollout.Bytes())
+	if strings.Contains(body, "duration") {
+		t.Errorf("rendered Rollout contains a pause duration; every pause must be indefinite (pause: {}), got:\n%s", body)
+	}
+	if gotPauses := strings.Count(body, "- pause: {}"); gotPauses != 4 {
+		t.Errorf("got %d bare `- pause: {}` entries, want 4 (one per gate, none of them timed)", gotPauses)
+	}
+}
+
 // TestDeriveEnvelope_RoundTripsThroughTheRealTemplate is ticket 07's
 // full round trip against the actual fixture Release Template, not a
 // hand-built stand-in: for both a narrow and a wide lane, the envelope

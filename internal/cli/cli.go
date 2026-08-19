@@ -14,11 +14,18 @@ import (
 // Exit codes follow the Unix convention an agent can branch on without
 // parsing output: 0 success, 1 the subcommand ran and reported a failure
 // (e.g. a rejected release request), 2 a usage error (unknown command,
-// missing/malformed flags).
+// missing/malformed flags), 3 a promotion was sent but its outcome is
+// unknown (Appendix C6).
+//
+// ExitTimeout exists so an agent never confuses "I don't know yet" with
+// "it failed": a promotion that times out waiting for Argo may already
+// have taken effect, and retrying it would be the one thing Appendix C6
+// forbids. Only `rollout start` and `rollout advance` return it.
 const (
-	ExitOK    = 0
-	ExitFail  = 1
-	ExitUsage = 2
+	ExitOK      = 0
+	ExitFail    = 1
+	ExitUsage   = 2
+	ExitTimeout = 3
 )
 
 // Command is one top-level safelane subcommand.
