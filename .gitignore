@@ -42,3 +42,6 @@ desktop.ini
 
 # Local phase-one working files (PLAN.md tickets)
 .scratch/
+
+# Local build output
+/safelane.exe

@@ -52,11 +52,25 @@ type Status struct {
 	// at all; [Executor.GetAnalysisRun] fetches the AnalysisRun object
 	// itself for that.
 	AnalysisRunPhase string
+	// CurrentPodHash and Revision are what a background AnalysisRun's own
+	// name is built from (`<rollout>-<CurrentPodHash>-<Revision>`,
+	// confirmed against the live cluster). Unlike AnalysisRunName -- which
+	// Argo clears from the Rollout's status once it settles Healthy, a
+	// race this build hit in its own live rehearsal -- these two persist
+	// on a Healthy Rollout, so a caller that reaches Complete after that
+	// field is already gone can still reconstruct the name deterministically.
+	CurrentPodHash string
+	Revision       string
 }
 
 // rolloutStatusDoc is the subset of `kubectl get rollout -o json` this
 // package reads. Everything else in the document is ignored.
 type rolloutStatusDoc struct {
+	Metadata struct {
+		Annotations struct {
+			Revision string `json:"rollout.argoproj.io/revision"`
+		} `json:"annotations"`
+	} `json:"metadata"`
 	Status struct {
 		Phase            string `json:"phase"`
 		Abort            bool   `json:"abort"`
@@ -115,6 +129,8 @@ func parseStatus(raw []byte) (Status, error) {
 		Gate:             stepsCompleted,
 		AnalysisRunName:  doc.Status.Canary.CurrentBackgroundAnalysisRunStatus.Name,
 		AnalysisRunPhase: doc.Status.Canary.CurrentBackgroundAnalysisRunStatus.Status,
+		CurrentPodHash:   doc.Status.CurrentPodHash,
+		Revision:         doc.Metadata.Annotations.Revision,
 	}, nil
 }
 

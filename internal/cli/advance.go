@@ -263,14 +263,16 @@ func advanceRollout(ctx context.Context, r *release.Release, ex *execute.Executo
 		Outcome:         release.OutcomeGranted,
 	}
 
-	if final.State == execute.StateComplete && final.AnalysisRunName != "" {
-		run, err := ex.GetAnalysisRun(ctx, final.AnalysisRunName)
-		if err != nil {
-			return result, err
+	if final.State == execute.StateComplete {
+		if realName := backgroundAnalysisRunName(ex.Rollout, final); realName != "" {
+			run, err := ex.GetAnalysisRun(ctx, realName)
+			if err != nil {
+				return result, err
+			}
+			result.analysisRun = run
+			result.friendlyName = analysisDisplayName(application, realName)
+			entry.Analysis = fmt.Sprintf("%s %s", result.friendlyName, run.Phase)
 		}
-		result.analysisRun = run
-		result.friendlyName = analysisDisplayName(application, final.AnalysisRunName)
-		entry.Analysis = fmt.Sprintf("%s %s", result.friendlyName, run.Phase)
 	}
 
 	updated, err = updated.WithExecution(entry)
@@ -444,6 +446,25 @@ func gateNumberForWeight(weights []int, weight int) int {
 		}
 	}
 	return 0
+}
+
+// backgroundAnalysisRunName is the real AnalysisRun name to query,
+// resolved defensively against a race confirmed in this build's own live
+// rehearsal: Argo clears `.status.canary.currentBackgroundAnalysisRunStatus`
+// from the Rollout once it settles Healthy, so a caller that only reaches
+// Complete after that field is already gone would otherwise see an empty
+// name and silently skip the measurement line. CurrentPodHash and Revision
+// persist on a Healthy Rollout, so the same name
+// (`<rollout>-<podHash>-<revision>`, confirmed against the live cluster)
+// is reconstructed from those when the transient field is empty.
+func backgroundAnalysisRunName(rollout string, st execute.Status) string {
+	if st.AnalysisRunName != "" {
+		return st.AnalysisRunName
+	}
+	if st.CurrentPodHash == "" || st.Revision == "" {
+		return ""
+	}
+	return fmt.Sprintf("%s-%s-%s", rollout, st.CurrentPodHash, st.Revision)
 }
 
 // analysisDisplayName is the friendly `<application>-success-rate-<N>`
