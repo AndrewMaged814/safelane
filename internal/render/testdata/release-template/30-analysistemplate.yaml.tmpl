@@ -14,7 +14,7 @@ spec:
       interval: 30s
       count: 3
       initialDelay: 30s
-      successCondition: len(result) == 0 || result[0] >= 0.99
+      successCondition: len(result) > 0 && result[0] >= 0.99
       failureLimit: 1
       provider:
         prometheus:
