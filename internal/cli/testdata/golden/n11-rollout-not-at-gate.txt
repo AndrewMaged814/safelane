@@ -1,0 +1,4 @@
+safelane rollout: rejected:
+  - [state] rollout_not_at_gate
+      the Rollout is Progressing toward weight 5; it is not at a gate
+      remedy: wait for the gate, then retry

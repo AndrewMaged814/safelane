@@ -195,6 +195,7 @@ func TestArguments_NeverContainFull(t *testing.T) {
 	fr := &fakeRunner{}
 	fr.enqueue("service/podinfo-stable unchanged\nrollout.argoproj.io/podinfo unchanged\n", nil)
 	fr.enqueue(`{"status":{"phase":"Progressing"}}`, nil)
+	fr.enqueue("rollout.argoproj.io/podinfo promoted\n", nil)
 	ex := newTestExecutor(fr)
 
 	if _, err := ex.Apply(context.Background(), testBundle(t)); err != nil {
@@ -203,12 +204,46 @@ func TestArguments_NeverContainFull(t *testing.T) {
 	if _, err := ex.GetStatus(context.Background()); err != nil {
 		t.Fatalf("GetStatus: %v", err)
 	}
+	if err := ex.Promote(context.Background()); err != nil {
+		t.Fatalf("Promote: %v", err)
+	}
 	for _, call := range fr.calls {
 		for _, a := range call {
 			if a == "--full" {
 				t.Fatalf("generated argument list %v contains --full", call)
 			}
 		}
+	}
+}
+
+func TestPromote_IsArgoRolloutsPromoteWithTheControllerFlags(t *testing.T) {
+	fr := &fakeRunner{}
+	fr.enqueue("rollout.argoproj.io/podinfo promoted\n", nil)
+	ex := execute.New(execute.Config{
+		Namespace: "podinfo", Rollout: "podinfo",
+		ControllerKubeconfig: "controller.kubeconfig", ControllerContext: "safelane-controller",
+	})
+	ex.Run = fr.run
+
+	if err := ex.Promote(context.Background()); err != nil {
+		t.Fatalf("Promote: %v", err)
+	}
+	got := strings.Join(fr.calls[0], " ")
+	want := "argo rollouts promote podinfo -n podinfo --kubeconfig controller.kubeconfig --context safelane-controller"
+	if got != want {
+		t.Errorf("promote args = %q, want %q", got, want)
+	}
+}
+
+func TestPromote_ClassifiesAFailureLikeEveryOtherCall(t *testing.T) {
+	fr := &fakeRunner{}
+	fr.enqueue("", &exec.Error{Name: "kubectl", Err: exec.ErrNotFound})
+	ex := newTestExecutor(fr)
+
+	err := ex.Promote(context.Background())
+	var rerr *release.Error
+	if !errors.As(err, &rerr) || rerr.Code != "kubectl_missing" {
+		t.Fatalf("err = %v, want a kubectl_missing *release.Error", err)
 	}
 }
 

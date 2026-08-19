@@ -37,6 +37,21 @@ type Status struct {
 	// Gate is the 1-based gate number this status corresponds to, when
 	// State is StateAtGate: the number of setWeight steps completed.
 	Gate int
+	// AnalysisRunName is the name Argo Rollouts itself gave the
+	// background AnalysisRun tracking this revision's canary (Rollout's
+	// own `.status.canary.currentBackgroundAnalysisRunStatus.name`), or
+	// "" when none is running. This is the real object name to query --
+	// it is not the friendly `<application>-success-rate-<N>` label a
+	// caller prints; that label is built separately from this name's own
+	// trailing ordinal (task 10).
+	AnalysisRunName string
+	// AnalysisRunPhase is Argo's own coarse read of that AnalysisRun
+	// ("Running", "Successful", "Failed", ...), straight off the
+	// Rollout's status. The measurement detail behind it -- which metric,
+	// what was measured, against what condition -- is not on the Rollout
+	// at all; [Executor.GetAnalysisRun] fetches the AnalysisRun object
+	// itself for that.
+	AnalysisRunPhase string
 }
 
 // rolloutStatusDoc is the subset of `kubectl get rollout -o json` this
@@ -58,6 +73,10 @@ type rolloutStatusDoc struct {
 					Weight *int `json:"weight"`
 				} `json:"canary"`
 			} `json:"weights"`
+			CurrentBackgroundAnalysisRunStatus struct {
+				Name   string `json:"name"`
+				Status string `json:"status"`
+			} `json:"currentBackgroundAnalysisRunStatus"`
 		} `json:"canary"`
 	} `json:"status"`
 	Spec struct {
@@ -91,9 +110,11 @@ func parseStatus(raw []byte) (Status, error) {
 	}
 	weight, stepsCompleted := currentWeight(doc)
 	return Status{
-		State:         classifyState(doc),
-		CurrentWeight: weight,
-		Gate:          stepsCompleted,
+		State:            classifyState(doc),
+		CurrentWeight:    weight,
+		Gate:             stepsCompleted,
+		AnalysisRunName:  doc.Status.Canary.CurrentBackgroundAnalysisRunStatus.Name,
+		AnalysisRunPhase: doc.Status.Canary.CurrentBackgroundAnalysisRunStatus.Status,
 	}, nil
 }
 

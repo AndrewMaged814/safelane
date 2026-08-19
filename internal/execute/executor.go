@@ -192,6 +192,20 @@ func nonEmptyLines(s string) []string {
 	return out
 }
 
+// Promote runs `kubectl argo rollouts promote`, advancing the Rollout past
+// its current pause (Appendix C5). It is a privileged call: it carries the
+// controller identity, the same as Apply.
+//
+// It never generates `--full` -- that flag skips every remaining step and
+// jumps straight to 100%, which would silently defeat every lane. Nothing
+// in this function ever appends it, and executor_test.go asserts that no
+// call this package makes ever does.
+func (e *Executor) Promote(ctx context.Context) error {
+	args := append([]string{"argo", "rollouts", "promote", e.Rollout, "-n", e.Namespace}, e.privilegedFlags()...)
+	_, err := e.run(ctx, "kubectl argo rollouts promote", args, nil)
+	return err
+}
+
 // lastField returns the last whitespace-separated token of a line, which
 // is where every kubectl apply outcome word ("unchanged", "created",
 // "configured") lands regardless of the resource-type prefix before it.

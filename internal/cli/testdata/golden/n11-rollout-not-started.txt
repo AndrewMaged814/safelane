@@ -1,0 +1,4 @@
+safelane rollout: rejected:
+  - [state] rollout_not_started
+      this release has no execution record
+      remedy: safelane rollout start <id>
