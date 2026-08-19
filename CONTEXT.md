@@ -12,8 +12,8 @@ _Avoid_: Cluster administrator, trusted release authority
 A caller's submission of one change identity and one environment selector: repository, pull request, and optionally environment. It does not carry evidence, cluster or namespace, reviewers, CI results, digests, or bookkeeping. SafeLane collects and verifies those itself.
 _Avoid_: Evidence dossier, release-evidence.json, deployment request
 
-**Reviewed Change**:
-A change merged into the demo fork after approval by the other hackathon teammate and a passing required CI check. The approval and CI result are evidence inputs, not SafeLane-generated claims.
+**Merged Change**:
+A change merged into the demo fork after a passing required CI check. Approval is evidence the Release Policy may require, not a mandatory input: `independent_pr_approval` decides whether it must be present.
 
 **Release Evidence**:
 The linked evidence for one Release Request: the merge commit SHA on `master`, the required publish-workflow result for that exact commit, the immutable OCI image digest, and an independent pull-request approval when the Release Policy requires one. Trusted build provenance is a planned future addition to this set, not a current requirement.
@@ -68,8 +68,20 @@ Whether one exact Release Request may enter SafeLane. The outcomes are eligible,
 _Avoid_: Risk tier, severity, unknown status, policy decision from evidence
 
 **Release Policy**:
-The operator-owned rules that name required evidence, optional checks, and the static rollout envelope an eligible release may follow. Later extensions may add risk-based envelopes; evidence completeness does not imply them.
+The operator-owned rules that name required evidence, optional checks, and the several rollout lanes an eligible release may be assigned to. Evidence completeness decides Release Eligibility; it does not by itself select a lane.
 _Avoid_: Rulebook, prompt, risk engine
+
+**Change Facts**:
+The evidence SafeLane itself collects from GitHub about one Merged Change — files touched, lines added and removed, agent-authorship trailers, the merge commit SHA, and the bounded unified diff. A caller never supplies Change Facts; SafeLane always does.
+_Avoid_: Caller-submitted diff, PR description
+
+**Change Assessment**:
+The record of how far a Merged Change may ship per step. A deterministic heuristic the operator owns sets a floor from Change Facts; a model assessor may run alongside it and may only raise that floor, never lower it. The two verdicts combine through one function, and that function selects the Release Lane. Missing, malformed, or failed assessment resolves to the operator's most cautious configured lane.
+_Avoid_: Risk score, weighted verdict, model-chosen weights
+
+**Release Lane**:
+One of several named, operator-declared rollout envelopes in `policy.yml` — for example `fast`, `standard`, `guarded` — each an ordered list of traffic weights and gates. A Change Assessment selects a lane by name; nothing else may. No assessor emits weights and no caller names a lane directly.
+_Avoid_: Risk tier as a caller input, `--lane` flag
 
 **Release Transition**:
 A typed proposal to move one release between allowed lifecycle states, such as Start, Advance, Pause, Resume, or Abort. It carries intent rather than Kubernetes configuration.
