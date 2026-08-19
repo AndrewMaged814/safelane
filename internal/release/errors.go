@@ -144,11 +144,17 @@ func Malformed(code, field, message, remedy string) *Error {
 }
 
 // Forbidden builds a CategoryForbiddenField rejection. Intake uses this when a
-// request carried Kubernetes configuration, a patch, a template selection or a
-// policy selection.
+// request carried Kubernetes configuration, a patch, a template selection, a
+// policy selection, its own evidence, its own risk, or its own lane.
+//
+// The code is "unknown_field" and not "forbidden_field_present" because that
+// is the whole point: from the caller's side there is no such field. A
+// request carrying "lane" is not asking for something it is not allowed to
+// have, it is naming something that does not exist in the Release Request
+// schema. Appendix C4 has one schema-level code for exactly this reason.
 func Forbidden(field, message string) *Error {
-	return newError(CategoryForbiddenField, "forbidden_field_present", field, message,
-		"Remove the field. SafeLane renders the deployment bundle from the operator-owned Release Template; callers submit release identity and evidence only.")
+	return newError(CategoryForbiddenField, "unknown_field", field, message,
+		"send repository and pull_request only")
 }
 
 // MissingEvidenceError builds a CategoryEvidenceMissing rejection.

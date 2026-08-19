@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"time"
+
+	"github.com/AndrewMaged814/safelane/internal/assess"
 )
 
 // RecordSchemaVersion is the version of the persisted Release record shape.
@@ -33,6 +35,10 @@ type ReleaseParams struct {
 	// Eligibility is the determination of whether this exact release may enter
 	// SafeLane. Every persisted Release has one, including withheld attempts.
 	Eligibility Eligibility
+	// Assessment is how far this change may ship per step, and why. It is
+	// present only for an eligible release: assessment is a question about a
+	// change that may ship at all. The zero value means "not assessed".
+	Assessment assess.Assessment
 	// CreatedAt is SafeLane's own timestamp, distinct from the caller's claimed
 	// metadata.submitted_at.
 	CreatedAt time.Time
@@ -70,6 +76,7 @@ type Release struct {
 	evidence    EvidenceResult
 	bundle      *RenderedBundle
 	eligibility Eligibility
+	assessment  assess.Assessment
 }
 
 // NewRelease validates and assembles the Release record.
@@ -143,6 +150,20 @@ func NewRelease(p ReleaseParams) (*Release, error) {
 		}
 	}
 
+	// The assessment invariant, and the reason it mirrors the bundle's: a
+	// risk and a lane recorded against a release that may not enter SafeLane
+	// would be a width decision attached to a change that never earned one.
+	// An ineligible or indeterminate release is not assessed at all -- no
+	// risk, no lane, no envelope.
+	if !p.Assessment.IsZero() && p.Eligibility.Status() != EligibilityEligible {
+		errs = append(errs, Internal("assessment_without_eligibility",
+			fmt.Sprintf("an assessment was attached to a %s release; assessment is a question about an eligible change", p.Eligibility.Status())))
+	}
+	if !p.Assessment.IsZero() && p.Assessment.Lane == "" {
+		errs = append(errs, Internal("assessment_without_lane",
+			"an assessment must record the lane its risk resolved to"))
+	}
+
 	if p.Bundle != nil {
 		if p.Bundle.IsZero() {
 			errs = append(errs, Internal("unset_bundle",
@@ -177,6 +198,7 @@ func NewRelease(p ReleaseParams) (*Release, error) {
 		request:     p.Request,
 		evidence:    p.Evidence,
 		eligibility: p.Eligibility,
+		assessment:  p.Assessment,
 	}
 	if p.Bundle != nil {
 		bundle := *p.Bundle
@@ -237,6 +259,16 @@ func (r *Release) Bundle() (RenderedBundle, bool) {
 // SafeLane. It has no setters: re-running assessment cannot rewrite it.
 func (r *Release) Eligibility() Eligibility { return r.eligibility }
 
+// Assessment returns how far this change may ship per step, and why. ok is
+// false when the release was not assessed, which is every release that is
+// not eligible: assessment is a question about a change that may ship at all.
+func (r *Release) Assessment() (assess.Assessment, bool) {
+	if r.assessment.IsZero() {
+		return assess.Assessment{}, false
+	}
+	return r.assessment, true
+}
+
 // TemplateIdentity returns the pinned Release Template identity, if a bundle exists.
 func (r *Release) TemplateIdentity() (TemplateIdentity, bool) {
 	if r.bundle == nil {
@@ -255,13 +287,14 @@ func (r *Release) BundleHashes() []ResourceHash {
 }
 
 type releaseJSON struct {
-	SchemaVersion string          `json:"schema_version"`
-	ID            ReleaseID       `json:"release_id"`
-	CreatedAt     time.Time       `json:"created_at"`
-	Request       ReleaseRequest  `json:"request"`
-	Evidence      EvidenceResult  `json:"evidence"`
-	Bundle        *RenderedBundle `json:"bundle"`
-	Eligibility   Eligibility     `json:"eligibility"`
+	SchemaVersion string            `json:"schema_version"`
+	ID            ReleaseID         `json:"release_id"`
+	CreatedAt     time.Time         `json:"created_at"`
+	Request       ReleaseRequest    `json:"request"`
+	Evidence      EvidenceResult    `json:"evidence"`
+	Bundle        *RenderedBundle   `json:"bundle"`
+	Eligibility   Eligibility       `json:"eligibility"`
+	Assessment    assess.Assessment `json:"assessment,omitempty"`
 }
 
 // MarshalJSON writes the persisted record.
@@ -274,6 +307,7 @@ func (r *Release) MarshalJSON() ([]byte, error) {
 		Evidence:      r.evidence,
 		Bundle:        r.bundle,
 		Eligibility:   r.eligibility,
+		Assessment:    r.assessment,
 	})
 }
 
@@ -299,6 +333,7 @@ func (r *Release) UnmarshalJSON(data []byte) error {
 		Evidence:    w.Evidence,
 		Bundle:      w.Bundle,
 		Eligibility: w.Eligibility,
+		Assessment:  w.Assessment,
 		CreatedAt:   w.CreatedAt,
 	})
 	if err != nil {

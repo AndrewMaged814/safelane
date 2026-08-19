@@ -10,9 +10,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
+	"github.com/AndrewMaged814/safelane/internal/assess"
 	"github.com/AndrewMaged814/safelane/internal/intake"
 	"github.com/AndrewMaged814/safelane/internal/orchestrate"
+	"github.com/AndrewMaged814/safelane/internal/policy"
 	"github.com/AndrewMaged814/safelane/internal/project"
 	"github.com/AndrewMaged814/safelane/internal/release"
 	"github.com/AndrewMaged814/safelane/internal/render"
@@ -21,48 +24,81 @@ import (
 	"github.com/AndrewMaged814/safelane/internal/verify/github"
 )
 
-// ReleaseCommand builds `safelane release --pr <n>` (and `--file` for CI).
-// root is the application directory used to find .safelane/project.yml.
+// ReleaseCommand builds `safelane release inspect --pr <n>` (and `--file`
+// for CI). root is the application directory used to find
+// .safelane/project.yml.
 func ReleaseCommand(root, defaultStoreDir string) Command {
 	return Command{
 		Name:    "release",
-		Summary: "submit a Release Request and record a Release",
+		Summary: "investigate a change and record what it may do",
 		Run: func(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-			return runRelease(ctx, args, stdout, stderr, root, defaultStoreDir)
+			// `inspect` is the read-only report an agent runs first and an
+			// operator reads on screen. The bare form is the same pass with a
+			// terser summary, kept because scripts and the integration test
+			// use it.
+			if len(args) > 0 && args[0] == "inspect" {
+				return runRelease(ctx, args[1:], stdout, stderr, root, defaultStoreDir, true)
+			}
+			return runRelease(ctx, args, stdout, stderr, root, defaultStoreDir, false)
 		},
 	}
 }
 
-func runRelease(ctx context.Context, args []string, stdout, stderr io.Writer, root, defaultStoreDir string) int {
+// releaseFlags is the flag set both forms of `safelane release` share.
+type releaseFlags struct {
+	file        string
+	pr          int
+	repo        string
+	environment string
+	image       string
+	jsonOut     bool
+	templateDir string
+	projectFile string
+	policyFile  string
+	storeDir    string
+	githubToken string
+}
+
+func parseReleaseFlags(args []string, stderr io.Writer, defaultStoreDir string) (releaseFlags, *flag.FlagSet, error) {
+	var f releaseFlags
 	fs := flag.NewFlagSet("release", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	file := fs.String("file", "", "path to a slim Release Request JSON file")
-	pr := fs.Int("pr", 0, "merged pull request number")
-	repo := fs.String("repo", "", "GitHub owner/name (default: git origin or project.yml)")
-	environment := fs.String("environment", "", "environment selector (default: project.yml)")
-	image := fs.String("image", "", "optional immutable digest pin to verify")
-	jsonOut := fs.Bool("json", false, "print the full Release record as JSON instead of a human summary")
-	templateDir := fs.String("template-dir", "", "override project.yml template_path")
-	projectFile := fs.String("project", "", "path to project.yml (default: .safelane/project.yml)")
-	storeDir := fs.String("store-dir", defaultStoreDir, "directory Release records are persisted under")
-	githubToken := fs.String("github-token", os.Getenv("GITHUB_TOKEN"), "GitHub API token (optional; unauthenticated calls work against public repos, rate-limited)")
+	fs.StringVar(&f.file, "file", "", "path to a slim Release Request JSON file")
+	fs.IntVar(&f.pr, "pr", 0, "merged pull request number")
+	fs.StringVar(&f.repo, "repo", "", "GitHub owner/name (default: git origin or project.yml)")
+	fs.StringVar(&f.environment, "environment", "", "environment selector (default: project.yml)")
+	fs.StringVar(&f.image, "image", "", "optional immutable digest pin to verify")
+	fs.BoolVar(&f.jsonOut, "json", false, "print the report as JSON for an agent to branch on")
+	fs.StringVar(&f.templateDir, "template-dir", "", "override project.yml template_path")
+	fs.StringVar(&f.projectFile, "project", "", "path to project.yml (default: .safelane/project.yml)")
+	fs.StringVar(&f.policyFile, "policy", "", "path to policy.yml (default: the compiled phase-one policy)")
+	fs.StringVar(&f.storeDir, "store-dir", defaultStoreDir, "directory Release records are persisted under")
+	fs.StringVar(&f.githubToken, "github-token", os.Getenv("GITHUB_TOKEN"), "GitHub API token (optional; unauthenticated calls work against public repos, rate-limited)")
 	if err := fs.Parse(args); err != nil {
-		return ExitUsage
+		return f, fs, err
 	}
-	if *file != "" && *pr != 0 {
+	switch {
+	case f.file != "" && f.pr != 0:
 		fmt.Fprintln(stderr, "safelane release: use --pr or --file, not both")
 		fs.Usage()
-		return ExitUsage
-	}
-	if *file == "" && *pr == 0 {
+		return f, fs, flag.ErrHelp
+	case f.file == "" && f.pr == 0:
 		fmt.Fprintln(stderr, "safelane release: --pr or --file is required")
 		fs.Usage()
+		return f, fs, flag.ErrHelp
+	}
+	return f, fs, nil
+}
+
+func runRelease(ctx context.Context, args []string, stdout, stderr io.Writer, root, defaultStoreDir string, report bool) int {
+	f, _, err := parseReleaseFlags(args, stderr, defaultStoreDir)
+	if err != nil {
 		return ExitUsage
 	}
 
-	intent, err := loadIntent(*file, *pr, *repo, *environment, *image)
+	intent, err := loadIntent(f.file, f.pr, f.repo, f.environment, f.image)
 	if err != nil {
-		if *file != "" && strings.Contains(err.Error(), "could not read") {
+		if f.file != "" && strings.Contains(err.Error(), "could not read") {
 			fmt.Fprintf(stderr, "safelane release: %v\n", err)
 			return ExitUsage
 		}
@@ -80,7 +116,7 @@ func runRelease(ctx context.Context, args []string, stdout, stderr io.Writer, ro
 		}
 	}
 
-	projPath := *projectFile
+	projPath := f.projectFile
 	if projPath == "" {
 		projPath = filepath.Join(root, filepath.FromSlash(project.RelPath))
 	}
@@ -90,7 +126,16 @@ func runRelease(ctx context.Context, args []string, stdout, stderr io.Writer, ro
 		return ExitFail
 	}
 
-	tmplPath := *templateDir
+	pol := policy.Default()
+	if f.policyFile != "" {
+		pol, err = policy.Load(f.policyFile)
+		if err != nil {
+			printRejection(stderr, err)
+			return ExitFail
+		}
+	}
+
+	tmplPath := f.templateDir
 	if tmplPath == "" {
 		tmplPath = cfg.Release.TemplatePath
 		if !filepath.IsAbs(tmplPath) {
@@ -104,32 +149,46 @@ func runRelease(ctx context.Context, args []string, stdout, stderr io.Writer, ro
 	}
 
 	deps := orchestrate.Deps{
-		GitHub:   &github.Client{Token: *githubToken},
-		GHCR:     &ghcr.Client{},
-		Template: tmpl,
-		Store:    &store.FileStore{Dir: *storeDir},
-		Project:  cfg,
-		Caller:   release.CallerIdentity{Identity: "safelane-cli", Kind: release.CallerAgent, Tool: "safelane"},
+		GitHub:      &github.Client{Token: f.githubToken},
+		GHCR:        &ghcr.Client{},
+		ChangeFacts: &assess.Client{Token: f.githubToken},
+		Template:    tmpl,
+		Store:       &store.FileStore{Dir: f.storeDir},
+		Project:     cfg,
+		Policy:      pol,
+		Caller:      release.CallerIdentity{Identity: "safelane-cli", Kind: release.CallerAgent, Tool: "safelane"},
 	}
 
-	r, err := orchestrate.SubmitRelease(ctx, intent, deps)
+	result, err := orchestrate.Submit(ctx, intent, deps)
 	if err != nil {
 		printRejection(stderr, err)
 		return ExitFail
 	}
 
-	if *jsonOut {
-		enc := json.NewEncoder(stdout)
-		enc.SetIndent("", "  ")
-		if err := enc.Encode(r); err != nil {
+	in := buildInspection(result, cfg, pol, time.Now().UTC())
+	switch {
+	case f.jsonOut && report:
+		if err := writeJSON(stdout, in.JSON()); err != nil {
 			fmt.Fprintf(stderr, "safelane release: could not encode the result: %v\n", err)
 			return ExitFail
 		}
-		return outcomeExitCode(r)
+	case f.jsonOut:
+		if err := writeJSON(stdout, result.Release); err != nil {
+			fmt.Fprintf(stderr, "safelane release: could not encode the result: %v\n", err)
+			return ExitFail
+		}
+	case report:
+		fmt.Fprint(stdout, in.Render())
+	default:
+		printSummary(stdout, result.Release)
 	}
+	return outcomeExitCode(result.Release)
+}
 
-	printSummary(stdout, r)
-	return outcomeExitCode(r)
+func writeJSON(w io.Writer, v any) error {
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	return enc.Encode(v)
 }
 
 func loadIntent(file string, pr int, repo, environment, image string) (release.Intent, error) {
@@ -158,10 +217,14 @@ func outcomeExitCode(r *release.Release) int {
 	return ExitFail
 }
 
+// printRejection writes the rejection block Appendix A specifies: one
+// `safelane release: rejected:` line, then one entry per problem. Every
+// problem the request has is reported in the same block, so an agent can
+// correct all of them in one pass instead of one per round trip.
 func printRejection(w io.Writer, err error) {
 	var errs release.Errors
 	if errors.As(err, &errs) {
-		fmt.Fprintf(w, "safelane release: rejected (%d problem(s)):\n", len(errs))
+		fmt.Fprintln(w, "safelane release: rejected:")
 		for _, e := range errs {
 			printError(w, e)
 		}
@@ -176,14 +239,22 @@ func printRejection(w io.Writer, err error) {
 	fmt.Fprintf(w, "safelane release: %v\n", err)
 }
 
+// printError writes one rejection: the Appendix C4 tag and reason code on
+// the first line with the field it is about, then what is wrong, then what
+// to do. Three lines, because a caller acting on this needs the code to
+// branch on and the remedy to act on, and mixing them into one line makes
+// both harder to read.
 func printError(w io.Writer, e *release.Error) {
-	fmt.Fprintf(w, "  - [%s] %s", e.Category, e.Code)
+	fmt.Fprintf(w, "  - [%s] %s", e.Tag(), e.Code)
 	if e.Field != "" {
 		fmt.Fprintf(w, " (%s)", e.Field)
 	}
-	fmt.Fprintf(w, ": %s\n", e.Message)
+	fmt.Fprintln(w)
+	if e.Message != "" {
+		fmt.Fprintf(w, "      %s\n", e.Message)
+	}
 	if e.Remedy != "" {
-		fmt.Fprintf(w, "    remedy: %s\n", e.Remedy)
+		fmt.Fprintf(w, "      remedy: %s\n", e.Remedy)
 	}
 }
 
@@ -195,8 +266,16 @@ func printSummary(w io.Writer, r *release.Release) {
 
 	if evidence, ok := r.Evidence().Verified(); ok {
 		fmt.Fprintf(w, "  source revision: %s\n", evidence.MergeCommitSHA())
-		fmt.Fprintf(w, "  pull request: #%d (approved by %s, independent of author: %v)\n",
-			evidence.PullRequest().Number, evidence.Approval().Reviewer, evidence.IndependentApproval())
+		// The approver is printed only when there is one. A policy that does
+		// not require independent approval leaves it empty, and "approved by
+		// ," is worse than saying nothing.
+		if approver := evidence.Approval().Reviewer; approver != "" {
+			fmt.Fprintf(w, "  pull request: #%d (approved by %s, independent of author: %v)\n",
+				evidence.PullRequest().Number, approver, evidence.IndependentApproval())
+		} else {
+			fmt.Fprintf(w, "  pull request: #%d (independent approval not required by this policy)\n",
+				evidence.PullRequest().Number)
+		}
 		fmt.Fprintf(w, "  required check: %s (%s)\n", evidence.RequiredCheck().Name, evidence.RequiredCheck().Conclusion)
 		fmt.Fprintf(w, "  artifact digest: %s\n", evidence.ArtifactDigest())
 	} else {
@@ -210,6 +289,11 @@ func printSummary(w io.Writer, r *release.Release) {
 		for _, h := range bundle.Hashes() {
 			fmt.Fprintf(w, "  - %s: %s\n", h.Ref, h.Hash)
 		}
+	}
+
+	if a, ok := r.Assessment(); ok {
+		fmt.Fprintf(w, "risk: %s (%s)\n", a.Risk, a.CombinedBy)
+		fmt.Fprintf(w, "lane: %s\n", a.Lane)
 	}
 
 	elig := r.Eligibility()

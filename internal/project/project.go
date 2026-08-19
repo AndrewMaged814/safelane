@@ -55,8 +55,8 @@ func Load(path string) (Config, error) {
 	if err != nil {
 		if os.IsNotExist(err) {
 			return Config{}, release.Invalid("missing_project_config", "project",
-				fmt.Sprintf("no project configuration at %s", path),
-				"Run safelane init --adapter codex in the application repository, or pass --project.")
+				"no operator configuration for this repository",
+				"run safelane init --app <name> --repo <owner/name>")
 		}
 		return Config{}, release.Invalid("unreadable_project_config", "project",
 			fmt.Sprintf("could not read %s: %v", path, err),

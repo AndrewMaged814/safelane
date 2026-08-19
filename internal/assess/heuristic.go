@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"strings"
 )
 
 // PathRule raises the floor to Minimum when any changed file matches Glob.
@@ -85,14 +86,14 @@ func (h heuristicAssessor) Assess(_ context.Context, f Facts) (Verdict, error) {
 	}
 
 	if f.AgentAuthored {
-		raise("agent_authored", h.cfg.AgentAuthoredMinimum)
+		raise(ruleAgentAuthored, h.cfg.AgentAuthoredMinimum)
 	}
 
 	for _, r := range h.cfg.Paths {
 		re := compiled[r.Glob]
 		for _, file := range f.Files {
 			if re.MatchString(file.Path) {
-				raise("path:"+r.Glob, r.Minimum)
+				raise(rulePathPrefix+r.Glob, r.Minimum)
 				break // one firing per rule, however many files match it
 			}
 		}
@@ -101,10 +102,9 @@ func (h heuristicAssessor) Assess(_ context.Context, f Facts) (Verdict, error) {
 	totalLines := f.TotalAdditions + f.TotalDeletions
 	for _, r := range h.cfg.Size {
 		switch {
-		case r.ChangedLinesAtLeast > 0 && totalLines >= r.ChangedLinesAtLeast:
-			raise(fmt.Sprintf("size:changed_lines_at_least:%d", r.ChangedLinesAtLeast), r.Minimum)
-		case r.FilesAtLeast > 0 && len(f.Files) >= r.FilesAtLeast:
-			raise(fmt.Sprintf("size:files_at_least:%d", r.FilesAtLeast), r.Minimum)
+		case r.ChangedLinesAtLeast > 0 && totalLines >= r.ChangedLinesAtLeast,
+			r.FilesAtLeast > 0 && len(f.Files) >= r.FilesAtLeast:
+			raise(sizeRuleName(r), r.Minimum)
 		}
 	}
 
@@ -119,4 +119,44 @@ func (h heuristicAssessor) Assess(_ context.Context, f Facts) (Verdict, error) {
 		Rules:     rules,
 		Available: true,
 	}, nil
+}
+
+// MinimumFor returns the floor the named rule raises to, for a rule name
+// as it appears in [Verdict.Rules]. Verdict.Rules records names only --
+// that is the shape the Release Record stores -- so anything that wants
+// to show *what* a rule did, rather than just that it fired, resolves it
+// back through the operator configuration that declared it.
+func (c HeuristicConfig) MinimumFor(rule string) (Risk, bool) {
+	if rule == ruleAgentAuthored {
+		return c.AgentAuthoredMinimum, true
+	}
+	if glob, ok := strings.CutPrefix(rule, rulePathPrefix); ok {
+		for _, r := range c.Paths {
+			if r.Glob == glob {
+				return r.Minimum, true
+			}
+		}
+		return "", false
+	}
+	for _, r := range c.Size {
+		if sizeRuleName(r) == rule {
+			return r.Minimum, true
+		}
+	}
+	return "", false
+}
+
+// Rule-name prefixes. They are the identifiers the Release Record
+// stores, so they are constants here rather than inline format strings
+// in two places that could drift apart.
+const (
+	ruleAgentAuthored = "agent_authored"
+	rulePathPrefix    = "path:"
+)
+
+func sizeRuleName(r SizeRule) string {
+	if r.ChangedLinesAtLeast > 0 {
+		return fmt.Sprintf("size:changed_lines_at_least:%d", r.ChangedLinesAtLeast)
+	}
+	return fmt.Sprintf("size:files_at_least:%d", r.FilesAtLeast)
 }

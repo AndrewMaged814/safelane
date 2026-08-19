@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/AndrewMaged814/safelane/internal/assess"
 	"github.com/AndrewMaged814/safelane/internal/policy"
 	"github.com/AndrewMaged814/safelane/internal/project"
 	"github.com/AndrewMaged814/safelane/internal/release"
@@ -50,6 +51,21 @@ type Deps struct {
 	// [policy.Default], the compiled phase-one policy.
 	Policy policy.Policy
 
+	// ChangeFacts collects the Change Facts an assessment is formed from.
+	// A nil Fetcher, or one that fails, does not fail the release: both
+	// verdicts record themselves unavailable and the lane falls back to
+	// the policy's DefaultLane, which is the most cautious one declared.
+	ChangeFacts assess.Fetcher
+	// Heuristic and Model are the two assessors. Unset, they are built
+	// from the Policy's own assessment configuration, which is where the
+	// operator declared them. Tests substitute fakes.
+	//
+	// A Heuristic that returns an error is a configuration defect and
+	// refuses the release (Appendix C1's third rule). A Model that
+	// cannot run is expected, legitimate, and never a low verdict.
+	Heuristic assess.Assessor
+	Model     assess.Assessor
+
 	// Now and NewID default to time.Now and release.MintReleaseID. Tests
 	// override them for deterministic output; production wiring leaves
 	// them unset.
@@ -76,6 +92,20 @@ func (d Deps) newID() (release.ReleaseID, error) {
 		return d.NewID()
 	}
 	return release.MintReleaseID()
+}
+
+func (d Deps) heuristic() assess.Assessor {
+	if d.Heuristic != nil {
+		return d.Heuristic
+	}
+	return assess.Heuristic(d.policy().Assessment.Heuristic)
+}
+
+func (d Deps) model() assess.Assessor {
+	if d.Model != nil {
+		return d.Model
+	}
+	return assess.Model(d.policy().Assessment.Model)
 }
 
 func (d Deps) caller() release.CallerIdentity {
@@ -110,53 +140,88 @@ func (d Deps) caller() release.CallerIdentity {
 // A broken operator template is a system misconfiguration to fix and
 // resubmit against, not a release outcome to record.
 func SubmitRelease(ctx context.Context, intent release.Intent, d Deps) (*release.Release, error) {
+	result, err := Submit(ctx, intent, d)
+	return result.Release, err
+}
+
+// Inspection is one pass over a Release Request: the Release it produced,
+// plus the two verification results it produced along the way.
+//
+// The Release alone cannot say *which* evidence check reached which
+// answer -- it records the combined outcome and the reasons, which is the
+// right shape for a record but not enough to print a per-check report.
+// These two results are what `release inspect` reads to say "the merged
+// commit was found, the publish check has not concluded, the digest could
+// not be looked up because of the first two". They are not persisted:
+// they are the working detail behind a decision the record already holds.
+type Inspection struct {
+	Release *release.Release
+	GitHub  github.Result
+	GHCR    ghcr.Result
+}
+
+// Submit is [SubmitRelease] with the verification detail kept.
+func Submit(ctx context.Context, intent release.Intent, d Deps) (Inspection, error) {
 	if err := intent.Validate(); err != nil {
-		return nil, err
+		return Inspection{}, err
 	}
 	if err := d.Project.Validate(); err != nil {
-		return nil, err
+		return Inspection{}, err
 	}
 
-	req, evidenceResult, verified := collectAndVerify(ctx, intent, d)
+	req, evidenceResult, verified, ghResult, ghcrResult := collectAndVerify(ctx, intent, d)
+	out := Inspection{GitHub: ghResult, GHCR: ghcrResult}
 
-	// No assessment is wired into this path yet -- collecting Change
-	// Facts and running the heuristic/model assessors is a later
-	// ticket's caller. An empty risk resolves to the policy's
-	// DefaultLane, which is deliberately the most cautious configured
-	// lane (Appendix C1's third rule): "no assessment available" is an
-	// expected, legitimate case here, not a defect.
-	_, lane, err := d.policy().LaneFor("")
+	// Assessment is a question about an eligible change, so it runs only
+	// when evidence verified. A release that may not enter SafeLane gets
+	// no risk and no lane, and [release.NewRelease] enforces that.
+	var (
+		assessment assess.Assessment
+		lane       policy.Lane
+		err        error
+	)
+	if verified != nil {
+		assessment, lane, err = assessRelease(ctx, intent, d)
+	} else {
+		_, lane, err = d.policy().LaneFor("")
+	}
 	if err != nil {
-		return nil, err
+		return out, err
 	}
 
 	var bundlePtr *release.RenderedBundle
+	envelope, err := release.NewRolloutEnvelope(lane.Weights, "start")
+	if err != nil {
+		return out, err
+	}
 	if verified != nil {
 		bundle, err := render.Render(d.Template, req.Target, *verified, lane.Weights)
 		if err != nil {
-			return nil, err
+			return out, err
 		}
 		bundlePtr = &bundle
+		// The enforced envelope is read back out of the manifest that was
+		// hashed, not out of the lane that was resolved a moment ago. The
+		// two should agree; reading the bytes is what proves it, and it is
+		// what the output claims when it says "read back from the hashed
+		// Rollout".
+		envelope, _, err = release.DeriveEnvelope(bundle)
+		if err != nil {
+			return out, err
+		}
 	}
 
 	id, err := d.newID()
 	if err != nil {
-		return nil, err
+		return out, err
 	}
 	req.Metadata.RequestID = "req_" + strings.TrimPrefix(string(id), "rel_")
 	req.Metadata.SubmittedAt = d.now()
 	req.Caller = d.caller()
 
-	// The same weights just rendered are what gets recorded: one lane
-	// resolution feeds both, so the enforced envelope cannot silently
-	// disagree with what was actually rendered and hashed.
-	envelope, err := release.NewRolloutEnvelope(lane.Weights, "start")
-	if err != nil {
-		return nil, err
-	}
 	elig, err := policy.Evaluate(d.policy(), evidenceResult, envelope)
 	if err != nil {
-		return nil, err
+		return out, err
 	}
 
 	r, err := release.NewRelease(release.ReleaseParams{
@@ -165,21 +230,83 @@ func SubmitRelease(ctx context.Context, intent release.Intent, d Deps) (*release
 		Evidence:    evidenceResult,
 		Bundle:      bundlePtr,
 		Eligibility: elig,
+		Assessment:  assessment,
 		CreatedAt:   d.now(),
 	})
 	if err != nil {
-		return nil, err
+		return out, err
 	}
+	out.Release = r
 
 	if err := d.Store.Save(r); err != nil {
-		return nil, release.Internal("release_not_persisted",
+		return out, release.Internal("release_not_persisted",
 			fmt.Sprintf("release %s was recorded but could not be persisted: %v", r.ID, err))
 	}
 
-	return r, nil
+	return out, nil
 }
 
-func collectAndVerify(ctx context.Context, intent release.Intent, d Deps) (release.ReleaseRequest, release.EvidenceResult, *release.ReleaseEvidence) {
+// assessRelease collects the Change Facts, runs both assessors, combines
+// them through [assess.Worse], and resolves the lane that risk bought.
+//
+// Three failure modes, three different answers:
+//
+//   - Change Facts cannot be collected: both verdicts record themselves
+//     unavailable and the lane falls back to DefaultLane, the narrowest
+//     one declared. Not being able to look at a change is not a licence
+//     to ship it widely.
+//   - The heuristic returns an error: that is a malformed operator
+//     configuration, and the release is refused. The heuristic is not
+//     optional.
+//   - The model cannot run: expected, and never a low verdict. Its Risk
+//     stays empty, [assess.Worse] ignores it, and the heuristic's floor
+//     stands alone.
+func assessRelease(ctx context.Context, intent release.Intent, d Deps) (assess.Assessment, policy.Lane, error) {
+	facts, factsErr := changeFacts(ctx, intent, d)
+	if factsErr != nil {
+		unavailable := assess.Verdict{Available: false, Reason: factsErr.Error()}
+		name, lane, err := d.policy().LaneFor("")
+		if err != nil {
+			return assess.Assessment{}, policy.Lane{}, err
+		}
+		return assess.Combine(facts, unavailable, unavailable, name), lane, nil
+	}
+
+	heuristic, err := d.heuristic().Assess(ctx, facts)
+	if err != nil {
+		return assess.Assessment{}, policy.Lane{}, release.Invalid("heuristic_failed", "assessment.heuristic",
+			err.Error(),
+			"Correct policy.yml's assessment.heuristic block. The heuristic is not optional; SafeLane will not fall back to a lane it cannot justify.")
+	}
+
+	// The model verdict never fails the release: Assess reports an
+	// unavailable assessor through the Verdict, not through an error.
+	model, _ := d.model().Assess(ctx, facts)
+
+	risk := assess.Worse(heuristic.Risk, model.Risk)
+	name, lane, err := d.policy().LaneFor(string(risk))
+	if err != nil {
+		return assess.Assessment{}, policy.Lane{}, err
+	}
+	return assess.Combine(facts, heuristic, model, name), lane, nil
+}
+
+func changeFacts(ctx context.Context, intent release.Intent, d Deps) (assess.Facts, error) {
+	if d.ChangeFacts == nil {
+		return assess.Facts{}, fmt.Errorf("no change-facts collector is configured")
+	}
+	repoName := intent.Repository
+	if repoName == "" {
+		repoName = d.Project.Repository.Name
+	}
+	repo, err := release.ParseRepositoryRef(repoName)
+	if err != nil {
+		return assess.Facts{}, err
+	}
+	return d.ChangeFacts.FetchChangeFacts(ctx, repo.Owner, repo.Name, intent.PullRequest)
+}
+
+func collectAndVerify(ctx context.Context, intent release.Intent, d Deps) (release.ReleaseRequest, release.EvidenceResult, *release.ReleaseEvidence, github.Result, ghcr.Result) {
 	repoName := intent.Repository
 	if repoName == "" {
 		repoName = d.Project.Repository.Name
@@ -209,17 +336,13 @@ func collectAndVerify(ctx context.Context, intent release.Intent, d Deps) (relea
 	if err != nil {
 		return req, release.UnknownEvidence(release.Invalid("malformed_repository", "repository",
 			fmt.Sprintf("%q is not a repository reference", repoName),
-			`Use "owner/name".`)), nil
+			`Use "owner/name".`)), nil, github.Result{}, ghcr.Result{}
 	}
 
 	facts, fetchErr := d.GitHub.FetchPullRequestFacts(ctx, repo.Owner, repo.Name, intent.PullRequest)
 	var ghResult github.Result
 	if fetchErr != nil {
-		reason := github.ReasonFetchFailed
-		if strings.Contains(strings.ToLower(fetchErr.Error()), "not found") {
-			reason = github.ReasonPullRequestNotFound
-		}
-		ghResult = github.Result{Status: github.StatusUnknown, Reason: reason, Detail: fetchErr.Error()}
+		ghResult = github.Result{Status: github.StatusUnknown, Reason: fetchReason(fetchErr), Detail: fetchErr.Error()}
 	} else {
 		req.Source.MergeCommitSHA = facts.MergeCommitSHA
 		req.Review.PullRequestURL = facts.URL
@@ -249,16 +372,32 @@ func collectAndVerify(ctx context.Context, intent release.Intent, d Deps) (relea
 	if ghResult.Status == github.StatusVerified && ghcrResult.Status == ghcr.StatusVerified {
 		evidence, err := buildReleaseEvidence(req, ghResult, ghcrResult, d.now())
 		if err != nil {
-			return req, evidenceResultFromError(err), nil
+			return req, evidenceResultFromError(err), nil, ghResult, ghcrResult
 		}
 		result, err := release.VerifiedEvidence(evidence)
 		if err != nil {
-			return req, release.UnknownEvidence(release.Internal("evidence_wrap_failed", err.Error())), nil
+			return req, release.UnknownEvidence(release.Internal("evidence_wrap_failed", err.Error())), nil, ghResult, ghcrResult
 		}
-		return req, result, &evidence
+		return req, result, &evidence, ghResult, ghcrResult
 	}
 
-	return req, combineNonVerified(ghResult, ghcrResult), nil
+	return req, combineNonVerified(ghResult, ghcrResult), nil, ghResult, ghcrResult
+}
+
+// fetchReason classifies a GitHub transport failure. A rate limit is
+// called what it is, because Appendix C4 makes it retryable and a caller
+// that reads "github_unreachable" would give up on something that fixes
+// itself in minutes.
+func fetchReason(err error) github.ReasonCode {
+	msg := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(msg, "rate limit"):
+		return github.ReasonRateLimited
+	case strings.Contains(msg, "not found"):
+		return github.ReasonPullRequestNotFound
+	default:
+		return github.ReasonFetchFailed
+	}
 }
 
 func resolveArtifact(ctx context.Context, intent release.Intent, d Deps, mergeSHA string) (ghcr.Result, release.ImageReference) {
@@ -370,9 +509,20 @@ func evidenceResultFromError(err error) release.EvidenceResult {
 }
 
 // combineNonVerified builds the EvidenceResult for the case where GitHub
-// and/or GHCR did not both verify. Unknown outranks failed, which outranks
-// missing: if either check could not be determined at all, the combined
-// outcome is unknown, never a milder, more specific-sounding result.
+// and/or GHCR did not both verify.
+//
+// Unknown outranks failed, which outranks missing: if a check could not be
+// determined at all, the combined outcome is unknown, never a milder,
+// more specific-sounding result. There is one exception, and it is the
+// difference between N4 reading "ineligible" and reading "retry me
+// forever": a *definite* GitHub rejection outranks an unknown GHCR,
+// because digest resolution is downstream of the merge commit. When
+// GitHub says the pull request never merged, the registry was never asked
+// a question it could have answered -- reporting that as "we could not
+// tell" would invite a retry of something that will not change.
+//
+// The exception is deliberately narrow. It applies only when GitHub
+// rejected, never when GitHub itself is unknown.
 func combineNonVerified(gh github.Result, gr ghcr.Result) release.EvidenceResult {
 	var reasons release.Errors
 	if e := githubResultError(gh); e != nil {
@@ -382,24 +532,24 @@ func combineNonVerified(gh github.Result, gr ghcr.Result) release.EvidenceResult
 		reasons = append(reasons, e)
 	}
 
+	if gh.Status == github.StatusRejected {
+		if isGithubMissingReason(gh.Reason) {
+			return release.MissingEvidence(reasons...)
+		}
+		return release.FailedEvidence(reasons...)
+	}
+
 	if gh.Status == github.StatusUnknown || gr.Status == ghcr.StatusUnknown {
 		return release.UnknownEvidence(reasons...)
 	}
 
-	ghMissing := gh.Status == github.StatusRejected && isGithubMissingReason(gh.Reason)
-	ghFailed := gh.Status == github.StatusRejected && !isGithubMissingReason(gh.Reason)
-	grFailed := gr.Status == ghcr.StatusRejected // ghcr has no "missing" case: an unresolvable reference is unknown, not missing.
-
-	switch {
-	case ghFailed || grFailed:
+	// ghcr has no "missing" case: an unresolvable reference is unknown, not missing.
+	if gr.Status == ghcr.StatusRejected {
 		return release.FailedEvidence(reasons...)
-	case ghMissing:
-		return release.MissingEvidence(reasons...)
-	default:
-		// Unreachable in practice: both Verified takes the other branch in
-		// verifyEvidence. Unknown is the safest fallback if it is ever hit.
-		return release.UnknownEvidence(reasons...)
 	}
+	// Unreachable in practice: both Verified takes the other branch in
+	// collectAndVerify. Unknown is the safest fallback if it is ever hit.
+	return release.UnknownEvidence(reasons...)
 }
 
 func githubResultError(r github.Result) *release.Error {
@@ -407,17 +557,43 @@ func githubResultError(r github.Result) *release.Error {
 	case github.StatusVerified:
 		return nil
 	case github.StatusUnknown:
-		return release.UnknownEvidenceError(string(r.Reason), "source", r.Detail,
-			"Re-run verification once GitHub is reachable and the pull request can be found.")
+		return release.UnknownEvidenceError(reasonCode(r.Reason), githubReasonFieldName(r.Reason), r.Detail,
+			"Re-run verification once GitHub can answer for this pull request.")
 	default: // StatusRejected
 		field, missing := githubReasonField(r.Reason)
 		if missing {
-			return release.MissingEvidenceError(string(r.Reason), field, r.Detail,
+			return release.MissingEvidenceError(reasonCode(r.Reason), field, r.Detail,
 				"Provide the missing evidence: an approving review from someone other than the author, or the required check run for the merge commit SHA.")
 		}
-		return release.FailedEvidenceError(string(r.Reason), field, r.Detail,
+		return release.FailedEvidenceError(reasonCode(r.Reason), field, r.Detail,
 			"Correct the pull request, review, or CI evidence named above and resubmit.")
 	}
+}
+
+// reasonCode maps a verification reason onto Appendix C4's catalogue.
+//
+// The two vocabularies are not the same and should not be merged. A
+// verify package names what it observed ("not_merged"); the catalogue
+// names what a caller has to do about it ("pull_request_not_merged",
+// ineligible, not retryable). Most reasons already agree; the ones that
+// do not are here, once, rather than spelled differently at each site
+// that prints or records them.
+func reasonCode(r github.ReasonCode) string {
+	switch r {
+	case github.ReasonNotMerged:
+		return "pull_request_not_merged"
+	case github.ReasonFetchFailed:
+		return "github_unreachable"
+	case github.ReasonRequiredCheckIncomplete:
+		return "verification_incomplete"
+	default:
+		return string(r)
+	}
+}
+
+func githubReasonFieldName(r github.ReasonCode) string {
+	field, _ := githubReasonField(r)
+	return field
 }
 
 func githubReasonField(reason github.ReasonCode) (field string, missing bool) {
@@ -430,7 +606,8 @@ func githubReasonField(reason github.ReasonCode) (field string, missing bool) {
 		return "review.pull_request_number", true
 	case github.ReasonApproverIsAuthor:
 		return "review.approver", false
-	case github.ReasonRequiredCheckFailed, github.ReasonRequiredCheckWrongSHA:
+	case github.ReasonRequiredCheckFailed, github.ReasonRequiredCheckWrongSHA,
+		github.ReasonRequiredCheckIncomplete:
 		return "ci.check_name", false
 	case github.ReasonMergeCommitMismatch:
 		return "source.merge_commit_sha", false
@@ -448,8 +625,17 @@ func ghcrResultError(r ghcr.Result) *release.Error {
 	case ghcr.StatusVerified:
 		return nil
 	case ghcr.StatusUnknown:
-		return release.UnknownEvidenceError(string(r.Reason), "artifact.image_reference", r.Detail,
-			"Re-run verification once the registry is reachable.")
+		// Appendix C4 splits these: an image that is simply not published
+		// yet is digest_not_found and worth retrying in a minute, while a
+		// registry that will not talk is ghcr_unreachable. Both are
+		// indeterminate; only the wording tells an agent which wait it is
+		// in for.
+		code := "digest_not_found"
+		if r.Reason != ghcr.ReasonResolveFailed {
+			code = "ghcr_unreachable"
+		}
+		return release.UnknownEvidenceError(code, "artifact.image_reference", r.Detail,
+			"Re-run verification once the image for this merge commit is published.")
 	default: // StatusRejected
 		return release.FailedEvidenceError(string(r.Reason), "artifact.image_reference", r.Detail,
 			"Resolve the correct immutable digest in the expected repository and resubmit.")

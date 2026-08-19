@@ -167,3 +167,51 @@ func TestParse_MissingPullRequest_RejectedByValidate(t *testing.T) {
 		t.Fatalf("want CategoryInvalidRequest for a missing pull request, got %v (%v)", release.Categorize(err), err)
 	}
 }
+
+// TestParse_ForbiddenFieldsReportedInDocumentOrder pins the order N9
+// prints: a request carrying "risk" and then "lane" is told about "risk"
+// first, next to where its author wrote it. Sorting the keys, or reading
+// them out of a map, would reverse that pair for no reason a reader of
+// the request could see.
+func TestParse_ForbiddenFieldsReportedInDocumentOrder(t *testing.T) {
+	_, err := Parse([]byte(`{ "repository": "AndrewMaged814/podinfo", "pull_request": 4,
+  "risk": "low", "lane": "fast" }`))
+	errs := release.Flatten(err)
+	if len(errs) != 2 {
+		t.Fatalf("want exactly the two named fields rejected, got %v", errs)
+	}
+	if errs[0].Field != "risk" || errs[1].Field != "lane" {
+		t.Fatalf("want risk then lane, got %q then %q", errs[0].Field, errs[1].Field)
+	}
+	for _, e := range errs {
+		if e.Code != "unknown_field" {
+			t.Errorf("want code unknown_field for %q, got %q", e.Field, e.Code)
+		}
+		if e.Remedy != "send repository and pull_request only" {
+			t.Errorf("want the same remedy on every schema rejection, got %q", e.Remedy)
+		}
+	}
+	if errs[0].Message != "a Release Request carries no risk claims" {
+		t.Errorf("unexpected message for risk: %q", errs[0].Message)
+	}
+	if errs[1].Message != "the lane is selected by assessment, never requested" {
+		t.Errorf("unexpected message for lane: %q", errs[1].Message)
+	}
+}
+
+// A caller cannot assert its own evidence any more than it can name its
+// own lane; both are the same rejection with different wording.
+func TestParse_EvidenceClaim_IsAnUnknownField(t *testing.T) {
+	_, err := Parse([]byte(`{ "repository": "AndrewMaged814/podinfo", "pull_request": 3,
+  "evidence": { "approved": true, "check": "success" } }`))
+	errs := release.Flatten(err)
+	if len(errs) != 1 {
+		t.Fatalf("want one rejection, got %v", errs)
+	}
+	if errs[0].Field != "evidence" || errs[0].Code != "unknown_field" {
+		t.Fatalf("want unknown_field (evidence), got %s (%s)", errs[0].Code, errs[0].Field)
+	}
+	if errs[0].Message != "a Release Request carries no evidence claims" {
+		t.Errorf("unexpected message: %q", errs[0].Message)
+	}
+}

@@ -39,3 +39,6 @@ desktop.ini
 # Local agent tool config: mirrors .agents/skills via symlink, regenerated
 # per machine (e.g. by the setup-matt-pocock-skills skill). Not source.
 .claude/
+
+# Local phase-one working files (PLAN.md tickets)
+.scratch/

@@ -3,6 +3,9 @@ package policy
 import (
 	"fmt"
 	"os"
+	"time"
+
+	"github.com/AndrewMaged814/safelane/internal/assess"
 
 	"github.com/AndrewMaged814/safelane/internal/release"
 	"gopkg.in/yaml.v3"
@@ -22,6 +25,25 @@ type yamlPolicy struct {
 	} `yaml:"lanes"`
 	RiskToLane  map[string]string `yaml:"risk_to_lane"`
 	DefaultLane string            `yaml:"default_lane"`
+	Assessment  struct {
+		Heuristic struct {
+			AgentAuthoredMinimum string `yaml:"agent_authored_minimum"`
+			Paths                []struct {
+				Glob    string `yaml:"glob"`
+				Minimum string `yaml:"minimum"`
+			} `yaml:"paths"`
+			Size []struct {
+				ChangedLinesAtLeast int    `yaml:"changed_lines_at_least"`
+				FilesAtLeast        int    `yaml:"files_at_least"`
+				Minimum             string `yaml:"minimum"`
+			} `yaml:"size"`
+		} `yaml:"heuristic"`
+		Model struct {
+			Assessors    []string `yaml:"assessors"`
+			Timeout      string   `yaml:"timeout"`
+			MaxDiffBytes int      `yaml:"max_diff_bytes"`
+		} `yaml:"model"`
+	} `yaml:"assessment"`
 }
 
 // Load reads and validates the operator's policy.yml. A risk_to_lane
@@ -58,6 +80,12 @@ func Load(path string) (Policy, error) {
 	for name, l := range y.Lanes {
 		p.Lanes[name] = Lane{Weights: l.Weights}
 	}
+
+	assessment, err := readAssessment(y)
+	if err != nil {
+		return Policy{}, err
+	}
+	p.Assessment = assessment
 
 	if err := p.validate(); err != nil {
 		return Policy{}, err
@@ -103,4 +131,84 @@ func (p Policy) validate() error {
 	}
 
 	return errs.OrNil()
+}
+
+// readAssessment converts policy.yml's assessment: block into the Go
+// values the two assessors take.
+//
+// An omitted block falls back to [Default]'s assessment configuration
+// rather than to an empty one. An empty HeuristicConfig would silently
+// disable every floor rule -- every change would assess low and take the
+// widest lane -- which is exactly the failure mode a missing block must
+// not produce. The heuristic is not optional (Appendix C1's third rule),
+// so "not configured" means "the compiled default", never "no rules".
+func readAssessment(y yamlPolicy) (AssessmentConfig, error) {
+	a := y.Assessment
+	if a.Heuristic.AgentAuthoredMinimum == "" && len(a.Heuristic.Paths) == 0 &&
+		len(a.Heuristic.Size) == 0 && len(a.Model.Assessors) == 0 {
+		return Default().Assessment, nil
+	}
+
+	var errs release.Errors
+	risk := func(field, value string, fallback assess.Risk) assess.Risk {
+		if value == "" {
+			return fallback
+		}
+		switch assess.Risk(value) {
+		case assess.RiskLow, assess.RiskMedium, assess.RiskHigh:
+			return assess.Risk(value)
+		}
+		errs = append(errs, release.Invalid("invalid_risk_level", field,
+			fmt.Sprintf("%q is not one of low, medium, high", value),
+			"Use one of the three risk levels. There is no fourth."))
+		return fallback
+	}
+
+	cfg := AssessmentConfig{}
+	cfg.Heuristic.AgentAuthoredMinimum = risk(
+		"assessment.heuristic.agent_authored_minimum", a.Heuristic.AgentAuthoredMinimum, assess.RiskLow)
+
+	for i, r := range a.Heuristic.Paths {
+		field := fmt.Sprintf("assessment.heuristic.paths[%d]", i)
+		if r.Glob == "" {
+			errs = append(errs, release.Invalid("missing_policy_field", field+".glob",
+				"a path rule declares no glob",
+				"Give every path rule a glob, for example pkg/api/**."))
+			continue
+		}
+		cfg.Heuristic.Paths = append(cfg.Heuristic.Paths, assess.PathRule{
+			Glob:    r.Glob,
+			Minimum: risk(field+".minimum", r.Minimum, assess.RiskLow),
+		})
+	}
+
+	for i, r := range a.Heuristic.Size {
+		field := fmt.Sprintf("assessment.heuristic.size[%d]", i)
+		if r.ChangedLinesAtLeast <= 0 && r.FilesAtLeast <= 0 {
+			errs = append(errs, release.Invalid("missing_policy_field", field,
+				"a size rule sets neither changed_lines_at_least nor files_at_least",
+				"Set exactly one threshold on every size rule."))
+			continue
+		}
+		cfg.Heuristic.Size = append(cfg.Heuristic.Size, assess.SizeRule{
+			ChangedLinesAtLeast: r.ChangedLinesAtLeast,
+			FilesAtLeast:        r.FilesAtLeast,
+			Minimum:             risk(field+".minimum", r.Minimum, assess.RiskLow),
+		})
+	}
+
+	cfg.Model.Assessors = a.Model.Assessors
+	cfg.Model.MaxDiffBytes = a.Model.MaxDiffBytes
+	if a.Model.Timeout != "" {
+		d, err := time.ParseDuration(a.Model.Timeout)
+		if err != nil {
+			errs = append(errs, release.Invalid("invalid_duration", "assessment.model.timeout",
+				fmt.Sprintf("%q is not a duration", a.Model.Timeout),
+				`Use a Go duration, for example "90s".`))
+		} else {
+			cfg.Model.Timeout = d
+		}
+	}
+
+	return cfg, errs.OrNil()
 }

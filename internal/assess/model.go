@@ -178,6 +178,7 @@ func (m modelAssessor) tryAssessor(ctx context.Context, name, diff string) Verdi
 			Risk:      risk,
 			Rationale: sanitize(parsed.RiskRationale),
 			Available: true,
+			Assessor:  name,
 		}
 	}
 
@@ -215,11 +216,11 @@ func sanitize(s string) string {
 // line's decoded object -- and a few of its common nested fields -- for
 // something that already has the schema's required risk_level field.
 //
-// This function's shape was not checked against a live claude/codex
-// invocation in this environment (a sandbox restriction blocked spawning
-// a nested agent CLI while writing this). Its fallback tests exercise
-// the shapes documented in Appendix E1/E2; spot-check it against a real
-// invocation of both CLIs before relying on it for a demo run.
+// Verified against a live `claude` run on 2026-08-19: `safelane release
+// inspect` against the real fork produced a rated verdict end to end, so
+// the stream-json path below is exercised, not merely specified. The
+// codex path is still spec-only; check it before a demo that depends on
+// the fallback.
 func extractModelOutput(raw []byte) (modelOutput, error) {
 	if out, ok := tryDecodeModelOutput(raw); ok {
 		return out, nil

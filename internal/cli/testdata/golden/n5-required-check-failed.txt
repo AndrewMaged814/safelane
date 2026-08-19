@@ -1,0 +1,9 @@
+Failed
+  ✗ Required publish check        build-and-push (failure)
+      the publish workflow failed for this exact commit
+      remedy: fix the build, merge again
+
+Decision
+  eligibility     ineligible
+  reason          required_check_failed
+  retryable       false

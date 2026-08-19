@@ -209,6 +209,10 @@ func ForbiddenRequestKeys() []string {
 		"policy", "policies", "policyRef", "policy_ref", "policyVersion",
 		"policy_version", "riskOverride", "risk_override", "severity", "risk",
 		"approval", "approvals", "waiver", "exception",
+		// Lane selection. The lane is selected by assessment, never
+		// requested: a caller naming one is the schema-level form of asking
+		// for a wider rollout than its change earned.
+		"lane", "lanes", "weights",
 		// Execution shaping. A caller does not choose its own rollout envelope.
 		"stages", "trafficWeight", "traffic_weight", "steps", "envelope",
 		"autoPromote", "auto_promote",
@@ -216,7 +220,7 @@ func ForbiddenRequestKeys() []string {
 		// SafeLane collects these itself.
 		"target", "source", "review", "ci", "artifact", "caller", "metadata",
 		"approver", "merge_commit_sha", "check_name", "run_id", "cluster",
-		"namespace",
+		"namespace", "evidence", "checks", "digest", "approved",
 	}
 }
 

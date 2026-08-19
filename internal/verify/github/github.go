@@ -48,6 +48,14 @@ const (
 	ReasonRequiredCheckMissing  ReasonCode = "required_check_missing"
 	ReasonRequiredCheckFailed   ReasonCode = "required_check_failed"
 	ReasonRequiredCheckWrongSHA ReasonCode = "required_check_wrong_sha"
+	// ReasonRequiredCheckIncomplete means the required check run exists but
+	// has not concluded yet. It is unknown, never rejected: a check that is
+	// still running has not said no, and a release waiting on one is worth
+	// retrying rather than refused.
+	ReasonRequiredCheckIncomplete ReasonCode = "required_check_incomplete"
+	// ReasonRateLimited means GitHub refused to answer because the token's
+	// (or the anonymous) quota is exhausted. Unknown, and retryable.
+	ReasonRateLimited ReasonCode = "rate_limited"
 )
 
 // Claim is what the caller declared about the reviewed change. It is
@@ -73,11 +81,16 @@ type Claim struct {
 
 // CheckRun is one check run GitHub reports against a commit SHA.
 type CheckRun struct {
-	Name        string
+	Name string
+	// Status is the run's lifecycle state: "queued", "in_progress" or
+	// "completed". A run that has not completed has no conclusion yet, and
+	// a missing conclusion is not a failed one.
+	Status      string
 	Conclusion  string // "success", "failure", "neutral", "cancelled", ...
 	HeadSHA     string // the exact commit this run ran against
 	RunID       int64
 	URL         string
+	StartedAt   time.Time
 	CompletedAt time.Time
 }
 
@@ -177,6 +190,18 @@ func unknown(reason ReasonCode, detailf string, args ...any) Result {
 	return Result{Status: StatusUnknown, Reason: reason, Detail: fmt.Sprintf(detailf, args...)}
 }
 
+// unknownWith is unknown for the case where SafeLane did observe the pull
+// request and simply cannot conclude from it yet -- a check run that has
+// not finished, say. The facts are carried through because they are real:
+// the merge commit was found, and a report that dropped them would say
+// SafeLane knows nothing when it knows most of it.
+func unknownWith(reason ReasonCode, facts Facts, detailf string, args ...any) Result {
+	r := unknown(reason, detailf, args...)
+	f := facts
+	r.Facts = &f
+	return r
+}
+
 func verified(facts Facts) Result {
 	f := facts
 	return Result{Status: StatusVerified, Facts: &f}
@@ -252,6 +277,19 @@ func Evaluate(claim Claim, facts Facts) Result {
 		return rejected(ReasonRequiredCheckWrongSHA, facts,
 			"required check %q ran against %q, not the merge commit %q",
 			claim.RequiredCheckName, found.HeadSHA, facts.MergeCommitSHA)
+	}
+	// A run that has not concluded is unknown, not rejected. Collapsing
+	// "still running" into "failed" would turn a release worth retrying in
+	// forty seconds into one that is refused outright.
+	if found.Status != "" && found.Status != "completed" {
+		return unknownWith(ReasonRequiredCheckIncomplete, facts,
+			"required check %q is %s for merge commit %q",
+			claim.RequiredCheckName, found.Status, facts.MergeCommitSHA)
+	}
+	if found.Conclusion == "" {
+		return unknownWith(ReasonRequiredCheckIncomplete, facts,
+			"required check %q has not concluded for merge commit %q",
+			claim.RequiredCheckName, facts.MergeCommitSHA)
 	}
 	if found.Conclusion != "success" {
 		return rejected(ReasonRequiredCheckFailed, facts,

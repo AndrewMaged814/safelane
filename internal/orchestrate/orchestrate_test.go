@@ -427,10 +427,31 @@ func TestSubmitRelease_RegistryUnreachable_PersistsUnknownEvidence(t *testing.T)
 	}
 }
 
-func TestSubmitRelease_BothChecksFailIndependently_UnknownOutranksFailed(t *testing.T) {
+// Unknown outranks failed: an operational failure must never be reported
+// as the milder, more specific-sounding outcome.
+func TestSubmitRelease_UnknownGitHubOutranksFailedGHCR(t *testing.T) {
+	deps, _ := baseDeps(t)
+	deps.GitHub = fakeFetcher{err: fmt.Errorf("github: connection reset")} // github: unknown
+	deps.GHCR = fakeResolver{digest: "sha256:" + strings.Repeat("b", 64)}  // ghcr: mismatched digest
+
+	r, err := SubmitRelease(context.Background(), fixtureIntent(), deps)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if r.Evidence().Outcome() != release.EvidenceUnknown {
+		t.Fatalf("want unknown when GitHub could not be reached, got %s", r.Evidence().Outcome())
+	}
+}
+
+// The one exception, and the reason it exists: digest resolution is
+// downstream of the merge commit. When GitHub says the pull request never
+// merged, the registry was never asked a question it could have answered,
+// so reporting "we could not tell" would invite a retry of something that
+// will not change. A definite no stays a definite no.
+func TestSubmitRelease_RejectedGitHubOutranksUnknownGHCR(t *testing.T) {
 	deps, _ := baseDeps(t)
 	facts := verifiedFacts()
-	facts.Merged = false // github: failed
+	facts.Merged = false // github: a definite no
 	deps.GitHub = fakeFetcher{facts: facts}
 	deps.GHCR = fakeResolver{err: fmt.Errorf("registry timeout")} // ghcr: unknown
 
@@ -438,8 +459,11 @@ func TestSubmitRelease_BothChecksFailIndependently_UnknownOutranksFailed(t *test
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if r.Evidence().Outcome() != release.EvidenceUnknown {
-		t.Fatalf("want unknown to outrank failed when both checks fail differently, got %s", r.Evidence().Outcome())
+	if r.Evidence().Outcome() != release.EvidenceFailed {
+		t.Fatalf("want failed when the pull request did not merge, got %s", r.Evidence().Outcome())
+	}
+	if r.Eligibility().Retryable() {
+		t.Error("an unmerged pull request is not worth retrying")
 	}
 }
 

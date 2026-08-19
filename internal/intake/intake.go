@@ -8,7 +8,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"sort"
 	"strings"
 	"sync"
 
@@ -35,7 +34,7 @@ func Parse(raw []byte) (release.Intent, error) {
 			"the request is not valid JSON",
 			"Submit a single JSON object matching the Release Request schema.").WithCause(err)
 	}
-	obj, ok := generic.(map[string]any)
+	_, ok := generic.(map[string]any)
 	if !ok {
 		return release.Intent{}, release.Malformed("invalid_request_shape", "",
 			"the request must be a single JSON object",
@@ -44,7 +43,7 @@ func Parse(raw []byte) (release.Intent, error) {
 
 	var errs release.Errors
 	forbiddenTop := make(map[string]bool)
-	for _, e := range screenForbiddenTopLevelFields(obj) {
+	for _, e := range screenForbiddenTopLevelFields(raw) {
 		errs = append(errs, e)
 		forbiddenTop[e.Field] = true
 	}
@@ -70,22 +69,68 @@ func Parse(raw []byte) (release.Intent, error) {
 	return intent, nil
 }
 
-func screenForbiddenTopLevelFields(obj map[string]any) []*release.Error {
+// screenForbiddenTopLevelFields reports every forbidden key in the order
+// the caller wrote it, not in map order and not sorted.
+//
+// The order matters because it is what the caller is reading: a request
+// carrying "risk" and then "lane" gets told about "risk" first, next to
+// where it wrote it. Sorting would reverse that pair for no reason a
+// reader of the request could see.
+func screenForbiddenTopLevelFields(raw []byte) []*release.Error {
 	forbidden := forbiddenKeySet()
-	keys := make([]string, 0, len(obj))
-	for k := range obj {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-
 	var out []*release.Error
-	for _, k := range keys {
+	for _, k := range topLevelKeysInOrder(raw) {
 		if forbidden[strings.ToLower(k)] {
-			out = append(out, release.Forbidden(k, fmt.Sprintf(
-				"the request must not include %q; SafeLane collects evidence and renders the deployment bundle itself", k)))
+			out = append(out, release.Forbidden(k, forbiddenFieldMessage(k)))
 		}
 	}
 	return out
+}
+
+// forbiddenFieldMessage says what the field would have been, in the
+// caller's own terms. The three named here are the ones a caller
+// plausibly believes it is entitled to send; the rest get the general
+// form, which is the same claim stated once.
+func forbiddenFieldMessage(key string) string {
+	switch strings.ToLower(key) {
+	case "evidence", "checks", "approved", "approval", "approvals", "approver", "digest":
+		return "a Release Request carries no evidence claims"
+	case "risk", "severity", "risk_override", "riskoverride":
+		return "a Release Request carries no risk claims"
+	case "lane", "lanes", "weights", "stages", "envelope":
+		return "the lane is selected by assessment, never requested"
+	default:
+		return fmt.Sprintf("a Release Request carries no %q field", key)
+	}
+}
+
+// topLevelKeysInOrder reads the object's keys straight off the token
+// stream, because decoding into a map loses the order the caller wrote
+// them in. Anything that is not a single JSON object yields no keys; the
+// caller has already reported that separately.
+func topLevelKeysInOrder(raw []byte) []string {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	tok, err := dec.Token()
+	if err != nil || tok != json.Delim('{') {
+		return nil
+	}
+	var keys []string
+	for dec.More() {
+		key, err := dec.Token()
+		if err != nil {
+			return keys
+		}
+		name, ok := key.(string)
+		if !ok {
+			return keys
+		}
+		keys = append(keys, name)
+		var discard json.RawMessage
+		if err := dec.Decode(&discard); err != nil {
+			return keys
+		}
+	}
+	return keys
 }
 
 var forbiddenKeySet = sync.OnceValue(func() map[string]bool {

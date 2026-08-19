@@ -1,0 +1,22 @@
+Detected
+  (none)
+
+Failed
+  ✗ Merged commit on master       pull request #9 is open
+      remedy: merge the pull request, then retry
+
+Unavailable
+  – Required publish check        skipped (no merge commit)
+  – Immutable GHCR digest         skipped (no merge commit)
+  – Independent PR approval       not required by this policy
+
+Assessment
+  not performed   an ineligible release receives no lane
+
+Decision
+  eligibility     ineligible
+  reason          pull_request_not_merged
+  retryable       false
+  envelope        none
+
+No rollout may start.

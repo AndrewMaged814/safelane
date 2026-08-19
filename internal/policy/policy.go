@@ -12,7 +12,9 @@ package policy
 
 import (
 	"fmt"
+	"time"
 
+	"github.com/AndrewMaged814/safelane/internal/assess"
 	"github.com/AndrewMaged814/safelane/internal/release"
 )
 
@@ -46,6 +48,21 @@ type Policy struct {
 	// cautious configured lane, never the widest, and this is not
 	// itself an error: risk decides width, not entry.
 	DefaultLane string
+
+	// Assessment is the operator-owned configuration behind the two
+	// assessors. See [AssessmentConfig].
+	Assessment AssessmentConfig
+}
+
+// AssessmentConfig is policy.yml's assessment: block (Appendix C3): the
+// deterministic heuristic that always runs and sets the floor, and the
+// best-effort model assessors that may only raise it.
+//
+// It lives on the Policy because both halves are operator-owned. No
+// assessor invents its own thresholds, and no caller supplies them.
+type AssessmentConfig struct {
+	Heuristic assess.HeuristicConfig
+	Model     assess.ModelConfig
 }
 
 // LaneFor resolves a risk level to the lane name and weights an eligible
@@ -91,6 +108,25 @@ func Default() Policy {
 			"high":   "guarded",
 		},
 		DefaultLane: "guarded",
+		Assessment: AssessmentConfig{
+			Heuristic: assess.HeuristicConfig{
+				AgentAuthoredMinimum: assess.RiskMedium,
+				Paths: []assess.PathRule{
+					{Glob: "pkg/api/**", Minimum: assess.RiskMedium},
+					{Glob: "**/migrations/**", Minimum: assess.RiskHigh},
+					{Glob: "charts/**", Minimum: assess.RiskHigh},
+				},
+				Size: []assess.SizeRule{
+					{ChangedLinesAtLeast: 200, Minimum: assess.RiskMedium},
+					{FilesAtLeast: 15, Minimum: assess.RiskMedium},
+				},
+			},
+			Model: assess.ModelConfig{
+				Assessors:    []string{"claude", "codex"},
+				Timeout:      90 * time.Second,
+				MaxDiffBytes: 200000,
+			},
+		},
 	}
 }
 

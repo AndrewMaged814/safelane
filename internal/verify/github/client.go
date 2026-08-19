@@ -95,9 +95,11 @@ type checkRunsResponse struct {
 	CheckRuns []struct {
 		ID          int64     `json:"id"`
 		Name        string    `json:"name"`
+		Status      string    `json:"status"`
 		Conclusion  string    `json:"conclusion"`
 		HeadSHA     string    `json:"head_sha"`
 		HTMLURL     string    `json:"html_url"`
+		StartedAt   time.Time `json:"started_at"`
 		CompletedAt time.Time `json:"completed_at"`
 	} `json:"check_runs"`
 }
@@ -140,10 +142,12 @@ func (c *Client) FetchPullRequestFacts(ctx context.Context, owner, repo string, 
 		for _, run := range checks.CheckRuns {
 			facts.CheckRuns = append(facts.CheckRuns, CheckRun{
 				Name:        run.Name,
+				Status:      run.Status,
 				Conclusion:  run.Conclusion,
 				HeadSHA:     facts.MergeCommitSHA, // the API scopes this call to this exact SHA
 				RunID:       run.ID,
 				URL:         run.HTMLURL,
+				StartedAt:   run.StartedAt,
 				CompletedAt: run.CompletedAt,
 			})
 		}
