@@ -345,11 +345,7 @@ func TestRenderRejectsMultiDocumentTemplateFile(t *testing.T) {
 		"10-two.yaml.tmpl": &fstest.MapFile{Data: []byte(
 			"apiVersion: v1\nkind: Service\nmetadata:\n  name: a\n---\napiVersion: v1\nkind: Service\nmetadata:\n  name: b\n")},
 	}
-	tmpl, err := render.LoadFS(fsys)
-	if err != nil {
-		t.Fatalf("LoadFS: %v", err)
-	}
-	if _, err := render.Render(tmpl, testTarget(), testEvidence(t, digestA), testWeights); err == nil ||
+	if _, err := render.LoadFS(fsys); err == nil ||
 		!strings.Contains(err.Error(), "multi_document_template") {
 		t.Errorf("error = %v, want multi_document_template", err)
 	}

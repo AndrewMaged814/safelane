@@ -195,7 +195,7 @@ func ConservativeProposal(s Snapshot) Proposal {
 			"Mandatory evidence remains the merged commit, passing publish workflow, and immutable GHCR digest.",
 		},
 		TemplateHighlights: []string{
-			"Two operator-owned Argo Rollouts templates define the Service and canary Rollout.",
+			"Three operator-owned Argo Rollouts templates define the stable Service, canary Service, and Rollout.",
 			"Health probes use /healthz and rollout weights come from the selected SafeLane lane.",
 		},
 		RequiredChecks: checks,
@@ -375,8 +375,10 @@ Use the discovered CI check names when they are credible. Keep rollout lanes bou
 The Release Template must use SafeLane placeholders such as {{ .ImageReference }}, {{ .Namespace }},
 {{ .RolloutName }}, {{ .StableServiceName }}, {{ .CanaryServiceName }}, and {{ range .Steps }}.
 Every template_files.path must be a relative path ending exactly in .yaml.tmpl (for example
-10-service.yaml.tmpl and 20-rollout.yaml.tmpl), and every template file must contain valid YAML
-template content. Do not return .yaml, .yml, or a path under templates/.
+10-service-stable.yaml.tmpl, 15-service-canary.yaml.tmpl, and 20-rollout.yaml.tmpl), and every
+template file must render exactly one Kubernetes object/YAML document. Never use the YAML document
+separator ---; put each object in its own .yaml.tmpl file. Do not return .yaml, .yml, or a path
+under templates/.
 Do not include credentials, shell commands, or files outside the template.
 
 Repository snapshot:
@@ -437,10 +439,23 @@ assessment:
 func conservativeTemplate(s Snapshot) []TemplateFile {
 	app := s.Application
 	return []TemplateFile{
-		{Path: "10-service.yaml.tmpl", Content: fmt.Sprintf(`apiVersion: v1
+		{Path: "10-service-stable.yaml.tmpl", Content: fmt.Sprintf(`apiVersion: v1
 kind: Service
 metadata:
   name: {{ .StableServiceName }}
+  namespace: {{ .Namespace }}
+spec:
+  selector:
+    app.kubernetes.io/name: %s
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+`, app)},
+		{Path: "15-service-canary.yaml.tmpl", Content: fmt.Sprintf(`apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .CanaryServiceName }}
   namespace: {{ .Namespace }}
 spec:
   selector:

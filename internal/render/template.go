@@ -102,6 +102,9 @@ func LoadFS(fsys fs.FS) (Template, error) {
 
 		switch {
 		case strings.HasSuffix(f.path, ResourceSuffix):
+			if err := validateSingleDocumentTemplate(f.path, f.body); err != nil {
+				return Template{}, err
+			}
 			resources = append(resources, resourceTemplate{path: f.path, body: f.body})
 		case f.path == MetadataFile:
 			parsed, err := parseMetadata(f.body)
@@ -124,6 +127,20 @@ func LoadFS(fsys fs.FS) (Template, error) {
 		fileCount: len(files),
 		resources: resources,
 	}, nil
+}
+
+// validateSingleDocumentTemplate rejects a literal YAML document separator at
+// load time. Resource templates are deliberately one object per file: the
+// rendered bundle hashes and identifies each file independently.
+func validateSingleDocumentTemplate(path, body string) error {
+	for _, raw := range strings.Split(body, "\n") {
+		if strings.TrimSpace(raw) == "---" {
+			return release.RenderError("multi_document_template", path,
+				fmt.Sprintf("%s contains more than one YAML document", path),
+				"Each "+ResourceSuffix+" file must contain exactly one Kubernetes object. Put each object in its own template file.")
+		}
+	}
+	return nil
 }
 
 // Identity returns the template identity recorded on every Release rendered from it.

@@ -57,6 +57,18 @@ func TestConservativeProposalIsProjectShapedAndValid(t *testing.T) {
 	if len(proposal.PolicyHighlights) == 0 || len(proposal.TemplateHighlights) == 0 {
 		t.Fatal("fallback proposal did not include structured recommendation highlights")
 	}
+	if len(proposal.TemplateFiles) != 3 {
+		t.Fatalf("fallback template files = %d, want stable service, canary service, and rollout", len(proposal.TemplateFiles))
+	}
+}
+
+func TestValidateProposalRejectsMultiDocumentTemplateFile(t *testing.T) {
+	proposal := ConservativeProposal(Snapshot{Application: "app"})
+	proposal.TemplateFiles[0].Content += "---\napiVersion: v1\nkind: Service\nmetadata:\n  name: second\n"
+
+	if err := ValidateProposal(proposal, Snapshot{}); err == nil || !strings.Contains(err.Error(), "multi_document_template") {
+		t.Fatalf("error = %v, want multi_document_template", err)
+	}
 }
 
 func TestRecommendExtractsStructuredResultNestedInStreamEvent(t *testing.T) {
@@ -79,7 +91,7 @@ func TestRecommendExtractsStructuredResultNestedInStreamEvent(t *testing.T) {
 
 func TestRecommendationPromptRequiresCompletePolicyShape(t *testing.T) {
 	prompt := recommendationPrompt(Snapshot{})
-	for _, required := range []string{"COMPLETE policy.yml", "lanes", "risk_to_lane", "default_lane", "assessment.heuristic", "assessment.model", "changed_lines_at_least", "timeout: 90s", "Do not turn paths or size into maps", ".yaml.tmpl", "Do not return .yaml", "exactly low, medium, or high", "standard is a lane name"} {
+	for _, required := range []string{"COMPLETE policy.yml", "lanes", "risk_to_lane", "default_lane", "assessment.heuristic", "assessment.model", "changed_lines_at_least", "timeout: 90s", "Do not turn paths or size into maps", ".yaml.tmpl", "exactly one Kubernetes object/YAML document", "Never use the YAML document", "Do not return .yaml", "exactly low, medium, or high", "standard is a lane name"} {
 		if !strings.Contains(prompt, required) {
 			t.Fatalf("prompt missing policy contract %q", required)
 		}
