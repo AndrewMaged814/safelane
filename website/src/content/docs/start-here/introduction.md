@@ -9,12 +9,14 @@ An agent can see a failed canary and ask for more rollout. If it also chooses th
 
 SafeLane splits the job. You give it a merged pull request. It verifies GitHub and GHCR evidence, renders operator-owned Kubernetes YAML, chooses a policy lane, and calls the rollout controller with a bounded envelope.
 
-<pre class="mermaid">flowchart LR
+```mermaid
+flowchart LR
   A["Release Request"] --> B["Verify GitHub + GHCR"]
   B --> C["Render trusted bundle"]
   C --> D["Assess and choose lane"]
   D --> E["Start or advance Argo"]
-  E --> F["Record proof"]</pre>
+  E --> F["Record proof"]
+```
 
 The caller cannot name its own risk or lane. It cannot send Kubernetes configuration. It cannot use the controller credential. Kubernetes denies direct changes from the restricted caller identity.
 

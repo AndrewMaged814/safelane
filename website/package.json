@@ -5,6 +5,8 @@
   "scripts": {
     "dev": "astro dev",
     "build": "astro build",
+    "check": "node scripts/check-built-site.mjs",
+    "test": "npm run build && npm run check",
     "preview": "astro preview"
   },
   "dependencies": {

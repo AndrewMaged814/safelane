@@ -37,6 +37,8 @@ jobs:
         working-directory: website
       - run: npm run build
         working-directory: website
+      - run: npm run check
+        working-directory: website
       - if: github.event_name != 'pull_request'
         uses: actions/upload-pages-artifact@v3
         with:
@@ -48,7 +50,8 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+      # GitHub can retain a stale custom-domain page_url even after CNAME removal.
+      url: https://andrewmaged814.github.io/safelane/
     steps:
       - id: deployment
         uses: actions/deploy-pages@v4

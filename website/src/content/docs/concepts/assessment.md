@@ -7,13 +7,15 @@ description: How heuristic and model assessment combine without widening authori
 
 A model may miss a migration, misread an agent-authored diff, or time out. The model is evidence about risk. It is not the authority that sets the rollout envelope.
 
-<pre class="mermaid">flowchart LR
+```mermaid
+flowchart LR
   A["Changed files, lines, agent evidence"] --> B["Heuristic floor"]
   A --> C["Best-effort model"]
   B --> D["Combined risk"]
   C --> D
   D --> E["Risk → lane"]
-  E --> F["Policy envelope"]</pre>
+  E --> F["Policy envelope"]
+```
 
 The heuristic always runs. It sets the floor. The model runs best-effort and may only raise risk. The record stores both verdicts, the combined risk, the lane, and the facts used.
 

@@ -7,12 +7,14 @@ description: The persisted object that binds evidence, decision, execution, and 
 
 Logs show what a command printed. They do not bind the exact pull request, image digest, rendered objects, lane, rollout actions, and Kubernetes identities into one object.
 
-<pre class="mermaid">flowchart LR
+```mermaid
+flowchart LR
   A["Artifact evidence"] --> E["Release Record"]
   B["Eligibility + assessment"] --> E
   C["Rendered bundle hash"] --> E
   D["Execution + boundary"] --> E
-  E --> F["safelane proof <id>"]</pre>
+  E --> F["safelane proof <id>"]
+```
 
 The record includes the release ID, request, target, caller, evidence result, rendered bundle, eligibility, assessment, execution entries, boundary, envelope, and outcome. It is stored under the operator-owned releases directory.
 

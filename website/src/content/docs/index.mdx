@@ -21,7 +21,8 @@ SafeLane gives agents, CI, and people one guarded release path. You identify a m
 
 The agent can drive the release. SafeLane remains the release authority.
 
-<pre class="mermaid">flowchart LR
+```mermaid
+flowchart LR
   subgraph before["Without SafeLane"]
     A["Agent"] -->|"claims risk + sends YAML"| B["Shared credential"]
     B --> C["Cluster"]
@@ -32,7 +33,8 @@ The agent can drive the release. SafeLane remains the release authority.
     F --> G["Constrained controller"]
     G --> H["Argo Rollouts"]
   end
-  before ~~~ after</pre>
+  before ~~~ after
+```
 
 | Without SafeLane | With SafeLane |
 | --- | --- |

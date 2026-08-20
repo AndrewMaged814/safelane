@@ -7,12 +7,14 @@ description: The complete inspect, start, advance, and proof workflow.
 
 Start with the release identity. SafeLane does the checking before it touches Argo.
 
-<pre class="mermaid">flowchart LR
+```mermaid
+flowchart LR
   A["doctor"] --> B["release inspect --pr N"]
   B --> C["rollout start ID"]
   C --> D["rollout advance ID"]
   D -->|repeat until complete| D
-  D --> E["proof ID"]</pre>
+  D --> E["proof ID"]
+```
 
     safelane doctor
     safelane release inspect --pr 42

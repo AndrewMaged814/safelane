@@ -7,11 +7,13 @@ description: Lanes, weights, evidence, and the risk-to-lane mapping.
 
 If the caller chooses both the risk and the rollout shape, every release is already at full authority. SafeLane makes the operator declare the lanes and their weights in policy.yml.
 
-<pre class="mermaid">flowchart LR
+```mermaid
+flowchart LR
   A["Verified evidence"] --> B["Risk"]
   B --> C["Lane"]
   C --> D["Weight envelope"]
-  D --> E["Next allowed step"]</pre>
+  D --> E["Next allowed step"]
+```
 
 | Lane | Weights |
 | --- | --- |

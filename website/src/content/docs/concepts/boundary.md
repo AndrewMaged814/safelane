@@ -7,12 +7,14 @@ description: Separate caller and controller identities keep agents away from pro
 
 If an agent, CI job, and controller share a kubeconfig, a caller that ignores the workflow can patch the Rollout directly. Kubernetes cannot distinguish intent after the credential is shared.
 
-<pre class="mermaid">flowchart LR
+```mermaid
+flowchart LR
   A["Caller identity"] -->|"read-only / no patch"| B["SafeLane"]
   B -->|"controller kubeconfig"| C["Release Controller"]
   C -->|"narrow patch"| D["Protected Rollout"]
   A -. "direct patch" .-> D
-  D -. "Kubernetes denies" .-> A</pre>
+  D -. "Kubernetes denies" .-> A
+```
 
 | Without the boundary | With the boundary |
 | --- | --- |

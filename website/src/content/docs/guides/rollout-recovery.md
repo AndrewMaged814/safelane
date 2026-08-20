@@ -7,12 +7,14 @@ description: Inspect status, pause a rollout, or abort it with a recorded reason
 
 Argo can pause at a canary gate. A timeout can leave the outcome unknown. Retrying blindly can send a second promotion after the first one already took effect.
 
-<pre class="mermaid">flowchart LR
+```mermaid
+flowchart LR
   A["rollout advance"] --> B{"Outcome?"}
   B -->|paused / healthy| C["status ID"]
   B -->|timeout| C
   B -->|regression| D["rollout abort --reason ..."]
-  C --> E["decide with current record"]</pre>
+  C --> E["decide with current record"]
+```
 
     safelane status rel_...
     safelane status --json rel_...
