@@ -293,15 +293,11 @@ func TestRolloutAdvance_FinalWeightWaitsForRunningBackgroundAnalysis(t *testing.
 	}
 }
 
-// TestRolloutAdvance_ToCompletion_SurvivesArgoClearingTheTransientField is a
-// regression test for a race this build hit in its own live rehearsal: Argo
-// clears `.status.canary.currentBackgroundAnalysisRunStatus` from the
-// Rollout once it settles Healthy, so the *very first* poll to observe
-// Complete can already show that field empty. The name must still be
-// reconstructed from CurrentPodHash + the revision annotation (both of
-// which persist), or the whole AnalysisRun measurement line silently
-// vanishes -- exactly what happened against the real cluster.
-func TestRolloutAdvance_ToCompletion_SurvivesArgoClearingTheTransientField(t *testing.T) {
+// TestRolloutAdvance_ToCompletion_DoesNotInventAnAnalysisRun verifies that a
+// healthy Rollout with no analysis status is still a valid completion. Pod
+// hash + revision are not proof that an AnalysisRun exists; manufacturing a
+// name from them caused the final promotion to fail on a harmless 404.
+func TestRolloutAdvance_ToCompletion_DoesNotInventAnAnalysisRun(t *testing.T) {
 	rel := fastLaneStarted(t)
 
 	q := &queueRunner{}
@@ -310,7 +306,6 @@ func TestRolloutAdvance_ToCompletion_SurvivesArgoClearingTheTransientField(t *te
 	q.enqueue(`{"metadata":{"annotations":{"rollout.argoproj.io/revision":"2"}},`+
 		`"status":{"phase":"Healthy","stableRS":"5f9b48bf7c","currentPodHash":"5f9b48bf7c"},`+
 		`"spec":{"strategy":{"canary":{"steps":[{"setWeight":5},{"pause":{}}]}}}}`, nil) // no currentBackgroundAnalysisRunStatus at all
-	q.enqueue(analysisRunJSON, nil) // GetAnalysisRun
 
 	ex := execute.New(execute.Config{Namespace: "podinfo", Rollout: "podinfo"})
 	ex.Run = q.run
@@ -320,11 +315,39 @@ func TestRolloutAdvance_ToCompletion_SurvivesArgoClearingTheTransientField(t *te
 	if err != nil {
 		t.Fatalf("advanceRollout: %v", err)
 	}
-	assertGolden(t, "a2-3-advance-complete.txt", result.Render())
+	if strings.Contains(result.Render(), "AnalysisRun") {
+		t.Fatalf("completion invented analysis evidence:\n%s", result.Render())
+	}
+	if len(q.calls) != 3 {
+		t.Fatalf("kubectl calls = %d, want status/promote/status only", len(q.calls))
+	}
+}
 
-	queried := q.calls[3]
-	if strings.Join(queried, " ") != "get analysisrun podinfo-5f9b48bf7c-2 -n podinfo -o json" {
-		t.Errorf("GetAnalysisRun call = %v, want the reconstructed name podinfo-5f9b48bf7c-2", queried)
+func TestRolloutAdvance_ToCompletion_ToleratesMissingAnalysisRun(t *testing.T) {
+	rel := fastLaneStarted(t)
+
+	q := &queueRunner{}
+	q.enqueue(atGateStatus(fastWeights, 5), nil)
+	q.enqueue("", nil)
+	q.enqueue(`{"metadata":{"annotations":{"rollout.argoproj.io/revision":"2"}},`+
+		`"status":{"phase":"Healthy","stableRS":"5f9b48bf7c","currentPodHash":"5f9b48bf7c",`+
+		`"canary":{"currentBackgroundAnalysisRunStatus":{"name":"podinfo-5f9b48bf7c-2","status":"Successful"}}},`+
+		`"spec":{"strategy":{"canary":{"steps":[{"setWeight":5},{"pause":{}}]}}}}`, nil)
+	q.enqueue("", errors.New(`analysisruns.argoproj.io "podinfo-5f9b48bf7c-2" not found`))
+
+	ex := execute.New(execute.Config{Namespace: "podinfo", Rollout: "podinfo"})
+	ex.Run = q.run
+	ex.Sleep = func(time.Duration) {}
+
+	result, err := advanceRollout(context.Background(), rel, ex, "podinfo", nil, time.Minute, time.Now)
+	if err != nil {
+		t.Fatalf("advanceRollout: %v", err)
+	}
+	if result.outcome != outcomePromotedComplete {
+		t.Fatalf("outcome = %v, want complete", result.outcome)
+	}
+	if strings.Contains(result.Render(), "AnalysisRun") {
+		t.Fatalf("missing AnalysisRun was reported as present:\n%s", result.Render())
 	}
 }
 
@@ -607,15 +630,15 @@ func TestRolloutAdvance_ArgoAborts_MatchesA34(t *testing.T) {
 	}
 }
 
-func TestBackgroundAnalysisRunName_PrefersTheLiveFieldFallsBackToReconstructing(t *testing.T) {
+func TestBackgroundAnalysisRunName_UsesOnlyTheLiveField(t *testing.T) {
 	live := execute.Status{AnalysisRunName: "podinfo-5f9b48bf7c-2"}
 	if got := backgroundAnalysisRunName("podinfo", live); got != "podinfo-5f9b48bf7c-2" {
 		t.Errorf("got %q, want the live field verbatim", got)
 	}
 
 	cleared := execute.Status{CurrentPodHash: "5f9b48bf7c", Revision: "2"}
-	if got := backgroundAnalysisRunName("podinfo", cleared); got != "podinfo-5f9b48bf7c-2" {
-		t.Errorf("got %q, want the reconstructed name when the transient field is gone", got)
+	if got := backgroundAnalysisRunName("podinfo", cleared); got != "" {
+		t.Errorf("got %q, want empty when Argo cleared the status reference", got)
 	}
 
 	if got := backgroundAnalysisRunName("podinfo", execute.Status{}); got != "" {

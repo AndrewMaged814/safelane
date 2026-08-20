@@ -368,11 +368,21 @@ func advanceRollout(ctx context.Context, r *release.Release, ex *execute.Executo
 		if realName := backgroundAnalysisRunName(ex.Rollout, final); realName != "" {
 			run, err := ex.GetAnalysisRun(ctx, realName)
 			if err != nil {
-				return result, err
+				// AnalysisRun is supplemental proof, not the commit point for
+				// an already-applied promotion. Argo can garbage-collect a
+				// completed run (or clear its transient status reference) before
+				// this read. Preserve the truthful Healthy/completed result when
+				// the only failure is that optional object no longer exists; keep
+				// surfacing RBAC/cluster failures because those are not safe to
+				// silently ignore.
+				if !analysisRunNotFound(err) {
+					return result, err
+				}
+			} else {
+				result.analysisRun = run
+				result.friendlyName = analysisDisplayName(application, realName)
+				entry.Analysis = fmt.Sprintf("%s %s", result.friendlyName, run.Phase)
 			}
-			result.analysisRun = run
-			result.friendlyName = analysisDisplayName(application, realName)
-			entry.Analysis = fmt.Sprintf("%s %s", result.friendlyName, run.Phase)
 		}
 	}
 
@@ -570,23 +580,25 @@ func gateNumberForWeight(weights []int, weight int) int {
 	return 0
 }
 
-// backgroundAnalysisRunName is the real AnalysisRun name to query,
-// resolved defensively against a race confirmed in this build's own live
-// rehearsal: Argo clears `.status.canary.currentBackgroundAnalysisRunStatus`
-// from the Rollout once it settles Healthy, so a caller that only reaches
-// Complete after that field is already gone would otherwise see an empty
-// name and silently skip the measurement line. CurrentPodHash and Revision
-// persist on a Healthy Rollout, so the same name
-// (`<rollout>-<podHash>-<revision>`, confirmed against the live cluster)
-// is reconstructed from those when the transient field is empty.
+// backgroundAnalysisRunName returns only the real AnalysisRun name Argo
+// reported. Pod hash and revision are insufficient evidence: a Rollout can
+// have no analysis configured, and Argo can clear the transient status after
+// a run settles. Guessing a name from those fields caused harmless 404s to be
+// treated as a failed final promotion.
 func backgroundAnalysisRunName(rollout string, st execute.Status) string {
 	if st.AnalysisRunName != "" {
 		return st.AnalysisRunName
 	}
-	if st.CurrentPodHash == "" || st.Revision == "" {
-		return ""
-	}
-	return fmt.Sprintf("%s-%s-%s", rollout, st.CurrentPodHash, st.Revision)
+	// Do not manufacture an AnalysisRun name from pod metadata alone. A
+	// healthy Rollout may legitimately have no analysis configured, and Argo
+	// may clear both the name and phase after a run settles. Without an
+	// explicit status name there is no evidence that this object ever existed.
+	return ""
+}
+
+func analysisRunNotFound(err error) bool {
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "analysisrun") && strings.Contains(message, "not found")
 }
 
 // analysisDisplayName is the friendly `<application>-success-rate-<N>`
