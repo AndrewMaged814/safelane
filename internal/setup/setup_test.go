@@ -74,6 +74,15 @@ func TestRecommendExtractsStructuredResultNestedInStreamEvent(t *testing.T) {
 	}
 }
 
+func TestRecommendationPromptRequiresCompletePolicyShape(t *testing.T) {
+	prompt := recommendationPrompt(Snapshot{})
+	for _, required := range []string{"COMPLETE policy.yml", "lanes", "risk_to_lane", "default_lane", "assessment.heuristic", "assessment.model", "changed_lines_at_least", "timeout: 90s", "Do not turn paths or size into maps", ".yaml.tmpl", "Do not return .yaml", "exactly low, medium, or high", "standard is a lane name"} {
+		if !strings.Contains(prompt, required) {
+			t.Fatalf("prompt missing policy contract %q", required)
+		}
+	}
+}
+
 func writeFile(t *testing.T, path, body string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

@@ -62,11 +62,12 @@ func runSetup(ctx context.Context, args []string, stdout, stderr io.Writer, root
 	}
 	proposal := setupengine.ConservativeProposal(snapshot)
 	if !*noAgent && deps.recommend != nil {
+		fmt.Fprint(stdout, "Asking Claude for a project-specific policy and Release Template")
 		recommendCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
-		agentProposal, recommendErr := deps.recommend(recommendCtx, snapshot)
+		agentProposal, recommendErr := recommendWithProgress(recommendCtx, snapshot, deps.recommend, stdout)
 		cancel()
 		if recommendErr != nil {
-			fmt.Fprintf(stdout, "Claude recommendation unavailable: %v\n", recommendErr)
+			fmt.Fprintf(stdout, "Claude recommendation could not be used: %v\n", recommendErr)
 			fmt.Fprintln(stdout, "Using a conservative proposal from repository facts.")
 		} else {
 			proposal = agentProposal
@@ -130,6 +131,29 @@ func runSetup(ctx context.Context, args []string, stdout, stderr io.Writer, root
 	fmt.Fprintf(stdout, "\nsetup ready: %s\n", displayInitPath(home, loc.ProjectFile, false))
 	fmt.Fprintln(stdout, "Run `safelane doctor` to validate the target and identities.")
 	return ExitOK
+}
+
+func recommendWithProgress(ctx context.Context, snapshot setupengine.Snapshot, recommend func(context.Context, setupengine.Snapshot) (setupengine.Proposal, error), stdout io.Writer) (setupengine.Proposal, error) {
+	done := make(chan struct{})
+	stopped := make(chan struct{})
+	go func() {
+		defer close(stopped)
+		ticker := time.NewTicker(700 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				fmt.Fprint(stdout, ".")
+			case <-done:
+				return
+			}
+		}
+	}()
+	proposal, err := recommend(ctx, snapshot)
+	close(done)
+	<-stopped
+	fmt.Fprintln(stdout)
+	return proposal, err
 }
 
 func activateSetup(loc project.Locations, snapshot setupengine.Snapshot, proposal setupengine.Proposal) error {
