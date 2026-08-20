@@ -92,17 +92,20 @@ func TestSetupAutomaticallyActivatesWithoutApproval(t *testing.T) {
 }
 
 func TestSetupRecommendationProgressUsesChangingStatuses(t *testing.T) {
-	var stdout bytes.Buffer
+	var progress bytes.Buffer
 	want := setupengine.ConservativeProposal(setupengine.Snapshot{Application: "app"})
 	_, err := recommendWithProgress(context.Background(), setupengine.Snapshot{}, func(context.Context, setupengine.Snapshot) (setupengine.Proposal, error) {
 		time.Sleep(1100 * time.Millisecond)
 		return want, nil
-	}, &stdout)
+	}, &progress)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(stdout.String(), "Claude is") {
-		t.Fatalf("progress output did not show a changing Claude status: %q", stdout.String())
+	if !strings.Contains(progress.String(), "Preparing SafeLane setup") || !strings.Contains(progress.String(), "SafeLane recommendation ready") {
+		t.Fatalf("progress output did not show the calm setup lifecycle: %q", progress.String())
+	}
+	if strings.Contains(progress.String(), "\r") || strings.Contains(progress.String(), "⠋") {
+		t.Fatalf("non-terminal progress should not contain animation control sequences: %q", progress.String())
 	}
 }
 

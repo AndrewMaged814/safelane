@@ -58,9 +58,8 @@ func runSetup(ctx context.Context, args []string, stdout, stderr io.Writer, root
 	}
 	proposal := setupengine.ConservativeProposal(snapshot)
 	if !*noAgent && deps.recommend != nil {
-		fmt.Fprint(stdout, "Asking Claude for a project-specific policy and Release Template")
 		recommendCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
-		agentProposal, recommendErr := recommendWithProgress(recommendCtx, snapshot, deps.recommend, stdout)
+		agentProposal, recommendErr := recommendWithProgress(recommendCtx, snapshot, deps.recommend, stderr)
 		cancel()
 		if recommendErr != nil {
 			fmt.Fprintf(stdout, "Claude recommendation could not be used: %v\n", recommendErr)
@@ -125,25 +124,44 @@ func printSetupBullets(stdout io.Writer, items []string) {
 	}
 }
 
-func recommendWithProgress(ctx context.Context, snapshot setupengine.Snapshot, recommend func(context.Context, setupengine.Snapshot) (setupengine.Proposal, error), stdout io.Writer) (setupengine.Proposal, error) {
+func recommendWithProgress(ctx context.Context, snapshot setupengine.Snapshot, recommend func(context.Context, setupengine.Snapshot) (setupengine.Proposal, error), progress io.Writer) (setupengine.Proposal, error) {
+	interactive := progressIsTerminal(progress)
+	if !interactive {
+		fmt.Fprintln(progress, "Preparing SafeLane setup...")
+		proposal, err := recommend(ctx, snapshot)
+		if err != nil {
+			fmt.Fprintln(progress, "SafeLane recommendation unavailable.")
+		} else {
+			fmt.Fprintln(progress, "SafeLane recommendation ready.")
+		}
+		return proposal, err
+	}
+	frames := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+	statuses := []string{
+		"Preparing SafeLane setup",
+		"Reading repository shape",
+		"Comparing CI checks",
+		"Drafting policy and rollout template",
+		"Waiting for Claude's recommendation",
+	}
 	done := make(chan struct{})
 	stopped := make(chan struct{})
-	statuses := []string{
-		"Claude is reading the repository shape",
-		"Claude is mapping CI checks to release evidence",
-		"Claude is tuning conservative policy floors",
-		"Claude is designing the rollout template",
-	}
 	go func() {
 		defer close(stopped)
-		ticker := time.NewTicker(900 * time.Millisecond)
+		ticker := time.NewTicker(250 * time.Millisecond)
 		defer ticker.Stop()
-		index := 0
+		frameIndex := 0
+		statusIndex := 0
+		lastStatus := time.Now()
 		for {
 			select {
 			case <-ticker.C:
-				fmt.Fprintf(stdout, "\r  %-58s", statuses[index%len(statuses)])
-				index++
+				if time.Since(lastStatus) >= 2500*time.Millisecond {
+					statusIndex = (statusIndex + 1) % len(statuses)
+					lastStatus = time.Now()
+				}
+				fmt.Fprintf(progress, "\r%s %s", frames[frameIndex%len(frames)], statuses[statusIndex])
+				frameIndex++
 			case <-done:
 				return
 			}
@@ -152,8 +170,21 @@ func recommendWithProgress(ctx context.Context, snapshot setupengine.Snapshot, r
 	proposal, err := recommend(ctx, snapshot)
 	close(done)
 	<-stopped
-	fmt.Fprintln(stdout, "\r  Claude recommendation received.                              ")
+	if err != nil {
+		fmt.Fprintln(progress, "\r✖ SafeLane recommendation unavailable.                         ")
+	} else {
+		fmt.Fprintln(progress, "\r✔ SafeLane recommendation ready.                              ")
+	}
 	return proposal, err
+}
+
+func progressIsTerminal(w io.Writer) bool {
+	file, ok := w.(*os.File)
+	if !ok {
+		return false
+	}
+	info, err := file.Stat()
+	return err == nil && info.Mode()&os.ModeCharDevice != 0
 }
 
 func activateSetup(loc project.Locations, snapshot setupengine.Snapshot, proposal setupengine.Proposal) error {
