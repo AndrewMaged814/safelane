@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -151,13 +152,21 @@ func TestStatusJSONIncludesFailedAnalysisMeasurement(t *testing.T) {
 	}
 }
 
-func TestStatusListUsesStoredRecordOnlyAndFormatsStalledDuration(t *testing.T) {
+func TestStatusListReconcilesLiveStateAndFormatsStalledDuration(t *testing.T) {
 	r := fastLaneStarted(t)
 	projectFile, storeDir := statusRuntime(t, r)
+	bundle, ok := r.Bundle()
+	if !ok {
+		t.Fatal("test release has no bundle")
+	}
+	q := &queueRunner{}
+	q.enqueue(fmt.Sprintf(`{"metadata":{"generation":8},"status":{"observedGeneration":8,"phase":"Paused","pauseConditions":[{}],"currentStepIndex":0},"spec":{"template":{"spec":{"containers":[{"image":"ghcr.io/andrewmaged814/podinfo@%s"}]}},"strategy":{"canary":{"steps":[{"setWeight":5},{"pause":{}}]}}}}`, bundle.PinnedDigest()), nil)
 	originalNewExecutor := newExecutor
 	t.Cleanup(func() { newExecutor = originalNewExecutor })
-	newExecutor = func(execute.Config) *execute.Executor {
-		panic("the no-argument status listing must not read the cluster")
+	newExecutor = func(cfg execute.Config) *execute.Executor {
+		ex := execute.New(cfg)
+		ex.Run = q.run
+		return ex
 	}
 
 	var stdout, stderr bytes.Buffer
@@ -179,6 +188,61 @@ func TestStatusListUsesStoredRecordOnlyAndFormatsStalledDuration(t *testing.T) {
 	}
 }
 
+func TestStatusListDoesNotShowMatchingTerminalRolloutAsOpen(t *testing.T) {
+	r := fastLaneStarted(t)
+	projectFile, storeDir := statusRuntime(t, r)
+	bundle, ok := r.Bundle()
+	if !ok {
+		t.Fatal("test release has no bundle")
+	}
+	q := &queueRunner{}
+	q.enqueue(fmt.Sprintf(`{"metadata":{"generation":8},"status":{"observedGeneration":8,"phase":"Degraded","abort":true},"spec":{"template":{"spec":{"containers":[{"image":"ghcr.io/andrewmaged814/podinfo@%s"}]}}}}`, bundle.PinnedDigest()), nil)
+
+	originalNewExecutor := newExecutor
+	t.Cleanup(func() { newExecutor = originalNewExecutor })
+	newExecutor = func(cfg execute.Config) *execute.Executor {
+		ex := execute.New(cfg)
+		ex.Run = q.run
+		return ex
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := runStatus(context.Background(), []string{
+		"--project", projectFile, "--store-dir", storeDir,
+	}, &stdout, &stderr, ".", "", func() time.Time { return time.Now() })
+	if code != ExitOK {
+		t.Fatalf("status exit = %d, stderr: %s", code, stderr.String())
+	}
+	if got := stdout.String(); !strings.Contains(got, "0 open releases") || strings.Contains(got, string(r.ID)) {
+		t.Fatalf("terminal live rollout was still listed as open:\n%s", got)
+	}
+}
+
+func TestStatusListKeepsReleaseOpenWhenTerminalLiveStateDoesNotMatch(t *testing.T) {
+	r := fastLaneStarted(t)
+	now := time.Date(2026, 8, 20, 15, 2, 59, 0, time.UTC)
+
+	wrongArtifact := execute.Status{
+		State: execute.StateAborted, ImageDigest: "sha256:" + strings.Repeat("f", 64),
+		Generation: 8, ObservedGeneration: 8,
+	}
+	if got := renderOpenStatuses([]*release.Release{r}, &wrongArtifact, now); !strings.Contains(got, string(r.ID)) {
+		t.Fatalf("release disappeared for a different live artifact:\n%s", got)
+	}
+
+	bundle, ok := r.Bundle()
+	if !ok {
+		t.Fatal("test release has no bundle")
+	}
+	unobserved := execute.Status{
+		State: execute.StateAborted, ImageDigest: bundle.PinnedDigest(),
+		Generation: 8, ObservedGeneration: 7,
+	}
+	if got := renderOpenStatuses([]*release.Release{r}, &unobserved, now); !strings.Contains(got, string(r.ID)) {
+		t.Fatalf("release disappeared for stale terminal state:\n%s", got)
+	}
+}
+
 func TestStatusListMatchesN14GoldenFragment(t *testing.T) {
 	guarded := guardedLaneStarted(t)
 	var err error
@@ -191,7 +255,7 @@ func TestStatusListMatchesN14GoldenFragment(t *testing.T) {
 	}
 	fast := fastLaneStartedForEnvironment(t, "staging")
 	now := time.Date(2026, 8, 20, 17, 33, 44, 0, time.UTC)
-	assertGoldenFragment(t, "n14-open-statuses.txt", renderOpenStatuses([]*release.Release{guarded, fast}, now))
+	assertGoldenFragment(t, "n14-open-statuses.txt", renderOpenStatuses([]*release.Release{guarded, fast}, nil, now))
 }
 
 func TestStoredOpenStatusExcludesCompleteAndAbortedReleases(t *testing.T) {

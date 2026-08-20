@@ -16,8 +16,8 @@ import (
 )
 
 // StatusCommand builds the top-level, read-only `safelane status` command.
-// A named release is read live from Argo. The no-argument recovery listing is
-// deliberately record-only so it remains cheap even with many open releases.
+// Both forms reconcile with Argo so terminal live state is never presented as
+// an open release merely because an older client failed to record the outcome.
 func StatusCommand(root, defaultStoreDir string) Command {
 	return Command{
 		Name:    "status",
@@ -85,7 +85,22 @@ func runStatus(ctx context.Context, args []string, stdout, stderr io.Writer, roo
 			fmt.Fprintf(stderr, "safelane status: %v\n", err)
 			return ExitFail
 		}
-		fmt.Fprint(stdout, renderOpenStatuses(releases, now()))
+		cfg, err := project.Load(paths.projectFile)
+		if err != nil {
+			fmt.Fprintf(stderr, "safelane status: %v\n", err)
+			return ExitFail
+		}
+		controllerKubeconfig, controllerContext := paths.controllerCredentials("", "")
+		ex := newExecutor(execute.Config{
+			Namespace: cfg.Target.Namespace, Rollout: cfg.Target.Rollout,
+			ControllerKubeconfig: controllerKubeconfig, ControllerContext: controllerContext,
+		})
+		live, err := ex.GetStatus(ctx)
+		if err != nil {
+			printRolloutRejection(stderr, err)
+			return ExitFail
+		}
+		fmt.Fprint(stdout, renderOpenStatuses(releases, &live, now()))
 		return ExitOK
 	}
 
@@ -315,10 +330,19 @@ func storedOpenStatus(r *release.Release) (openStatus, bool) {
 	return view, true
 }
 
-func renderOpenStatuses(releases []*release.Release, now time.Time) string {
+func renderOpenStatuses(releases []*release.Release, live *execute.Status, now time.Time) string {
 	var rows []openStatus
 	for _, r := range releases {
 		if row, ok := storedOpenStatus(r); ok {
+			if live != nil && liveArtifactMatches(r, *live) {
+				switch live.State {
+				case execute.StateComplete, execute.StateDegraded, execute.StateAborted:
+					continue
+				default:
+					row.state = live.State
+					row.weight = live.CurrentWeight
+				}
+			}
 			rows = append(rows, row)
 		}
 	}
@@ -333,6 +357,12 @@ func renderOpenStatuses(releases []*release.Release, now time.Time) string {
 			row.releaseID, row.target, row.lane, row.state, row.weight, formatStalled(now.Sub(row.stalledAt)))
 	}
 	return b.String()
+}
+
+func liveArtifactMatches(r *release.Release, live execute.Status) bool {
+	bundle, ok := r.Bundle()
+	return ok && live.ImageDigest != "" && bundle.PinnedDigest() == live.ImageDigest &&
+		(live.Generation == 0 || live.ObservedGeneration >= live.Generation)
 }
 
 func formatStalled(d time.Duration) string {
