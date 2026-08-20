@@ -173,6 +173,7 @@ type statusReport struct {
 	Generation           int64             `json:"generation,omitempty"`
 	ObservedGeneration   int64             `json:"observed_generation,omitempty"`
 	ObservedDigest       string            `json:"observed_digest,omitempty"`
+	ObservedReleaseID    release.ReleaseID `json:"observed_release_id,omitempty"`
 	ReleaseMatch         *bool             `json:"release_match,omitempty"`
 	ArgoMessage          string            `json:"argo_message,omitempty"`
 	AnalysisRun          string            `json:"analysis_run,omitempty"`
@@ -191,10 +192,13 @@ func buildStatusReport(r *release.Release, live execute.Status) statusReport {
 		ReleaseID: r.ID, State: live.State, Weight: live.CurrentWeight, Gate: live.Gate,
 		Generation: live.Generation, ObservedGeneration: live.ObservedGeneration,
 		ObservedDigest: live.ImageDigest, ArgoMessage: live.Message,
-		AnalysisRun: live.AnalysisRunName, AnalysisPhase: live.AnalysisRunPhase,
+		ObservedReleaseID: live.ReleaseID,
+		AnalysisRun:       live.AnalysisRunName, AnalysisPhase: live.AnalysisRunPhase,
 	}
 	if bundle, ok := r.Bundle(); ok && live.ImageDigest != "" {
-		match := bundle.PinnedDigest() == live.ImageDigest &&
+		binding, bound := r.Binding()
+		match := bound && live.ReleaseID == r.ID && binding.Matches(r.ID, r.Target(), bundle.PinnedDigest()) &&
+			bundle.PinnedDigest() == live.ImageDigest && live.Generation >= binding.Generation &&
 			(live.Generation == 0 || live.ObservedGeneration >= live.Generation)
 		report.ReleaseMatch = &match
 	}

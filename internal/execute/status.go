@@ -29,7 +29,8 @@ const (
 
 // Status is one read of the Rollout's status.
 type Status struct {
-	State State
+	State     State
+	ReleaseID release.ReleaseID
 	// Generation is the Rollout spec generation returned by Kubernetes.
 	// ObservedGeneration is the latest generation Argo has reconciled. A
 	// terminal state is stale while ObservedGeneration trails Generation.
@@ -82,7 +83,8 @@ type rolloutStatusDoc struct {
 	Metadata struct {
 		Generation  flexibleInt64 `json:"generation"`
 		Annotations struct {
-			Revision string `json:"rollout.argoproj.io/revision"`
+			Revision  string            `json:"rollout.argoproj.io/revision"`
+			ReleaseID release.ReleaseID `json:"safelane.dev/release-id"`
 		} `json:"annotations"`
 	} `json:"metadata"`
 	Status struct {
@@ -166,6 +168,7 @@ func parseStatus(raw []byte) (Status, error) {
 	weight, stepsCompleted := currentWeight(doc)
 	return Status{
 		State:              classifyState(doc),
+		ReleaseID:          doc.Metadata.Annotations.ReleaseID,
 		Generation:         int64(doc.Metadata.Generation),
 		ObservedGeneration: int64(doc.Status.ObservedGeneration),
 		Phase:              doc.Status.Phase,

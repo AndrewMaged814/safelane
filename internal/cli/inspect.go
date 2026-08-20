@@ -45,18 +45,50 @@ const (
 // lets --json carry the same content without a second derivation of the
 // same facts from the same Release.
 type inspection struct {
-	release *release.Release
-	policy  policy.Policy
-	checks  []evidenceCheck
+	release        *release.Release
+	policy         policy.Policy
+	checks         []evidenceCheck
+	safety         []evidenceCheck
+	history        []*release.Release
+	liveState      release.State
+	effectiveState release.State
+	stateSource    string
 }
 
 // buildInspection derives the report from one submission pass.
 func buildInspection(insp orchestrate.Inspection, cfg project.Config, pol policy.Policy, now time.Time) inspection {
+	checks := evidenceChecks(insp, cfg, pol, now)
 	return inspection{
 		release: insp.Release,
 		policy:  pol,
-		checks:  evidenceChecks(insp, cfg, pol, now),
+		checks:  checks,
+		safety:  safetySignals(insp, cfg), liveState: release.StateUnknown, effectiveState: insp.Release.State(), stateSource: "recorded",
 	}
+}
+
+func persistedEvidenceChecks(r *release.Release, cfg project.Config, pol policy.Policy) []evidenceCheck {
+	if evidence, ok := r.Evidence().Verified(); ok {
+		checks := []evidenceCheck{{label: checkMergedCommitPrefix + cfg.Repository.DefaultBranch, outcome: checkDetected, value: evidence.MergeCommitSHA()}}
+		for _, run := range evidence.RequiredChecks() {
+			checks = append(checks, evidenceCheck{label: checkPublish, outcome: checkDetected, value: run.Name, tail: "(" + run.Conclusion + ")"})
+		}
+		checks = append(checks, evidenceCheck{label: checkDigest, outcome: checkDetected, value: shortDigest(evidence.ArtifactDigest())})
+		if pol.IndependentPRApprovalRequired {
+			checks = append(checks, evidenceCheck{label: checkApproval, outcome: checkDetected, value: evidence.Approval().Reviewer})
+		} else {
+			checks = append(checks, evidenceCheck{label: checkApproval, outcome: checkUnavailable, value: "not required by this policy"})
+		}
+		return checks
+	}
+	outcome := checkFailed
+	if r.Evidence().Outcome() == release.EvidenceUnknown {
+		outcome = checkUnavailable
+	}
+	var checks []evidenceCheck
+	for _, reason := range r.Evidence().Reasons() {
+		checks = append(checks, evidenceCheck{label: "Recorded evidence", outcome: outcome, value: reason.Code, detail: reason.Message, remedy: reason.Remedy})
+	}
+	return checks
 }
 
 // evidenceChecks derives the four evidence rows from the two verification
@@ -79,11 +111,33 @@ func evidenceChecks(insp orchestrate.Inspection, cfg project.Config, pol policy.
 	owner := reasonOwner(gh)
 
 	merged := mergedCommitCheck(mergedLabel, gh, facts, owner)
-	publish := publishCheck(cfg.Release.RequiredCheck, gh, facts, owner, merged.outcome, now)
+	var publishes []evidenceCheck
+	for _, name := range cfg.Release.RequiredCheckNames() {
+		publishes = append(publishes, publishCheck(name, gh, facts, owner, merged.outcome, now))
+	}
 	digest := digestCheck(cfg, gr, facts, merged.outcome)
 	approval := approvalCheck(pol, gh, facts, owner)
+	checks := []evidenceCheck{merged}
+	checks = append(checks, publishes...)
+	return append(checks, digest, approval)
+}
 
-	return []evidenceCheck{merged, publish, digest, approval}
+func safetySignals(insp orchestrate.Inspection, cfg project.Config) []evidenceCheck {
+	if insp.GitHub.Facts == nil {
+		return nil
+	}
+	mandatory := map[string]bool{}
+	for _, name := range cfg.Release.RequiredCheckNames() {
+		mandatory[name] = true
+	}
+	var out []evidenceCheck
+	for _, run := range insp.GitHub.Facts.CheckRuns {
+		if mandatory[run.Name] || (run.Conclusion != "failure" && run.Conclusion != "cancelled") {
+			continue
+		}
+		out = append(out, evidenceCheck{label: run.Name, outcome: checkFailed, value: run.Conclusion, detail: "non-gating check"})
+	}
+	return out
 }
 
 // reasonOwner says which of the four checks a GitHub verification reason
@@ -138,15 +192,15 @@ func publishCheck(name string, gh github.Result, facts github.Facts, owner check
 		return c
 	}
 	run, found := facts.CheckRun(name)
-	if owner != ownerPublish {
+	if found && run.HeadSHA == facts.MergeCommitSHA && run.Status == "completed" && run.Conclusion == "success" {
 		c.outcome, c.value, c.tail = checkDetected, name, "("+run.Conclusion+")"
 		return c
 	}
 	if !found {
-		c.outcome = checkFailed
+		c.outcome = checkUnavailable
 		c.value = name + " (not found)"
 		c.detail = "no such check ran for this exact commit"
-		c.remedy = "publish the required check for the merge commit, then retry"
+		c.remedy = "run the mandatory check for the merge commit, then retry explicitly"
 		return c
 	}
 	if gh.Status == github.StatusUnknown {
@@ -222,6 +276,18 @@ func (in inspection) Render() string {
 	r := in.release
 
 	fmt.Fprintf(&b, "\n%s%s\n\n", pad("SafeLane investigation", 42), r.ID)
+	if len(in.history) > 0 {
+		fmt.Fprintf(&b, "Recorded state: %s\n", r.State())
+		b.WriteString("Attempt history:\n")
+		for _, attempt := range in.history {
+			fmt.Fprintf(&b, "  %d  %s  %-13s %s", attempt.AttemptNumber(), attempt.ID, attempt.State(), attempt.CreatedAt.Format(time.RFC3339))
+			if attempt.RetryOf() != "" {
+				fmt.Fprintf(&b, "  retry_of=%s", attempt.RetryOf())
+			}
+			b.WriteByte('\n')
+		}
+		b.WriteByte('\n')
+	}
 
 	target := in.targetSection()
 	target.render(&b, labelWidth(target))
@@ -236,6 +302,10 @@ func (in inspection) Render() string {
 	}
 	if unavailable := in.checksWith(checkUnavailable); len(unavailable) > 0 {
 		renderChecks(&b, "Unavailable", "–", unavailable, width, false)
+		b.WriteString("\n")
+	}
+	if len(in.safety) > 0 {
+		renderChecks(&b, "Safety signals (non-gating)", "!", in.safety, checkLabelWidth(in.safety), false)
 		b.WriteString("\n")
 	}
 
@@ -256,15 +326,38 @@ func (in inspection) Render() string {
 	decision.render(&b, width)
 
 	b.WriteString("\n")
-	switch r.Eligibility().Status() {
-	case release.EligibilityEligible:
-		fmt.Fprintf(&b, "Nothing was changed.\nNext: safelane rollout start %s\n", r.ID)
-	case release.EligibilityIneligible:
-		b.WriteString("No rollout may start.\n")
-	default:
+	if next := nextCommand(r); next != "" {
+		fmt.Fprintf(&b, "Nothing was changed.\nNext: %s\n", next)
+	}
+	if r.State() == release.StatePromoted {
+		b.WriteString("This artifact was already released; no redeploy is offered.\n")
+	}
+	if r.State() == release.StateIneligible {
+		b.WriteString("No rollout may start. This outcome is not retryable.\n")
+	}
+	if r.State() == release.StateIndeterminate {
 		b.WriteString("SafeLane could not determine the answer. This is not a refusal. Retry.\n")
 	}
+	if r.State() == release.StateUnknown {
+		b.WriteString("Live identity could not be proven. No transition is allowed.\n")
+	}
 	return b.String()
+}
+
+func nextCommand(r *release.Release) string {
+	switch r.State() {
+	case release.StateReady:
+		return "safelane rollout start " + string(r.ID)
+	case release.StateStarting, release.StateProgressing, release.StateAnalysing, release.StateAtGate, release.StatePaused:
+		return "safelane status " + string(r.ID)
+	case release.StateAborted, release.StateFailed, release.StateBlocked:
+		return "safelane release retry " + string(r.ID)
+	case release.StateIndeterminate:
+		if r.Eligibility().Retryable() {
+			return "safelane release retry " + string(r.ID)
+		}
+	}
+	return ""
 }
 
 func (in inspection) checksWith(outcome checkOutcome) []evidenceCheck {

@@ -181,6 +181,21 @@ func (e *Executor) Apply(ctx context.Context, bundle release.RenderedBundle) ([]
 	return rows, nil
 }
 
+// AnnotateRelease binds the controller-owned Rollout to exactly one SafeLane attempt.
+func (e *Executor) AnnotateRelease(ctx context.Context, id release.ReleaseID) error {
+	args := append([]string{"annotate", "rollout", e.Rollout, "-n", e.Namespace,
+		"safelane.dev/release-id=" + string(id), "--overwrite"}, e.privilegedFlags()...)
+	_, err := e.run(ctx, "kubectl annotate rollout", args, nil)
+	return err
+}
+
+// Retry restarts an explicitly aborted same-artifact Rollout without reapplying YAML.
+func (e *Executor) Retry(ctx context.Context) error {
+	args := append([]string{"argo", "rollouts", "retry", "rollout", e.Rollout, "-n", e.Namespace}, e.privilegedFlags()...)
+	_, err := e.run(ctx, "kubectl argo rollouts retry", args, nil)
+	return err
+}
+
 func nonEmptyLines(s string) []string {
 	var out []string
 	for _, line := range strings.Split(s, "\n") {

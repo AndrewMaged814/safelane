@@ -115,14 +115,14 @@ func completeRelease(t *testing.T) *release.Release {
 	return r
 }
 
-func TestReleaseRecordV2PrunesRequestAndRoundTripsEverySection(t *testing.T) {
+func TestReleaseRecordV3PrunesRequestAndRoundTripsEverySection(t *testing.T) {
 	r := completeRelease(t)
 	raw, err := json.Marshal(r)
 	if err != nil {
 		t.Fatal(err)
 	}
 	text := string(raw)
-	for _, want := range []string{`"schema_version":"safelane.release.record/v2"`, `"assessment"`, `"envelope"`, `"execution"`, `"boundary"`, `"outcome":"aborted"`} {
+	for _, want := range []string{`"schema_version":"safelane.release.record/v3"`, `"attempt_number":1`, `"state":"ready"`, `"assessment"`, `"envelope"`, `"execution"`, `"boundary"`, `"outcome":"aborted"`} {
 		if !strings.Contains(text, want) {
 			t.Errorf("record missing %s\n%s", want, text)
 		}

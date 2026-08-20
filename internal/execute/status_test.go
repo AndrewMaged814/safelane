@@ -73,7 +73,7 @@ func TestGetStatus_CurrentWeight_PrefersTheObservedTrafficWeight(t *testing.T) {
 
 func TestGetStatus_ReportsGenerationAndArgoMessage(t *testing.T) {
 	fr := &fakeRunner{}
-	fr.enqueue(`{"metadata":{"generation":8},"status":{"observedGeneration":"7","phase":"Degraded",`+
+	fr.enqueue(`{"metadata":{"generation":8,"annotations":{"safelane.dev/release-id":"rel_01ARZ3NDEKTSV4RRFFQ69G5FAV"}},"status":{"observedGeneration":"7","phase":"Degraded",`+
 		`"abort":true,"message":"Rollout aborted update to revision 4"}}`, nil)
 	ex := newTestExecutor(fr)
 
@@ -83,6 +83,9 @@ func TestGetStatus_ReportsGenerationAndArgoMessage(t *testing.T) {
 	}
 	if st.Generation != 8 || st.ObservedGeneration != 7 || st.Message != "Rollout aborted update to revision 4" {
 		t.Fatalf("status diagnostics = %+v", st)
+	}
+	if st.ReleaseID != "rel_01ARZ3NDEKTSV4RRFFQ69G5FAV" {
+		t.Fatalf("release annotation = %q", st.ReleaseID)
 	}
 }
 

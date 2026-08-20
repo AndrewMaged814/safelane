@@ -19,10 +19,11 @@ type Target struct {
 	Environment string `json:"environment"`
 	Cluster     string `json:"cluster"`
 	Namespace   string `json:"namespace"`
+	Rollout     string `json:"rollout,omitempty"`
 }
 
 func (t Target) String() string {
-	return fmt.Sprintf("%s/%s/%s/%s", t.Application, t.Environment, t.Cluster, t.Namespace)
+	return fmt.Sprintf("%s/%s/%s/%s/%s", t.Application, t.Environment, t.Cluster, t.Namespace, t.Rollout)
 }
 
 // IsZero reports whether no component was supplied.

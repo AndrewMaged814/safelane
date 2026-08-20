@@ -22,7 +22,7 @@ DECISION
   evidence          verified
                     3 verified, 0 failed, 1 unavailable
   envelope          1 → 5 → 25 → 50 → 100, 4 gates
-                    read from the hashed bundle, digest sha256:b97a88c46c66aea385f5497be3446891892eb320aff5bd42c1a2b0254f1f432b
+                    read from the hashed bundle, digest sha256:22149f9f2192f02adf3492fb3a8541a25717f3dbcae09e6ca8d9b10d95c27cdc
 
 EXECUTION
   14:26:03Z  start      weight 1     granted

@@ -117,6 +117,12 @@ func runRolloutStart(ctx context.Context, args []string, stdout, stderr io.Write
 		printRolloutRejection(stderr, err)
 		return ExitFail
 	}
+	if r.State() != release.StateReady {
+		printRolloutRejection(stderr, release.Invalid("release_not_ready", "release_id",
+			fmt.Sprintf("release %s is %s; rollout start only accepts ready attempts", r.ID, r.State()),
+			"Run `safelane release inspect --pr <n>` and follow its next_command."))
+		return ExitFail
+	}
 	if paths.projectFile == "" {
 		paths, err = resolveRuntime(root, f.projectFile, "", f.storeDir)
 		if err != nil {
@@ -137,8 +143,54 @@ func runRolloutStart(ctx context.Context, args []string, stdout, stderr io.Write
 		ControllerKubeconfig: f.controllerKubeconfig,
 		ControllerContext:    f.controllerContext,
 	})
+	pre, err := ex.GetStatus(ctx)
+	if err != nil {
+		printRolloutRejection(stderr, err)
+		return ExitFail
+	}
+	bundle, _ := r.Bundle()
+	binding := release.ExecutionBinding{ReleaseID: r.ID, Application: r.Target().Application,
+		Environment: r.Target().Environment, Cluster: r.Target().Cluster, Namespace: r.Target().Namespace,
+		Rollout: cfg.Target.Rollout, Digest: bundle.PinnedDigest(),
+		PreGeneration: pre.Generation, PreDigest: pre.ImageDigest, PreArgoRevision: pre.Revision, PreAnalysisRun: pre.AnalysisRunName}
+	r, err = r.WithState(release.StateStarting, binding)
+	if err != nil {
+		printRolloutRejection(stderr, err)
+		return ExitFail
+	}
+	if err := st.Update(r); err != nil {
+		fmt.Fprintf(stderr, "safelane rollout start: could not persist starting state: %v\n", err)
+		return ExitFail
+	}
 
-	result, err := startRollout(ctx, r, ex, f.timeout, time.Now)
+	retryAbortedSameDigest := false
+	if r.RetryOf() != "" && pre.ImageDigest == bundle.PinnedDigest() {
+		if parent, loadErr := st.Load(r.RetryOf()); loadErr == nil && parent.State() == release.StateAborted {
+			retryAbortedSameDigest = true
+		}
+	}
+	result, err := startRolloutAttempt(ctx, r, ex, f.timeout, time.Now, retryAbortedSameDigest)
+	if result.release != nil {
+		finalBinding := binding
+		if result.final.Generation != 0 {
+			finalBinding.Generation, finalBinding.ArgoRevision = result.final.Generation, result.final.Revision
+			finalBinding.AnalysisRunName = result.final.AnalysisRunName
+		}
+		state := release.StateAtGate
+		if err != nil {
+			state = release.StateFailed
+		}
+		if err != nil && result.final.Generation == 0 {
+			state = release.StateUnknown
+		}
+		if result.final.State == execute.StateAborted {
+			state = release.StateAborted
+		}
+		if result.final.ReleaseID != "" && result.final.ReleaseID != r.ID {
+			state = release.StateUnknown
+		}
+		result.release, _ = result.release.WithState(state, finalBinding)
+	}
 	if err != nil && result.release != nil {
 		if serr := st.Update(result.release); serr != nil {
 			fmt.Fprintf(stderr, "safelane rollout start: the attempted start could not be persisted: %v\n", serr)
@@ -247,6 +299,10 @@ func (s startResult) RenderFailure() string {
 // and waits for Argo to reach the lane's first gate, per Appendix C5's
 // blocking wait. now is injected so tests get a deterministic timestamp.
 func startRollout(ctx context.Context, r *release.Release, ex *execute.Executor, timeout time.Duration, now func() time.Time) (startResult, error) {
+	return startRolloutAttempt(ctx, r, ex, timeout, now, false)
+}
+
+func startRolloutAttempt(ctx context.Context, r *release.Release, ex *execute.Executor, timeout time.Duration, now func() time.Time, retryAbortedSameDigest bool) (startResult, error) {
 	bundle, ok := r.Bundle()
 	if !ok {
 		return startResult{}, release.Internal("release_without_bundle",
@@ -280,7 +336,18 @@ func startRollout(ctx context.Context, r *release.Release, ex *execute.Executor,
 		}
 	}
 
-	rows, err := ex.Apply(ctx, bundle)
+	if _, bound := r.Binding(); bound {
+		if err := ex.AnnotateRelease(ctx, r.ID); err != nil {
+			return startResult{release: r}, err
+		}
+	}
+	var rows []execute.ApplyRow
+	var err error
+	if retryAbortedSameDigest {
+		err = ex.Retry(ctx)
+	} else {
+		rows, err = ex.Apply(ctx, bundle)
+	}
 	if err != nil {
 		return startResult{release: r}, err
 	}
@@ -296,6 +363,11 @@ func startRollout(ctx context.Context, r *release.Release, ex *execute.Executor,
 		return result, err
 	}
 	result.final = status
+	if _, bound := r.Binding(); bound && status.ReleaseID != r.ID {
+		return result, release.Invalid("release_identity_mismatch", "safelane.dev/release-id",
+			fmt.Sprintf("live Rollout is annotated for %q, expected %q", status.ReleaseID, r.ID),
+			"Do not transition this attempt; inspect the Rollout identity and retry explicitly if safe.")
+	}
 	if status.State != execute.StateAtGate {
 		outcome := release.OutcomeFailed
 		reasonCode := "rollout_did_not_reach_a_gate"

@@ -15,13 +15,27 @@ import (
 // deliberately does not carry is layout: no padding, no ladders, no
 // wrapped prose.
 type inspectionJSON struct {
-	ReleaseID   release.ReleaseID  `json:"release_id"`
-	Target      release.Target     `json:"target"`
-	Checks      []checkJSON        `json:"checks"`
-	Assessment  *assess.Assessment `json:"assessment"`
-	Bundle      *bundleJSON        `json:"bundle"`
-	Decision    decisionJSON       `json:"decision"`
-	NextCommand string             `json:"next_command,omitempty"`
+	ReleaseID      release.ReleaseID  `json:"release_id"`
+	Target         release.Target     `json:"target"`
+	Checks         []checkJSON        `json:"checks"`
+	SafetySignals  []checkJSON        `json:"safety_signals,omitempty"`
+	Assessment     *assess.Assessment `json:"assessment"`
+	Bundle         *bundleJSON        `json:"bundle"`
+	Decision       decisionJSON       `json:"decision"`
+	NextCommand    string             `json:"next_command,omitempty"`
+	History        []attemptJSON      `json:"history"`
+	RecordedState  release.State      `json:"recorded_state"`
+	LiveState      release.State      `json:"live_state"`
+	EffectiveState release.State      `json:"effective_state"`
+	StateSource    string             `json:"state_source"`
+}
+
+type attemptJSON struct {
+	ReleaseID     release.ReleaseID `json:"release_id"`
+	AttemptNumber int               `json:"attempt_number"`
+	State         release.State     `json:"state"`
+	CreatedAt     string            `json:"created_at"`
+	RetryOf       release.ReleaseID `json:"retry_of,omitempty"`
 }
 
 type checkJSON struct {
@@ -55,14 +69,21 @@ type decisionJSON struct {
 func (in inspection) JSON() inspectionJSON {
 	r := in.release
 	out := inspectionJSON{
-		ReleaseID: r.ID,
-		Target:    r.Target(),
+		ReleaseID:      r.ID,
+		Target:         r.Target(),
+		RecordedState:  r.State(),
+		LiveState:      in.liveState,
+		EffectiveState: in.effectiveState,
+		StateSource:    in.stateSource,
 		Decision: decisionJSON{
 			Eligibility:   r.Eligibility().Status().String(),
 			PolicyVersion: in.policy.Version,
 			Reason:        r.Eligibility().ReasonCode(),
 			Retryable:     r.Eligibility().Retryable(),
 		},
+	}
+	for _, h := range in.history {
+		out.History = append(out.History, attemptJSON{ReleaseID: h.ID, AttemptNumber: h.AttemptNumber(), State: h.State(), CreatedAt: h.CreatedAt.Format("2006-01-02T15:04:05Z07:00"), RetryOf: h.RetryOf()})
 	}
 	for _, c := range in.checks {
 		out.Checks = append(out.Checks, checkJSON{
@@ -72,6 +93,9 @@ func (in inspection) JSON() inspectionJSON {
 			Detail:  c.detail,
 			Remedy:  c.remedy,
 		})
+	}
+	for _, c := range in.safety {
+		out.SafetySignals = append(out.SafetySignals, checkJSON{Name: c.label, Outcome: c.outcome.String(), Summary: strings.TrimSpace(c.value + " " + c.tail), Detail: c.detail})
 	}
 	if a, ok := r.Assessment(); ok {
 		out.Assessment = &a
@@ -87,8 +111,8 @@ func (in inspection) JSON() inspectionJSON {
 		out.Decision.Weights = env.Stages()
 		out.Decision.Gates = gateCount(env.Stages())
 		out.Decision.NextAction = env.NextAction()
-		out.NextCommand = "safelane rollout start " + string(r.ID)
 	}
+	out.NextCommand = nextCommand(r)
 	return out
 }
 

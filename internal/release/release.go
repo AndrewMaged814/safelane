@@ -16,14 +16,18 @@ import (
 // by *adding* sections - a new field on [Release] and a new key in its JSON - which is
 // a backwards-compatible change that does not need a new version. Bump this only if
 // identity, evidence or the artifact/target/bundle binding below ever changes shape.
-const RecordSchemaVersion = "safelane.release.record/v2"
+const RecordSchemaVersion = "safelane.release.record/v3"
 
 // ReleaseParams is the argument to [NewRelease].
 type ReleaseParams struct {
 	// ID must already be minted. #48 requires a stable release ID before
 	// eligibility is recorded, so it is an input here rather than something
 	// this constructor invents at an arbitrary point in the flow.
-	ID ReleaseID
+	ID            ReleaseID
+	AttemptNumber int
+	RetryOf       ReleaseID
+	State         State
+	Binding       ExecutionBinding
 	// Intent is the caller's pruned request, recorded verbatim. Evidence collected by
 	// SafeLane belongs in Evidence, never back inside this snapshot.
 	Intent Intent
@@ -100,6 +104,10 @@ type Release struct {
 	assessmentRecord AssessmentRecord
 	execution        []ExecutionEntry
 	boundary         Boundary
+	attemptNumber    int
+	retryOf          ReleaseID
+	state            State
+	binding          ExecutionBinding
 }
 
 // NewRelease validates and assembles the Release record.
@@ -110,6 +118,34 @@ func NewRelease(p ReleaseParams) (*Release, error) {
 	caller := p.Caller
 	legacyRequest := p.Request.SchemaVersion != ""
 	assessment := p.RecordedAssessment
+	if p.AttemptNumber == 0 {
+		p.AttemptNumber = 1
+	}
+	if p.State == "" {
+		if len(p.Execution) > 0 {
+			last := p.Execution[len(p.Execution)-1]
+			switch {
+			case last.Outcome == OutcomeAborted || last.Verb == VerbAbort || last.Verb == VerbArgoAbort:
+				p.State = StateAborted
+			case last.Outcome == OutcomeFailed:
+				p.State = StateFailed
+			case last.Verb == VerbPause:
+				p.State = StatePaused
+			default:
+				p.State = StateAtGate
+			}
+		}
+		switch p.Eligibility.Status() {
+		case EligibilityEligible:
+			if p.State == "" {
+				p.State = StateReady
+			}
+		case EligibilityIneligible:
+			p.State = StateIneligible
+		case EligibilityIndeterminate:
+			p.State = StateIndeterminate
+		}
+	}
 	if assessment.IsZero() && !p.Assessment.IsZero() {
 		assessment = assessmentRecordFrom(p.Assessment)
 	}
@@ -140,6 +176,35 @@ func NewRelease(p ReleaseParams) (*Release, error) {
 	}
 	if p.CreatedAt.IsZero() {
 		errs = append(errs, Internal("missing_created_at", "a Release must record when SafeLane created it"))
+	}
+	if p.AttemptNumber < 1 {
+		errs = append(errs, Internal("invalid_attempt_number", "attempt_number must be positive"))
+	}
+	if p.AttemptNumber == 1 && p.RetryOf != "" {
+		errs = append(errs, Internal("invalid_retry_link", "attempt 1 cannot retry another attempt"))
+	}
+	if p.AttemptNumber > 1 && p.RetryOf == "" {
+		errs = append(errs, Internal("missing_retry_link", "later attempts must identify retry_of"))
+	}
+	if err := p.State.Validate(); err != nil {
+		errs = append(errs, Internal("invalid_recorded_state", err.Error()))
+	}
+	switch p.Eligibility.Status() {
+	case EligibilityIneligible:
+		if p.State != StateIneligible {
+			errs = append(errs, Internal("state_eligibility_mismatch", "ineligible evidence must record state ineligible"))
+		}
+	case EligibilityIndeterminate:
+		if p.State != StateIndeterminate {
+			errs = append(errs, Internal("state_eligibility_mismatch", "indeterminate evidence must record state indeterminate"))
+		}
+	case EligibilityEligible:
+		if p.State == StateIneligible || p.State == StateIndeterminate {
+			errs = append(errs, Internal("state_eligibility_mismatch", "eligible evidence cannot record an evidence-withheld state"))
+		}
+	}
+	if !p.Binding.IsZero() && p.Binding.ReleaseID != p.ID {
+		errs = append(errs, Internal("binding_release_mismatch", "execution binding release_id does not match the record"))
 	}
 
 	verified, isVerified := p.Evidence.Verified()
@@ -285,6 +350,10 @@ func NewRelease(p ReleaseParams) (*Release, error) {
 		assessment:       p.Assessment,
 		assessmentRecord: assessment,
 		boundary:         p.Boundary,
+		attemptNumber:    p.AttemptNumber,
+		retryOf:          p.RetryOf,
+		state:            p.State,
+		binding:          p.Binding,
 	}
 	if len(p.Execution) > 0 {
 		r.execution = append([]ExecutionEntry{}, p.Execution...)
@@ -298,6 +367,11 @@ func NewRelease(p ReleaseParams) (*Release, error) {
 
 // Request returns the caller's submission as recorded.
 func (r *Release) Request() Intent { return r.request }
+
+func (r *Release) AttemptNumber() int                { return r.attemptNumber }
+func (r *Release) RetryOf() ReleaseID                { return r.retryOf }
+func (r *Release) State() State                      { return r.state }
+func (r *Release) Binding() (ExecutionBinding, bool) { return r.binding, !r.binding.IsZero() }
 
 // Target returns the operator-resolved release target, stored outside request.
 func (r *Release) Target() Target { return r.target }
@@ -393,6 +467,10 @@ func (r *Release) WithExecution(entry ExecutionEntry) (*Release, error) {
 	}
 	return NewRelease(ReleaseParams{
 		ID:                 r.ID,
+		AttemptNumber:      r.attemptNumber,
+		RetryOf:            r.retryOf,
+		State:              r.state,
+		Binding:            r.binding,
 		Intent:             r.request,
 		Target:             r.target,
 		Caller:             r.caller,
@@ -414,9 +492,24 @@ func (r *Release) WithBoundary(boundary Boundary) (*Release, error) {
 		bundlePtr = &b
 	}
 	return NewRelease(ReleaseParams{
-		ID: r.ID, Intent: r.request, Target: r.target, Caller: r.caller, Evidence: r.evidence,
+		ID: r.ID, AttemptNumber: r.attemptNumber, RetryOf: r.retryOf, State: r.state, Binding: r.binding,
+		Intent: r.request, Target: r.target, Caller: r.caller, Evidence: r.evidence,
 		Bundle: bundlePtr, Eligibility: r.eligibility, Assessment: r.assessment, RecordedAssessment: r.assessmentRecord,
 		Execution: r.execution, Boundary: boundary, CreatedAt: r.CreatedAt,
+	})
+}
+
+// WithState returns an atomically persistable replacement carrying newly observed state and binding.
+func (r *Release) WithState(state State, binding ExecutionBinding) (*Release, error) {
+	var bundlePtr *RenderedBundle
+	if b, ok := r.Bundle(); ok {
+		bundlePtr = &b
+	}
+	return NewRelease(ReleaseParams{
+		ID: r.ID, AttemptNumber: r.attemptNumber, RetryOf: r.retryOf, State: state, Binding: binding,
+		Intent: r.request, Target: r.target, Caller: r.caller, Evidence: r.evidence,
+		Bundle: bundlePtr, Eligibility: r.eligibility, Assessment: r.assessment,
+		RecordedAssessment: r.assessmentRecord, Execution: r.execution, Boundary: r.boundary, CreatedAt: r.CreatedAt,
 	})
 }
 
@@ -438,20 +531,24 @@ func (r *Release) BundleHashes() []ResourceHash {
 }
 
 type releaseJSON struct {
-	SchemaVersion string           `json:"schema_version"`
-	ID            ReleaseID        `json:"release_id"`
-	CreatedAt     time.Time        `json:"created_at"`
-	Request       Intent           `json:"request"`
-	Target        Target           `json:"target"`
-	Caller        CallerIdentity   `json:"caller,omitempty"`
-	Evidence      EvidenceResult   `json:"evidence"`
-	Bundle        *RenderedBundle  `json:"bundle"`
-	Eligibility   Eligibility      `json:"eligibility"`
-	Assessment    AssessmentRecord `json:"assessment,omitempty"`
-	Execution     []ExecutionEntry `json:"execution,omitempty"`
-	Boundary      Boundary         `json:"boundary,omitempty"`
-	Envelope      *EnvelopeRecord  `json:"envelope,omitempty"`
-	Outcome       string           `json:"outcome"`
+	SchemaVersion string            `json:"schema_version"`
+	ID            ReleaseID         `json:"release_id"`
+	CreatedAt     time.Time         `json:"created_at"`
+	AttemptNumber int               `json:"attempt_number"`
+	RetryOf       ReleaseID         `json:"retry_of,omitempty"`
+	State         State             `json:"state"`
+	Binding       *ExecutionBinding `json:"execution_binding,omitempty"`
+	Request       Intent            `json:"request"`
+	Target        Target            `json:"target"`
+	Caller        CallerIdentity    `json:"caller,omitempty"`
+	Evidence      EvidenceResult    `json:"evidence"`
+	Bundle        *RenderedBundle   `json:"bundle"`
+	Eligibility   Eligibility       `json:"eligibility"`
+	Assessment    AssessmentRecord  `json:"assessment,omitempty"`
+	Execution     []ExecutionEntry  `json:"execution,omitempty"`
+	Boundary      Boundary          `json:"boundary,omitempty"`
+	Envelope      *EnvelopeRecord   `json:"envelope,omitempty"`
+	Outcome       string            `json:"outcome"`
 }
 
 // MarshalJSON writes the persisted record.
@@ -465,10 +562,19 @@ func (r *Release) MarshalJSON() ([]byte, error) {
 			}
 		}
 	}
+	var binding *ExecutionBinding
+	if !r.binding.IsZero() {
+		copy := r.binding
+		binding = &copy
+	}
 	return json.Marshal(releaseJSON{
 		SchemaVersion: RecordSchemaVersion,
 		ID:            r.ID,
 		CreatedAt:     r.CreatedAt,
+		AttemptNumber: r.attemptNumber,
+		RetryOf:       r.retryOf,
+		State:         r.state,
+		Binding:       binding,
 		Request:       r.request,
 		Target:        r.target,
 		Caller:        r.caller,
@@ -513,7 +619,16 @@ func (r *Release) UnmarshalJSON(data []byte) error {
 			"Regenerate the record; v1 evidence-dossier request fields are not accepted.").WithCause(err)
 	}
 	built, err := NewRelease(ReleaseParams{
-		ID:                 w.ID,
+		ID:            w.ID,
+		AttemptNumber: w.AttemptNumber,
+		RetryOf:       w.RetryOf,
+		State:         w.State,
+		Binding: func() ExecutionBinding {
+			if w.Binding != nil {
+				return *w.Binding
+			}
+			return ExecutionBinding{}
+		}(),
 		Intent:             w.Request,
 		Target:             w.Target,
 		Caller:             w.Caller,

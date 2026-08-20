@@ -69,6 +69,7 @@ type EvidenceInput struct {
 	Approval       VerifiedApproval
 	MergeCommitSHA string
 	RequiredCheck  VerifiedCheckRun
+	RequiredChecks []VerifiedCheckRun
 	Artifact       VerifiedArtifact
 	VerifiedAt     time.Time
 }
@@ -107,6 +108,7 @@ type ReleaseEvidence struct {
 	approval       VerifiedApproval
 	mergeCommitSHA string
 	requiredCheck  VerifiedCheckRun
+	requiredChecks []VerifiedCheckRun
 	artifact       VerifiedArtifact
 	verifiedAt     time.Time
 }
@@ -140,19 +142,25 @@ func NewReleaseEvidence(in EvidenceInput) (ReleaseEvidence, error) {
 			fmt.Sprintf("%q is not a full 40-character commit SHA", in.MergeCommitSHA),
 			"Record the merge commit produced by the pull request on the base branch."))
 	}
-	if in.RequiredCheck.Name == "" {
+	checks := in.RequiredChecks
+	if len(checks) == 0 && in.RequiredCheck.Name != "" {
+		checks = []VerifiedCheckRun{in.RequiredCheck}
+	}
+	if len(checks) == 0 {
 		errs = append(errs, MissingEvidenceError("missing_required_check", "evidence.required_check",
 			"no required check run", "Verify the required check run for the merge commit SHA."))
 	}
-	if in.RequiredCheck.Conclusion != CheckConclusionSuccess {
-		errs = append(errs, FailedEvidenceError("required_check_not_successful", "evidence.required_check.conclusion",
-			fmt.Sprintf("required check concluded %q", in.RequiredCheck.Conclusion),
-			`Only a "success" conclusion is CI evidence. A failed, cancelled, skipped or in-progress check is not.`))
-	}
-	if in.RequiredCheck.HeadSHA != in.MergeCommitSHA {
-		errs = append(errs, FailedEvidenceError("check_run_commit_mismatch", "evidence.required_check.head_sha",
-			fmt.Sprintf("required check ran against %q, not the merge commit %q", in.RequiredCheck.HeadSHA, in.MergeCommitSHA),
-			"Verify the required check run for the merge commit SHA. A passing check on the pull request head does not satisfy this."))
+	for _, check := range checks {
+		if check.Conclusion != CheckConclusionSuccess {
+			errs = append(errs, FailedEvidenceError("required_check_not_successful", "evidence.required_check.conclusion",
+				fmt.Sprintf("required check %q concluded %q", check.Name, check.Conclusion),
+				`Only a "success" conclusion is CI evidence. A failed, cancelled, skipped or in-progress check is not.`))
+		}
+		if check.HeadSHA != in.MergeCommitSHA {
+			errs = append(errs, FailedEvidenceError("check_run_commit_mismatch", "evidence.required_check.head_sha",
+				fmt.Sprintf("required check %q ran against %q, not the merge commit %q", check.Name, check.HeadSHA, in.MergeCommitSHA),
+				"Verify the required check run for the merge commit SHA. A passing check on the pull request head does not satisfy this."))
+		}
 	}
 	if in.Artifact.Reference.IsZero() {
 		errs = append(errs, MissingEvidenceError("missing_artifact", "evidence.artifact.reference",
@@ -189,7 +197,8 @@ func NewReleaseEvidence(in EvidenceInput) (ReleaseEvidence, error) {
 		pullRequest:    in.PullRequest,
 		approval:       in.Approval,
 		mergeCommitSHA: in.MergeCommitSHA,
-		requiredCheck:  in.RequiredCheck,
+		requiredCheck:  checks[0],
+		requiredChecks: append([]VerifiedCheckRun(nil), checks...),
 		artifact:       in.Artifact,
 		verifiedAt:     in.VerifiedAt.UTC(),
 	}, nil
@@ -210,6 +219,9 @@ func (e ReleaseEvidence) MergeCommitSHA() string { return e.mergeCommitSHA }
 
 // RequiredCheck returns the verified required check run for the merge commit SHA.
 func (e ReleaseEvidence) RequiredCheck() VerifiedCheckRun { return e.requiredCheck }
+func (e ReleaseEvidence) RequiredChecks() []VerifiedCheckRun {
+	return append([]VerifiedCheckRun(nil), e.requiredChecks...)
+}
 
 // Artifact returns the verified immutable artifact.
 func (e ReleaseEvidence) Artifact() VerifiedArtifact { return e.artifact }
@@ -236,7 +248,8 @@ type evidenceJSON struct {
 	PullRequest    VerifiedPullRequest `json:"pull_request"`
 	Approval       VerifiedApproval    `json:"approval"`
 	MergeCommitSHA string              `json:"merge_commit_sha"`
-	RequiredCheck  VerifiedCheckRun    `json:"required_check"`
+	RequiredCheck  *VerifiedCheckRun   `json:"required_check,omitempty"`
+	RequiredChecks []VerifiedCheckRun  `json:"required_checks,omitempty"`
 	Artifact       VerifiedArtifact    `json:"artifact"`
 	VerifiedAt     time.Time           `json:"verified_at"`
 }
@@ -252,7 +265,7 @@ func (e ReleaseEvidence) MarshalJSON() ([]byte, error) {
 		PullRequest:    e.pullRequest,
 		Approval:       e.approval,
 		MergeCommitSHA: e.mergeCommitSHA,
-		RequiredCheck:  e.requiredCheck,
+		RequiredChecks: e.requiredChecks,
 		Artifact:       e.artifact,
 		VerifiedAt:     e.verifiedAt,
 	})
@@ -280,7 +293,13 @@ func (e *ReleaseEvidence) UnmarshalJSON(data []byte) error {
 		PullRequest:    w.PullRequest,
 		Approval:       w.Approval,
 		MergeCommitSHA: w.MergeCommitSHA,
-		RequiredCheck:  w.RequiredCheck,
+		RequiredCheck: func() VerifiedCheckRun {
+			if w.RequiredCheck != nil {
+				return *w.RequiredCheck
+			}
+			return VerifiedCheckRun{}
+		}(),
+		RequiredChecks: w.RequiredChecks,
 		Artifact:       w.Artifact,
 		VerifiedAt:     w.VerifiedAt,
 	})

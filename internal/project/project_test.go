@@ -73,7 +73,7 @@ func TestDefaultYAML_RoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load default YAML: %v", err)
 	}
-	if cfg.Repository.DefaultBranch != "master" || cfg.Release.RequiredCheck != "build-and-push" {
+	if cfg.Repository.DefaultBranch != "master" || len(cfg.Release.RequiredChecks) != 1 || cfg.Release.RequiredChecks[0] != "build-and-push" {
 		t.Fatalf("unexpected default: %+v", cfg)
 	}
 	if cfg.Release.ImageTag != DefaultImageTag {

@@ -18,11 +18,13 @@ SafeLane creates operator-owned files under ~/.safelane/apps/podinfo/:
     release-template/
     releases/
 
-The project file names the GitHub repository, default branch, image repository and tag, required check, target cluster, namespace, Rollout, template path, and controller credentials. Edit the operator-owned files, then run doctor.
+The project file names the GitHub repository, default branch, image repository and tag, mandatory checks, target cluster, namespace, Rollout, template path, and controller credentials. Edit the operator-owned files, then run doctor.
 
 ## Why configuration lives under SAFELANE_HOME
 
 SafeLane keeps application configuration and records outside the application checkout. A caller can identify the repository, but it cannot rewrite the operator's policy by changing a working tree file.
+
+For this prototype, `releases/rel_*.json` is the authoritative single-machine ledger. Each file is one attempt and updates land atomically. Shared-machine synchronization and concurrent SafeLane writers are unsupported.
 
 ## Next
 

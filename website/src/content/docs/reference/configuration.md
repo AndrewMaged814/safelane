@@ -9,7 +9,7 @@ SafeLane reads these files from SAFELANE_HOME (default ~/.safelane). Keep them o
 
 ### project.yml
 
-    version: 2
+    version: 3
     application: podinfo
     repository:
       name: AndrewMaged814/podinfo
@@ -18,7 +18,9 @@ SafeLane reads these files from SAFELANE_HOME (default ~/.safelane). Keep them o
       environment: production
       image_repository: ghcr.io/andrewmaged814/podinfo
       image_tag: sha-{{merge_sha}}
-      required_check: build-and-push
+      required_checks:
+        - build-and-push
+        - test
       template_path: release-template
     target:
       cluster: safelane-demo
@@ -27,7 +29,7 @@ SafeLane reads these files from SAFELANE_HOME (default ~/.safelane). Keep them o
     controller_kubeconfig: controller.kubeconfig
     controller_context: safelane-controller
 
-version must be 1 or 2. application, environment, cluster, and namespace must be lowercase DNS labels. repository.name is owner/name. The image repository includes a registry.
+version must be 1, 2, or 3. Version 3 uses required_checks to name every mandatory check. application, environment, cluster, and namespace must be lowercase DNS labels. repository.name is owner/name. The image repository includes a registry.
 
 ### policy.yml
 

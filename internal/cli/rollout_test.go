@@ -257,13 +257,15 @@ func TestRolloutStart_FreshAbortIsPersistedAndReportedAsPostApplyFailure(t *test
 	projectFile, storeDir := statusRuntime(t, rel)
 
 	q := &queueRunner{}
+	q.enqueue(`{"metadata":{"generation":7},"status":{"observedGeneration":7,"phase":"Healthy"}}`, nil)
 	q.enqueue(`{"status":{"userInfo":{"username":"system:serviceaccount:podinfo:safelane-controller"}}}`, nil)
 	q.enqueue("yes\n", nil)
 	q.enqueue(`{"status":{"userInfo":{"username":"system:serviceaccount:podinfo:safelane-caller"}}}`, nil)
 	q.enqueue("yes\n", nil)
 	q.enqueue("no\n", nil)
+	q.enqueue("rollout.argoproj.io/podinfo annotated\n", nil)
 	q.enqueue(applyUnchangedFour+"rollout.argoproj.io/podinfo configured\n", nil)
-	q.enqueue(`{"metadata":{"generation":8},"status":{"observedGeneration":8,"phase":"Degraded",`+
+	q.enqueue(`{"metadata":{"generation":8,"annotations":{"safelane.dev/release-id":"`+string(rel.ID)+`"}},"spec":{"template":{"spec":{"containers":[{"image":"podinfo@`+riskyDigest+`"}]}}},"status":{"observedGeneration":8,"phase":"Degraded",`+
 		`"abort":true,"message":"Rollout aborted update to revision 4"}}`, nil)
 	originalNewExecutor := newExecutor
 	t.Cleanup(func() { newExecutor = originalNewExecutor })

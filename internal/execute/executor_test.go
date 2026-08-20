@@ -93,6 +93,19 @@ func TestApply_ReportsOneRowPerResourceInBundleOrder(t *testing.T) {
 	}
 }
 
+func TestReleaseAnnotationAndArgoRetryUseNarrowExactCommands(t *testing.T) {
+	fr := &fakeRunner{}
+	fr.enqueue("annotated\n", nil)
+	fr.enqueue("retried\n", nil)
+	ex := newTestExecutor(fr)
+	id := release.ReleaseID("rel_01ARZ3NDEKTSV4RRFFQ69G5FAV")
+	if err := ex.AnnotateRelease(context.Background(), id); err != nil { t.Fatal(err) }
+	if err := ex.Retry(context.Background()); err != nil { t.Fatal(err) }
+	wantAnnotation := "annotate rollout podinfo -n podinfo safelane.dev/release-id=" + string(id) + " --overwrite"
+	if got := strings.Join(fr.calls[0], " "); got != wantAnnotation { t.Fatalf("annotation command = %q", got) }
+	if got := strings.Join(fr.calls[1], " "); got != "argo rollouts retry rollout podinfo -n podinfo" { t.Fatalf("retry command = %q", got) }
+}
+
 func TestApply_SendsTheExactBundleBytesOnStdin(t *testing.T) {
 	fr := &fakeRunner{}
 	fr.enqueue("service/podinfo-stable unchanged\nrollout.argoproj.io/podinfo unchanged\n", nil)

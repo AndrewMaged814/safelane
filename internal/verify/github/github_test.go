@@ -110,7 +110,9 @@ func TestEvaluate_RequiredCheckMissing(t *testing.T) {
 	facts := baseFacts()
 	facts.CheckRuns = nil
 	got := Evaluate(baseClaim(), facts)
-	assertRejected(t, got, ReasonRequiredCheckMissing)
+	if got.Status != StatusUnknown || got.Reason != ReasonRequiredCheckMissing {
+		t.Fatalf("want Unknown(%s), got %+v", ReasonRequiredCheckMissing, got)
+	}
 }
 
 func TestEvaluate_RequiredCheckFailed(t *testing.T) {

@@ -13,7 +13,9 @@ import (
 	"time"
 
 	"github.com/AndrewMaged814/safelane/internal/assess"
+	"github.com/AndrewMaged814/safelane/internal/execute"
 	"github.com/AndrewMaged814/safelane/internal/intake"
+	"github.com/AndrewMaged814/safelane/internal/ledger"
 	"github.com/AndrewMaged814/safelane/internal/orchestrate"
 	"github.com/AndrewMaged814/safelane/internal/policy"
 	"github.com/AndrewMaged814/safelane/internal/project"
@@ -32,14 +34,17 @@ func ReleaseCommand(root, defaultStoreDir string) Command {
 		Name:    "release",
 		Summary: "investigate a change and record what it may do",
 		Run: func(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+			if len(args) > 0 && args[0] == "retry" {
+				return runReleaseRetry(ctx, args[1:], stdout, stderr, root, defaultStoreDir)
+			}
 			// `inspect` is the read-only report an agent runs first and an
 			// operator reads on screen. The bare form is the same pass with a
 			// terser summary, kept because scripts and the integration test
 			// use it.
 			if len(args) > 0 && args[0] == "inspect" {
-				return runRelease(ctx, args[1:], stdout, stderr, root, defaultStoreDir, true)
+				return runRelease(ctx, args[1:], stdout, stderr, root, defaultStoreDir, true, 0, "")
 			}
-			return runRelease(ctx, args, stdout, stderr, root, defaultStoreDir, false)
+			return runRelease(ctx, args, stdout, stderr, root, defaultStoreDir, false, 0, "")
 		},
 	}
 }
@@ -90,7 +95,7 @@ func parseReleaseFlags(args []string, stderr io.Writer, defaultStoreDir string) 
 	return f, fs, nil
 }
 
-func runRelease(ctx context.Context, args []string, stdout, stderr io.Writer, root, defaultStoreDir string, report bool) int {
+func runRelease(ctx context.Context, args []string, stdout, stderr io.Writer, root, defaultStoreDir string, report bool, attempt int, retryOf release.ReleaseID) int {
 	f, _, err := parseReleaseFlags(args, stderr, defaultStoreDir)
 	if err != nil {
 		return ExitUsage
@@ -127,13 +132,36 @@ func runRelease(ctx context.Context, args []string, stdout, stderr io.Writer, ro
 		printRejection(stderr, err)
 		return ExitFail
 	}
-
 	pol := policy.Default()
 	if paths.policyFile != "" {
 		pol, err = policy.Load(paths.policyFile)
 		if err != nil {
 			printRejection(stderr, err)
 			return ExitFail
+		}
+	}
+	fileStore := &store.FileStore{Dir: f.storeDir}
+	releaseLedger := ledger.ReleaseLedger{Store: fileStore}
+	subject := ledger.Subject{Repository: intent.Repository, PullRequest: intent.PullRequest, Target: cfg.ReleaseTarget(intent.Environment)}
+	if retryOf == "" {
+		if existing, history, resolveErr := releaseLedger.Resolve(subject); resolveErr != nil {
+			printRejection(stderr, resolveErr)
+			return ExitFail
+		} else if existing != nil {
+			observed := orchestrate.Observe(ctx, existing.Request(), orchestrate.Deps{
+				GitHub: &github.Client{Token: f.githubToken}, GHCR: &ghcr.Client{}, Project: cfg, Policy: pol,
+				Caller: release.CallerIdentity{Identity: "safelane-cli", Kind: release.CallerAgent, Tool: "safelane"},
+			})
+			observed.Release = existing
+			in := buildInspection(observed, cfg, pol, time.Now().UTC())
+			if observed.GitHub.Facts == nil {
+				in.checks = persistedEvidenceChecks(existing, cfg, pol)
+			}
+			in.history = history
+			if existing.State().Active() {
+				reconcileInspection(ctx, &in, cfg, paths, releaseLedger)
+			}
+			return printInspection(stdout, stderr, in, f.jsonOut, report)
 		}
 	}
 
@@ -155,14 +183,16 @@ func runRelease(ctx context.Context, args []string, stdout, stderr io.Writer, ro
 	}
 
 	deps := orchestrate.Deps{
-		GitHub:      &github.Client{Token: f.githubToken},
-		GHCR:        &ghcr.Client{},
-		ChangeFacts: &assess.Client{Token: f.githubToken},
-		Template:    tmpl,
-		Store:       &store.FileStore{Dir: f.storeDir},
-		Project:     cfg,
-		Policy:      pol,
-		Caller:      release.CallerIdentity{Identity: "safelane-cli", Kind: release.CallerAgent, Tool: "safelane"},
+		GitHub:        &github.Client{Token: f.githubToken},
+		GHCR:          &ghcr.Client{},
+		ChangeFacts:   &assess.Client{Token: f.githubToken},
+		Template:      tmpl,
+		Store:         releaseLedger,
+		Project:       cfg,
+		Policy:        pol,
+		Caller:        release.CallerIdentity{Identity: "safelane-cli", Kind: release.CallerAgent, Tool: "safelane"},
+		AttemptNumber: attempt,
+		RetryOf:       retryOf,
 	}
 
 	result, err := orchestrate.Submit(ctx, intent, deps)
@@ -172,13 +202,67 @@ func runRelease(ctx context.Context, args []string, stdout, stderr io.Writer, ro
 	}
 
 	in := buildInspection(result, cfg, pol, time.Now().UTC())
+	in.history, _ = releaseLedger.History(subject)
+	return printInspection(stdout, stderr, in, f.jsonOut, report)
+}
+
+func reconcileInspection(ctx context.Context, in *inspection, cfg project.Config, paths runtimePaths, l ledger.ReleaseLedger) {
+	r := in.release
+	controllerKubeconfig, controllerContext := paths.controllerCredentials("", "")
+	ex := newExecutor(execute.Config{Namespace: cfg.Target.Namespace, Rollout: cfg.Target.Rollout,
+		ControllerKubeconfig: controllerKubeconfig, ControllerContext: controllerContext})
+	live, err := ex.GetStatus(ctx)
+	if err != nil {
+		in.effectiveState, in.stateSource = release.StateUnknown, "live_reconciliation_failed"
+		return
+	}
+	in.liveState = mapLiveState(live.State)
+	bundle, hasBundle := r.Bundle()
+	binding, bound := r.Binding()
+	if !hasBundle || !bound || live.ReleaseID != r.ID || live.ImageDigest != bundle.PinnedDigest() ||
+		!binding.Matches(r.ID, r.Target(), bundle.PinnedDigest()) || live.Generation < binding.Generation ||
+		live.ObservedGeneration < live.Generation {
+		in.effectiveState, in.stateSource = release.StateUnknown, "identity_mismatch"
+		return
+	}
+	in.effectiveState, in.stateSource = in.liveState, "live"
+	if in.liveState == release.StatePromoted || in.liveState == release.StateAborted || in.liveState == release.StateFailed {
+		binding.Generation, binding.ArgoRevision, binding.AnalysisRunName = live.Generation, live.Revision, live.AnalysisRunName
+		if updated, updateErr := r.WithState(in.liveState, binding); updateErr == nil && l.Update(updated) == nil {
+			in.release = updated
+			in.history[len(in.history)-1] = updated
+		}
+	}
+}
+
+func mapLiveState(s execute.State) release.State {
+	switch s {
+	case execute.StateProgressing:
+		return release.StateProgressing
+	case execute.StateAnalysing:
+		return release.StateAnalysing
+	case execute.StateAtGate:
+		return release.StateAtGate
+	case execute.StateComplete:
+		return release.StatePromoted
+	case execute.StateAborted:
+		return release.StateAborted
+	case execute.StateDegraded:
+		return release.StateFailed
+	default:
+		return release.StateStarting
+	}
+}
+
+func printInspection(stdout, stderr io.Writer, in inspection, jsonOut, report bool) int {
+	result := orchestrate.Inspection{Release: in.release}
 	switch {
-	case f.jsonOut && report:
+	case jsonOut && report:
 		if err := writeJSON(stdout, in.JSON()); err != nil {
 			fmt.Fprintf(stderr, "safelane release: could not encode the result: %v\n", err)
 			return ExitFail
 		}
-	case f.jsonOut:
+	case jsonOut:
 		if err := writeJSON(stdout, result.Release); err != nil {
 			fmt.Fprintf(stderr, "safelane release: could not encode the result: %v\n", err)
 			return ExitFail
@@ -189,6 +273,35 @@ func runRelease(ctx context.Context, args []string, stdout, stderr io.Writer, ro
 		printSummary(stdout, result.Release)
 	}
 	return outcomeExitCode(result.Release)
+}
+
+func runReleaseRetry(ctx context.Context, args []string, stdout, stderr io.Writer, root, defaultStoreDir string) int {
+	if len(args) != 1 {
+		fmt.Fprintln(stderr, "usage: safelane release retry <release-id>")
+		return ExitUsage
+	}
+	id := release.ReleaseID(args[0])
+	if err := id.Validate(); err != nil {
+		printRejection(stderr, err)
+		return ExitUsage
+	}
+	paths, err := resolveRuntime(root, "", "", defaultStoreDir)
+	if err != nil {
+		printRejection(stderr, err)
+		return ExitFail
+	}
+	l := ledger.ReleaseLedger{Store: &store.FileStore{Dir: paths.storeDir}}
+	parent, attempt, err := l.RetryParent(id)
+	if err != nil {
+		printRejection(stderr, err)
+		return ExitFail
+	}
+	intent := parent.Request()
+	callArgs := []string{"--pr", fmt.Sprint(intent.PullRequest), "--repo", intent.Repository, "--environment", intent.Environment}
+	if intent.Image != "" {
+		callArgs = append(callArgs, "--image", intent.Image)
+	}
+	return runRelease(ctx, callArgs, stdout, stderr, root, defaultStoreDir, true, attempt, id)
 }
 
 func writeJSON(w io.Writer, v any) error {

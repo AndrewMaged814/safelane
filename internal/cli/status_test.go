@@ -98,9 +98,16 @@ func TestStatusReportsWhetherLiveStateBelongsToTheRelease(t *testing.T) {
 		t.Fatal("test release has no bundle")
 	}
 
+	binding := release.ExecutionBinding{ReleaseID: r.ID, Application: r.Target().Application, Environment: r.Target().Environment,
+		Cluster: r.Target().Cluster, Namespace: r.Target().Namespace, Rollout: r.Target().Rollout,
+		Digest: bundle.PinnedDigest(), Generation: 8}
+	r, err := r.WithState(release.StateAtGate, binding)
+	if err != nil {
+		t.Fatal(err)
+	}
 	matched := buildStatusReport(r, execute.Status{
 		State: execute.StateAtGate, ImageDigest: bundle.PinnedDigest(),
-		Generation: 8, ObservedGeneration: 8,
+		ReleaseID: r.ID, Generation: 8, ObservedGeneration: 8,
 	})
 	if matched.ReleaseMatch == nil || !*matched.ReleaseMatch {
 		t.Fatalf("release_match = %v, want true", matched.ReleaseMatch)
@@ -108,10 +115,15 @@ func TestStatusReportsWhetherLiveStateBelongsToTheRelease(t *testing.T) {
 
 	stale := buildStatusReport(r, execute.Status{
 		State: execute.StateAborted, ImageDigest: bundle.PinnedDigest(),
-		Generation: 8, ObservedGeneration: 7,
+		ReleaseID: r.ID, Generation: 8, ObservedGeneration: 7,
 	})
 	if stale.ReleaseMatch == nil || *stale.ReleaseMatch {
 		t.Fatalf("release_match = %v, want false for an unobserved generation", stale.ReleaseMatch)
+	}
+	other := buildStatusReport(r, execute.Status{State: execute.StateAtGate, ImageDigest: bundle.PinnedDigest(),
+		ReleaseID: "rel_01ARZ3NDEKTSV4RRFFQ69G5FAW", Generation: 8, ObservedGeneration: 8})
+	if other.ReleaseMatch == nil || *other.ReleaseMatch {
+		t.Fatalf("release_match = %v, want false when another release shares the digest", other.ReleaseMatch)
 	}
 }
 

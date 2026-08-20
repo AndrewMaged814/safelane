@@ -70,7 +70,8 @@ type Claim struct {
 	ExpectedMergeCommitSHA string
 	// RequiredCheckName is the check run name that must have succeeded
 	// against ExpectedMergeCommitSHA specifically.
-	RequiredCheckName string
+	RequiredCheckName  string
+	RequiredCheckNames []string
 	// ExpectedBaseRef is the branch the PR must have merged into, e.g. "main".
 	ExpectedBaseRef string
 	// SkipIndependentApproval, when true, means the operator Release Policy
@@ -255,46 +256,52 @@ func Evaluate(claim Claim, facts Facts) Result {
 		}
 	}
 
-	if claim.RequiredCheckName == "" {
+	names := claim.RequiredCheckNames
+	if len(names) == 0 && claim.RequiredCheckName != "" {
+		names = []string{claim.RequiredCheckName}
+	}
+	if len(names) == 0 {
 		return unknown(ReasonRequiredCheckMissing, "no required check name was configured to verify")
 	}
 
-	var found *CheckRun
-	for i := range facts.CheckRuns {
-		if facts.CheckRuns[i].Name == claim.RequiredCheckName {
-			found = &facts.CheckRuns[i]
-			break
+	for _, name := range names {
+		var found *CheckRun
+		for i := range facts.CheckRuns {
+			if facts.CheckRuns[i].Name == name {
+				found = &facts.CheckRuns[i]
+				break
+			}
 		}
-	}
-	if found == nil {
-		return rejected(ReasonRequiredCheckMissing, facts,
-			"required check %q was not found for merge commit %q", claim.RequiredCheckName, facts.MergeCommitSHA)
-	}
-	if found.HeadSHA != facts.MergeCommitSHA {
-		// Defensive: Fetcher implementations must only return check runs for
-		// the requested SHA, but a passing check on the PR head must never
-		// satisfy this claim, so this is enforced again here.
-		return rejected(ReasonRequiredCheckWrongSHA, facts,
-			"required check %q ran against %q, not the merge commit %q",
-			claim.RequiredCheckName, found.HeadSHA, facts.MergeCommitSHA)
-	}
-	// A run that has not concluded is unknown, not rejected. Collapsing
-	// "still running" into "failed" would turn a release worth retrying in
-	// forty seconds into one that is refused outright.
-	if found.Status != "" && found.Status != "completed" {
-		return unknownWith(ReasonRequiredCheckIncomplete, facts,
-			"required check %q is %s for merge commit %q",
-			claim.RequiredCheckName, found.Status, facts.MergeCommitSHA)
-	}
-	if found.Conclusion == "" {
-		return unknownWith(ReasonRequiredCheckIncomplete, facts,
-			"required check %q has not concluded for merge commit %q",
-			claim.RequiredCheckName, facts.MergeCommitSHA)
-	}
-	if found.Conclusion != "success" {
-		return rejected(ReasonRequiredCheckFailed, facts,
-			"required check %q concluded %q for merge commit %q",
-			claim.RequiredCheckName, found.Conclusion, facts.MergeCommitSHA)
+		if found == nil {
+			return unknownWith(ReasonRequiredCheckMissing, facts,
+				"required check %q was not found for merge commit %q", name, facts.MergeCommitSHA)
+		}
+		if found.HeadSHA != facts.MergeCommitSHA {
+			// Defensive: Fetcher implementations must only return check runs for
+			// the requested SHA, but a passing check on the PR head must never
+			// satisfy this claim, so this is enforced again here.
+			return rejected(ReasonRequiredCheckWrongSHA, facts,
+				"required check %q ran against %q, not the merge commit %q",
+				name, found.HeadSHA, facts.MergeCommitSHA)
+		}
+		// A run that has not concluded is unknown, not rejected. Collapsing
+		// "still running" into "failed" would turn a release worth retrying in
+		// forty seconds into one that is refused outright.
+		if found.Status != "" && found.Status != "completed" {
+			return unknownWith(ReasonRequiredCheckIncomplete, facts,
+				"required check %q is %s for merge commit %q",
+				name, found.Status, facts.MergeCommitSHA)
+		}
+		if found.Conclusion == "" {
+			return unknownWith(ReasonRequiredCheckIncomplete, facts,
+				"required check %q has not concluded for merge commit %q",
+				name, facts.MergeCommitSHA)
+		}
+		if found.Conclusion != "success" {
+			return rejected(ReasonRequiredCheckFailed, facts,
+				"required check %q concluded %q for merge commit %q",
+				name, found.Conclusion, facts.MergeCommitSHA)
+		}
 	}
 
 	return verified(facts)

@@ -69,8 +69,10 @@ type Deps struct {
 	// Now and NewID default to time.Now and release.MintReleaseID. Tests
 	// override them for deterministic output; production wiring leaves
 	// them unset.
-	Now   func() time.Time
-	NewID func() (release.ReleaseID, error)
+	Now           func() time.Time
+	NewID         func() (release.ReleaseID, error)
+	AttemptNumber int
+	RetryOf       release.ReleaseID
 }
 
 func (d Deps) policy() policy.Policy {
@@ -160,6 +162,13 @@ type Inspection struct {
 	GHCR    ghcr.Result
 }
 
+// Observe re-collects read-only evidence for an already-persisted attempt. It never
+// mints an ID, renders a bundle, assesses a lane, or writes the ledger.
+func Observe(ctx context.Context, intent release.Intent, d Deps) Inspection {
+	_, _, _, gh, gr := collectAndVerify(ctx, intent, d)
+	return Inspection{GitHub: gh, GHCR: gr}
+}
+
 // Submit is [SubmitRelease] with the verification detail kept.
 func Submit(ctx context.Context, intent release.Intent, d Deps) (Inspection, error) {
 	if err := intent.Validate(); err != nil {
@@ -225,15 +234,17 @@ func Submit(ctx context.Context, intent release.Intent, d Deps) (Inspection, err
 	}
 
 	r, err := release.NewRelease(release.ReleaseParams{
-		ID:          id,
-		Intent:      intent,
-		Target:      req.Target,
-		Caller:      d.caller(),
-		Evidence:    evidenceResult,
-		Bundle:      bundlePtr,
-		Eligibility: elig,
-		Assessment:  assessment,
-		CreatedAt:   d.now(),
+		ID:            id,
+		AttemptNumber: d.AttemptNumber,
+		RetryOf:       d.RetryOf,
+		Intent:        intent,
+		Target:        req.Target,
+		Caller:        d.caller(),
+		Evidence:      evidenceResult,
+		Bundle:        bundlePtr,
+		Eligibility:   elig,
+		Assessment:    assessment,
+		CreatedAt:     d.now(),
 	})
 	if err != nil {
 		return out, err
@@ -326,7 +337,7 @@ func collectAndVerify(ctx context.Context, intent release.Intent, d Deps) (relea
 			BaseBranch: d.Project.Repository.DefaultBranch,
 		},
 		Review: release.ClaimedReview{PullRequestNumber: intent.PullRequest},
-		CI:     release.ClaimedCI{CheckName: d.Project.Release.RequiredCheck, Workflow: d.Project.Release.RequiredCheck},
+		CI:     release.ClaimedCI{CheckName: d.Project.Release.RequiredCheckNames()[0], Workflow: d.Project.Release.RequiredCheckNames()[0]},
 		Caller: d.caller(),
 		Metadata: release.RequestMetadata{
 			RequestID:   "req_pending",
@@ -352,7 +363,7 @@ func collectAndVerify(ctx context.Context, intent release.Intent, d Deps) (relea
 		if appr, ok := facts.IndependentApprover(); ok {
 			req.Review.Approver = appr.Reviewer
 		}
-		if check, ok := facts.CheckRun(d.Project.Release.RequiredCheck); ok {
+		if check, ok := facts.CheckRun(d.Project.Release.RequiredCheckNames()[0]); ok {
 			req.CI.RunID = check.RunID
 			req.CI.RunURL = check.URL
 		}
@@ -360,7 +371,7 @@ func collectAndVerify(ctx context.Context, intent release.Intent, d Deps) (relea
 			Repository:              repo.String(),
 			PullRequestNumber:       intent.PullRequest,
 			ExpectedMergeCommitSHA:  facts.MergeCommitSHA,
-			RequiredCheckName:       d.Project.Release.RequiredCheck,
+			RequiredCheckNames:      d.Project.Release.RequiredCheckNames(),
 			ExpectedBaseRef:         d.Project.Repository.DefaultBranch,
 			SkipIndependentApproval: !d.policy().IndependentPRApprovalRequired,
 		}, facts)
@@ -372,7 +383,7 @@ func collectAndVerify(ctx context.Context, intent release.Intent, d Deps) (relea
 	}
 
 	if ghResult.Status == github.StatusVerified && ghcrResult.Status == ghcr.StatusVerified {
-		evidence, err := buildReleaseEvidence(req, ghResult, ghcrResult, d.now())
+		evidence, err := buildReleaseEvidence(req, ghResult, ghcrResult, d.Project.Release.RequiredCheckNames(), d.now())
 		if err != nil {
 			return req, evidenceResultFromError(err), nil, ghResult, ghcrResult
 		}
@@ -447,7 +458,7 @@ func resolveArtifact(ctx context.Context, intent release.Intent, d Deps, mergeSH
 // returned StatusVerified, so the check-run lookup below is guaranteed to
 // find what Evaluate already proved exists. An independent approver is
 // present only when the Release Policy required one.
-func buildReleaseEvidence(req release.ReleaseRequest, gh github.Result, gr ghcr.Result, now time.Time) (release.ReleaseEvidence, error) {
+func buildReleaseEvidence(req release.ReleaseRequest, gh github.Result, gr ghcr.Result, requiredNames []string, now time.Time) (release.ReleaseEvidence, error) {
 	facts := *gh.Facts
 
 	approver, hasApprover := facts.IndependentApprover()
@@ -458,7 +469,11 @@ func buildReleaseEvidence(req release.ReleaseRequest, gh github.Result, gr ghcr.
 			ApprovedAt: approver.ApprovedAt,
 		}
 	}
-	check, _ := facts.CheckRun(req.CI.CheckName)
+	var checks []release.VerifiedCheckRun
+	for _, name := range requiredNames {
+		check, _ := facts.CheckRun(name)
+		checks = append(checks, release.VerifiedCheckRun{Name: check.Name, HeadSHA: check.HeadSHA, Conclusion: check.Conclusion, RunID: check.RunID, URL: check.URL, CompletedAt: check.CompletedAt})
+	}
 
 	repo, _ := req.Repository()
 	imageRef, _ := req.ImageReference()
@@ -474,14 +489,7 @@ func buildReleaseEvidence(req release.ReleaseRequest, gh github.Result, gr ghcr.
 		},
 		Approval:       approval,
 		MergeCommitSHA: facts.MergeCommitSHA,
-		RequiredCheck: release.VerifiedCheckRun{
-			Name:        check.Name,
-			HeadSHA:     check.HeadSHA,
-			Conclusion:  check.Conclusion,
-			RunID:       check.RunID,
-			URL:         check.URL,
-			CompletedAt: check.CompletedAt,
-		},
+		RequiredChecks: checks,
 		Artifact: release.VerifiedArtifact{
 			Reference:      imageRef,
 			ObservedDigest: gr.ResolvedDigest,

@@ -27,20 +27,23 @@ operator's SafeLane policy does not make them mandatory. Keep the terms exact:
 
 Run `safelane release inspect --pr <pr> --repo <owner/repo>`.
 
-Exit 0 returns a release ID. Report eligibility, risk, lane, failed checks from
-step 1, and the model rationale. Treat model rationale as a hypothesis: verify
-material claims against the diff, existing tests, and check output. Attribute no
-runtime event to the change during this read-only step.
+Read `history`, `recorded_state`, `live_state`, `effective_state`, `state_source`,
+and `next_command` from inspect's JSON. The ledger is authoritative for attempt
+identity: repeated inspection reuses the latest attempt. Report actual check
+outcomes before the model assessment. Treat its rationale as a hypothesis and
+never supply a CI cause that the report did not contain.
 
 Exit 1: report every Failed and Unavailable line and stop. Retry only when the
 typed result says `retryable true`.
 
-Before starting a high-risk release or one with a failed check, ask the user for
-explicit approval. State that start applies the Rendered Manifest Bundle.
+Follow only `next_command`. A terminal or `unknown` attempt has no start action.
+When inspect offers start or advance, ask explicit approval by quoting the exact
+command, release ID, application, and full production target. Completion means
+the user approved that exact mutation.
 
 ## 3. Start and classify the result
 
-Run `safelane rollout start <release-id>`.
+Run the exact approved `safelane rollout start <release-id>` command.
 
 - `exit 0`: first gate reached; continue with the next action printed.
 - `rejected`: nothing was applied. Report the reason code and remedy verbatim.
@@ -54,13 +57,14 @@ Diagnostic reads:
 
 `safelane proof --details <release-id>`
 
-`release_match: false` means the shared live Rollout state is not correlated to
-this release's observed generation and digest. Describe it as prior, stale, or
-unrelated live state—not as this release's outcome.
+`release_match: false` means annotation, execution binding, target, digest, and
+generation did not all correlate. Describe live state as unrelated, never as
+this attempt's outcome.
 
 ## 4. Advance one gate at a time
 
-Run `safelane rollout advance <release-id>` until the output says complete.
+Ask approval with the exact advance command and target, then run it once. Repeat
+inspection/status before asking for another gate.
 Never pass `--to`; the recorded envelope chooses the next weight.
 
 - `exit 0`: follow the printed next action.

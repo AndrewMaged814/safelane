@@ -34,11 +34,12 @@ type Repository struct {
 
 // Release names the environment, artifact, required check, and template.
 type Release struct {
-	Environment     string `yaml:"environment"`
-	ImageRepository string `yaml:"image_repository"`
-	ImageTag        string `yaml:"image_tag"`
-	RequiredCheck   string `yaml:"required_check"`
-	TemplatePath    string `yaml:"template_path"`
+	Environment     string   `yaml:"environment"`
+	ImageRepository string   `yaml:"image_repository"`
+	ImageTag        string   `yaml:"image_tag"`
+	RequiredCheck   string   `yaml:"required_check"`
+	RequiredChecks  []string `yaml:"required_checks"`
+	TemplatePath    string   `yaml:"template_path"`
 }
 
 // Target is the cluster destination. SafeLane never infers these from the caller.
@@ -76,7 +77,7 @@ func Load(path string) (Config, error) {
 // Validate reports every missing or unsafe operator field at once.
 func (c Config) Validate() error {
 	var errs release.Errors
-	if c.Version != 1 && c.Version != 2 {
+	if c.Version != 1 && c.Version != 2 && c.Version != 3 {
 		errs = append(errs, release.Malformed("unsupported_project_version", "version",
 			fmt.Sprintf("project version %d is not supported", c.Version),
 			"Set version to 2."))
@@ -120,10 +121,19 @@ func (c Config) Validate() error {
 			"no image repository was configured",
 			"Set release.image_repository to ghcr.io/owner/name."))
 	}
-	if c.Release.RequiredCheck == "" {
-		errs = append(errs, release.Invalid("missing_project_field", "release.required_check",
+	if (c.Version == 3 && len(c.Release.RequiredChecks) == 0) || (c.Version < 3 && len(c.Release.RequiredCheckNames()) == 0) {
+		errs = append(errs, release.Invalid("missing_project_field", "release.required_checks",
 			"no required check was configured",
-			"Set release.required_check to the GitHub check run name that publishes the image."))
+			"Set release.required_checks to every mandatory GitHub check run name."))
+	}
+	seenChecks := map[string]bool{}
+	for i, name := range c.Release.RequiredCheckNames() {
+		if strings.TrimSpace(name) == "" {
+			errs = append(errs, release.Invalid("empty_required_check", fmt.Sprintf("release.required_checks[%d]", i), "mandatory check names cannot be empty", "Remove the empty entry or name the GitHub check run."))
+		} else if seenChecks[name] {
+			errs = append(errs, release.Invalid("duplicate_required_check", "release.required_checks", fmt.Sprintf("mandatory check %q is listed more than once", name), "List each mandatory check once."))
+		}
+		seenChecks[name] = true
 	}
 	if c.Release.TemplatePath == "" {
 		errs = append(errs, release.Invalid("missing_project_field", "release.template_path",
@@ -134,6 +144,18 @@ func (c Config) Validate() error {
 		c.Release.ImageTag = DefaultImageTag
 	}
 	return errs.OrNil()
+}
+
+// RequiredCheckNames returns the v3 mandatory set, with the singular field retained
+// only so version 1/2 fixtures remain readable.
+func (r Release) RequiredCheckNames() []string {
+	if len(r.RequiredChecks) > 0 {
+		return append([]string(nil), r.RequiredChecks...)
+	}
+	if r.RequiredCheck != "" {
+		return []string{r.RequiredCheck}
+	}
+	return nil
 }
 
 // DefaultImageTag is the tag pattern used when project.yml omits image_tag.
@@ -179,6 +201,7 @@ func (c Config) ReleaseTarget(environment string) release.Target {
 		Environment: environment,
 		Cluster:     c.Target.Cluster,
 		Namespace:   ns,
+		Rollout:     c.Target.Rollout,
 	}
 }
 
@@ -247,7 +270,7 @@ func DefaultYAML(application, repo, defaultBranch, imageRepository string) []byt
 	if repo == "" {
 		repo = "owner/name"
 	}
-	body := fmt.Sprintf(`version: 2
+	body := fmt.Sprintf(`version: 3
 
 application: %s
 
@@ -259,7 +282,8 @@ release:
   environment: production
   image_repository: %s
   image_tag: "sha-{{merge_sha}}"
-  required_check: build-and-push
+  required_checks:
+    - build-and-push
   template_path: release-template
 
 target:
