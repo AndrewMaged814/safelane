@@ -46,18 +46,29 @@ SafeLane now includes a Claude Code skill, /safelane, for agent-driven releases.
 
 ## Install
 
-SafeLane requires Go 1.26.5 or later.
+macOS and Linux:
 
 ```bash
-go install github.com/AndrewMaged814/safelane/cmd/safelane@main
+curl -fsSL https://raw.githubusercontent.com/AndrewMaged814/SafeLane/main/docs/install.sh | sh
 ```
 
-Or build from source:
+Windows PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/AndrewMaged814/SafeLane/main/docs/install.ps1 | iex
+```
+
+The installers download the latest checksummed GitHub Release. They always reuse one
+canonical location: `~/.local/bin/safelane` on macOS and Linux, and
+`%LOCALAPPDATA%\SafeLane\bin\safelane.exe` on Windows. Rerun the same command to upgrade.
+
+To build from source, install Go 1.26.5 or later:
 
 ```bash
 git clone https://github.com/AndrewMaged814/safelane.git
 cd safelane
 go build -o ./bin/safelane ./cmd/safelane
+./bin/safelane version
 ```
 
 See the [documentation](https://andrewmaged814.github.io/safelane/) for the current command

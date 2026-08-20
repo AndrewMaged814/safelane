@@ -1,0 +1,88 @@
+$ErrorActionPreference = "Stop"
+
+$repo = if ($env:SAFELANE_REPO) { $env:SAFELANE_REPO } else { "AndrewMaged814/SafeLane" }
+$installDir = if ($env:SAFELANE_INSTALL_DIR) {
+    $env:SAFELANE_INSTALL_DIR
+} else {
+    Join-Path $env:LOCALAPPDATA "SafeLane\bin"
+}
+$downloadBase = if ($env:SAFELANE_DOWNLOAD_BASE_URL) {
+    $env:SAFELANE_DOWNLOAD_BASE_URL.TrimEnd("/")
+} else {
+    "https://github.com/$repo/releases/download"
+}
+$version = $env:SAFELANE_VERSION
+
+if (-not $version) {
+    $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases/latest"
+    $version = $release.tag_name
+}
+if ($version -notmatch '^v\d+\.\d+\.\d+(?:[.-][0-9A-Za-z.-]+)?$') {
+    throw "Could not determine a valid SafeLane release version: $version"
+}
+
+$architecture = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString().ToLowerInvariant()
+$arch = switch ($architecture) {
+    "x64" { "amd64" }
+    "arm64" { "arm64" }
+    default { throw "Unsupported Windows architecture: $architecture" }
+}
+
+$filename = "safelane-$version-windows-$arch.zip"
+$tmpDir = Join-Path ([System.IO.Path]::GetTempPath()) ("safelane-install-" + [guid]::NewGuid().ToString("N"))
+New-Item -ItemType Directory -Path $tmpDir | Out-Null
+
+try {
+    $archivePath = Join-Path $tmpDir $filename
+    $checksumsPath = Join-Path $tmpDir "checksums.txt"
+    Write-Host "Downloading SafeLane $version for windows/$arch..."
+    Invoke-WebRequest -Uri "$downloadBase/$version/$filename" -OutFile $archivePath
+    Invoke-WebRequest -Uri "$downloadBase/$version/checksums.txt" -OutFile $checksumsPath
+
+    $escapedFilename = [regex]::Escape($filename)
+    $checksumLine = Get-Content -LiteralPath $checksumsPath |
+        Where-Object { $_ -match "^([0-9a-fA-F]{64})\s+\*?$escapedFilename$" } |
+        Select-Object -First 1
+    if (-not $checksumLine) {
+        throw "checksums.txt has no entry for $filename"
+    }
+    $expected = ([regex]::Match($checksumLine, '^([0-9a-fA-F]{64})')).Groups[1].Value.ToLowerInvariant()
+    $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $archivePath).Hash.ToLowerInvariant()
+    if ($expected -ne $actual) {
+        throw "Checksum verification failed for $filename."
+    }
+
+    $extractDir = Join-Path $tmpDir "archive"
+    Expand-Archive -LiteralPath $archivePath -DestinationPath $extractDir
+    $sourceBinary = Join-Path $extractDir "safelane.exe"
+    if (-not (Test-Path -LiteralPath $sourceBinary -PathType Leaf)) {
+        throw "$filename does not contain safelane.exe"
+    }
+
+    New-Item -ItemType Directory -Path $installDir -Force | Out-Null
+    $destination = Join-Path $installDir "safelane.exe"
+    $stagedDestination = "$destination.new"
+    Copy-Item -LiteralPath $sourceBinary -Destination $stagedDestination -Force
+    Move-Item -LiteralPath $stagedDestination -Destination $destination -Force
+
+    if ($env:SAFELANE_NO_PATH_UPDATE -ne "1") {
+        $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+        $entries = @($userPath -split ";" | Where-Object { $_ })
+        $alreadyPresent = $entries | Where-Object { $_.TrimEnd("\") -ieq $installDir.TrimEnd("\") }
+        if (-not $alreadyPresent) {
+            $newUserPath = (@($installDir) + $entries) -join ";"
+            [Environment]::SetEnvironmentVariable("Path", $newUserPath, "User")
+            Write-Host "Added $installDir to your user PATH. Restart your terminal."
+        }
+        $processEntries = @($env:Path -split ";" | Where-Object { $_ })
+        if (-not ($processEntries | Where-Object { $_.TrimEnd("\") -ieq $installDir.TrimEnd("\") })) {
+            $env:Path = "$installDir;$env:Path"
+        }
+    }
+
+    Write-Host "SafeLane $version installed to $destination"
+} finally {
+    if (Test-Path -LiteralPath $tmpDir) {
+        Remove-Item -LiteralPath $tmpDir -Recurse -Force
+    }
+}
