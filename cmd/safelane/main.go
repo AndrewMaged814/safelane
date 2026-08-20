@@ -38,6 +38,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		versionCommand(),
 		cli.ReleaseCommand(".", defaultStoreDir),
 		cli.RolloutCommand(".", defaultStoreDir),
+		cli.StatusCommand(".", defaultStoreDir),
 		cli.ProofCommand(defaultStoreDir),
 		cli.InitCommand("."),
 	}

@@ -112,3 +112,33 @@ func (s *FileStore) Load(id release.ReleaseID) (*release.Release, error) {
 	}
 	return &r, nil
 }
+
+// List returns every valid Release record in the store. A stray, partial, or
+// otherwise invalid file is ignored: one damaged record must not hide all the
+// healthy releases from a recovery-oriented status listing.
+func (s *FileStore) List() ([]*release.Release, error) {
+	entries, err := os.ReadDir(s.Dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("store: could not list %s: %w", s.Dir, err)
+	}
+
+	releases := make([]*release.Release, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(s.Dir, entry.Name()))
+		if err != nil {
+			return nil, fmt.Errorf("store: could not read %s while listing: %w", entry.Name(), err)
+		}
+		var r release.Release
+		if err := json.Unmarshal(data, &r); err != nil {
+			continue
+		}
+		releases = append(releases, &r)
+	}
+	return releases, nil
+}

@@ -2,6 +2,7 @@ package store
 
 import (
 	"errors"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -27,6 +28,39 @@ func fixtureRequest() release.ReleaseRequest {
 		},
 		Caller:   release.CallerIdentity{Identity: "test", Kind: release.CallerCI},
 		Metadata: release.RequestMetadata{RequestID: "req-1", SubmittedAt: time.Now()},
+	}
+}
+
+func TestFileStore_ListSkipsInvalidFiles(t *testing.T) {
+	dir := t.TempDir()
+	s := &FileStore{Dir: dir}
+	r := fixtureRelease(t)
+	if err := s.Save(r); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "broken.json"), []byte(`{"release_id":`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("not a release"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := s.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != r.ID {
+		t.Fatalf("List = %+v, want only %s", got, r.ID)
+	}
+}
+
+func TestFileStore_ListMissingDirectoryIsEmpty(t *testing.T) {
+	got, err := (&FileStore{Dir: filepath.Join(t.TempDir(), "missing")}).List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("List returned %d releases, want none", len(got))
 	}
 }
 
