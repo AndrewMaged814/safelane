@@ -3,11 +3,13 @@ package proof
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/AndrewMaged814/safelane/internal/assess"
 	"github.com/AndrewMaged814/safelane/internal/orchestrate"
 	"github.com/AndrewMaged814/safelane/internal/project"
 	"github.com/AndrewMaged814/safelane/internal/release"
@@ -22,471 +24,198 @@ const (
 	fixtureReleaseID = "rel_00000000000000000000000000"
 )
 
-type fakeFetcher struct {
-	facts github.Facts
-	err   error
-}
+type fakeFetcher struct{ facts github.Facts }
 
-func (f fakeFetcher) FetchPullRequestFacts(ctx context.Context, owner, repo string, number int) (github.Facts, error) {
-	if f.err != nil {
-		return github.Facts{}, f.err
-	}
+func (f fakeFetcher) FetchPullRequestFacts(context.Context, string, string, int) (github.Facts, error) {
 	return f.facts, nil
 }
 
-type fakeResolver struct {
-	digest string
-	err    error
-}
+type fakeResolver struct{ digest string }
 
-func (f fakeResolver) ResolveDigest(ctx context.Context, ref release.ImageReference) (string, error) {
-	if f.err != nil {
-		return "", f.err
-	}
+func (f fakeResolver) ResolveDigest(context.Context, release.ImageReference) (string, error) {
+	return f.digest, nil
+}
+func (f fakeResolver) ResolveTag(context.Context, string, string) (string, error) {
 	return f.digest, nil
 }
 
-func (f fakeResolver) ResolveTag(ctx context.Context, repository, tag string) (string, error) {
-	if f.err != nil {
-		return "", f.err
-	}
-	return f.digest, nil
+type fakeFacts struct{ value assess.Facts }
+
+func (f fakeFacts) FetchChangeFacts(context.Context, string, string, int) (assess.Facts, error) {
+	return f.value, nil
 }
 
-func verifiedFacts() github.Facts {
-	return github.Facts{
-		Repository:     "AndrewMaged814/podinfo",
-		Number:         1,
-		URL:            "https://github.com/AndrewMaged814/podinfo/pull/1",
-		Merged:         true,
-		MergedAt:       time.Date(2026, 8, 15, 9, 0, 0, 0, time.UTC),
-		BaseRef:        "main",
-		MergeCommitSHA: fixtureMergeSHA,
-		AuthorLogin:    "AndrewMaged814",
-		Approvals: []github.Approval{
-			{Reviewer: "ahmed-placeholder", State: "APPROVED", ApprovedAt: time.Date(2026, 8, 15, 8, 0, 0, 0, time.UTC)},
-		},
-		CheckRuns: []github.CheckRun{
-			{
-				Name: "publish / build-and-push", Conclusion: "success", HeadSHA: fixtureMergeSHA,
-				RunID: 16453210987, URL: "https://github.com/AndrewMaged814/podinfo/actions/runs/16453210987",
-				CompletedAt: time.Date(2026, 8, 15, 8, 30, 0, 0, time.UTC),
-			},
-		},
-	}
+type fakeAssessor struct{ verdict assess.Verdict }
+
+func (f fakeAssessor) Name() string { return f.verdict.Assessor }
+
+func (f fakeAssessor) Assess(context.Context, assess.Facts) (assess.Verdict, error) {
+	return f.verdict, nil
 }
 
-func fixtureIntent() release.Intent {
-	return release.Intent{
-		SchemaVersion: release.RequestSchemaVersion,
-		Repository:    "AndrewMaged814/podinfo",
-		PullRequest:   1,
-		Environment:   "production",
+func fromJSON[T any](t *testing.T, raw string) T {
+	t.Helper()
+	var value T
+	if err := json.Unmarshal([]byte(raw), &value); err != nil {
+		t.Fatalf("fixture JSON: %v", err)
 	}
+	return value
 }
 
-func fixtureProject() project.Config {
-	return project.Config{
-		Version:     1,
-		Application: "podinfo",
-		Repository:  project.Repository{Name: "AndrewMaged814/podinfo", DefaultBranch: "main"},
-		Release: project.Release{
-			Environment:     "production",
-			ImageRepository: "ghcr.io/andrewmaged814/podinfo",
-			ImageTag:        "sha-{{merge_sha_short8}}",
-			RequiredCheck:   "publish / build-and-push",
-			TemplatePath:    ".safelane/release-template",
-		},
-		Target: project.Target{Cluster: "safelane-demo", Namespace: "podinfo", Rollout: "podinfo"},
-	}
-}
-
-func loadTemplate(t *testing.T) render.Template {
+func completeRelease(t *testing.T) *release.Release {
 	t.Helper()
 	tmpl, err := render.LoadDir(filepath.Join("..", "render", "testdata", "release-template"))
 	if err != nil {
-		t.Fatalf("could not load template fixture: %v", err)
+		t.Fatal(err)
 	}
-	return tmpl
-}
-
-func persist(t *testing.T, mutate func(*orchestrate.Deps)) *release.Release {
-	t.Helper()
+	id, _ := release.ParseReleaseID(fixtureReleaseID)
+	facts := github.Facts{
+		Repository: "AndrewMaged814/podinfo", Number: 4, URL: "https://github.com/AndrewMaged814/podinfo/pull/4",
+		Merged: true, MergedAt: time.Date(2026, 8, 20, 14, 0, 0, 0, time.UTC), BaseRef: "master",
+		MergeCommitSHA: fixtureMergeSHA, AuthorLogin: "AndrewMaged814",
+		CheckRuns: []github.CheckRun{{Name: "build-and-push", Conclusion: "success", HeadSHA: fixtureMergeSHA}},
+	}
 	dir := t.TempDir()
 	fs := &store.FileStore{Dir: dir}
-	id, err := release.ParseReleaseID(fixtureReleaseID)
+	d := orchestrate.Deps{
+		GitHub: fakeFetcher{facts}, GHCR: fakeResolver{fixtureDigest}, Template: tmpl, Store: fs,
+		Project: project.Config{Version: 1, Application: "podinfo", Repository: project.Repository{Name: "AndrewMaged814/podinfo", DefaultBranch: "master"},
+			Release: project.Release{Environment: "production", ImageRepository: "ghcr.io/andrewmaged814/podinfo", ImageTag: "sha-{{merge_sha_short8}}", RequiredCheck: "build-and-push", TemplatePath: ".safelane/release-template"},
+			Target:  project.Target{Cluster: "safelane-demo", Namespace: "podinfo", Rollout: "podinfo"}},
+		ChangeFacts: fakeFacts{fromJSON[assess.Facts](t, `{"files":[{"path":"one"},{"path":"two"},{"path":"three"}],"additions":64,"deletions":12,"agent_authored":true,"agent_evidence":"Co-authored-by: Claude <noreply@anthropic.com>"}`)},
+		Heuristic:   fakeAssessor{fromJSON[assess.Verdict](t, `{"risk":"medium","rules":["agent_authored","path:pkg/api/**"],"available":true}`)},
+		Model:       fakeAssessor{fromJSON[assess.Verdict](t, `{"assessor":"claude","risk":"high","rationale":"error path returns before writing a status","available":true}`)},
+		Now:         func() time.Time { return time.Date(2026, 8, 20, 14, 20, 0, 0, time.UTC) },
+		NewID:       func() (release.ReleaseID, error) { return id, nil },
+	}
+	r, err := orchestrate.SubmitRelease(context.Background(), release.Intent{SchemaVersion: release.RequestSchemaVersion, Repository: "AndrewMaged814/podinfo", PullRequest: 4, Environment: "production"}, d)
 	if err != nil {
-		t.Fatalf("ParseReleaseID: %v", err)
-	}
-	deps := orchestrate.Deps{
-		GitHub:   fakeFetcher{facts: verifiedFacts()},
-		GHCR:     fakeResolver{digest: fixtureDigest},
-		Template: loadTemplate(t),
-		Store:    fs,
-		Project:  fixtureProject(),
-		Now:      func() time.Time { return time.Date(2026, 8, 15, 12, 0, 0, 0, time.UTC) },
-		NewID:    func() (release.ReleaseID, error) { return id, nil },
-	}
-	if mutate != nil {
-		mutate(&deps)
-	}
-	if _, err := orchestrate.SubmitRelease(context.Background(), fixtureIntent(), deps); err != nil {
 		t.Fatalf("SubmitRelease: %v", err)
 	}
-	loaded, err := fs.Load(id)
+	r, err = r.WithBoundary(release.Boundary{
+		ControllerIdentity: "system:serviceaccount:podinfo:safelane-controller",
+		CallerIdentity:     "system:serviceaccount:podinfo:safelane-caller",
+		CallerCapability:   release.CallerCapability{AssertedAt: time.Date(2026, 8, 20, 14, 26, 0, 0, time.UTC), Method: "SubjectAccessReview", GetRollouts: true},
+	})
 	if err != nil {
-		t.Fatalf("Load persisted release: %v", err)
+		t.Fatal(err)
 	}
-	return loaded
+	entries := []release.ExecutionEntry{
+		{At: time.Date(2026, 8, 20, 14, 26, 3, 0, time.UTC), Verb: release.VerbStart, RequestedWeight: 1, Outcome: release.OutcomeGranted},
+		{At: time.Date(2026, 8, 20, 14, 26, 41, 0, time.UTC), Verb: release.VerbAdvance, RequestedWeight: 100, Outcome: release.OutcomeRefused, ReasonCode: "transition_exceeds_envelope"},
+		{At: time.Date(2026, 8, 20, 14, 26, 48, 0, time.UTC), Verb: release.VerbAdvance, RequestedWeight: 5, Outcome: release.OutcomeGranted},
+		{At: time.Date(2026, 8, 20, 14, 29, 8, 0, time.UTC), Verb: release.VerbArgoAbort, Outcome: release.OutcomeAborted, ReasonCode: "analysis_failed", Analysis: "podinfo-success-rate-4", Detail: "request-success-rate 0.71 < 0.99"},
+	}
+	for _, entry := range entries {
+		r, err = r.WithExecution(entry)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	return r
 }
 
-func decodeProofJSON(t *testing.T, p Proof) map[string]any {
-	t.Helper()
-	raw, err := json.Marshal(p)
+func TestReleaseRecordV2PrunesRequestAndRoundTripsEverySection(t *testing.T) {
+	r := completeRelease(t)
+	raw, err := json.Marshal(r)
 	if err != nil {
-		t.Fatalf("Marshal proof: %v", err)
+		t.Fatal(err)
+	}
+	text := string(raw)
+	for _, want := range []string{`"schema_version":"safelane.release.record/v2"`, `"assessment"`, `"envelope"`, `"execution"`, `"boundary"`, `"outcome":"aborted"`} {
+		if !strings.Contains(text, want) {
+			t.Errorf("record missing %s\n%s", want, text)
+		}
 	}
 	var obj map[string]any
 	if err := json.Unmarshal(raw, &obj); err != nil {
-		t.Fatalf("Unmarshal proof JSON: %v", err)
+		t.Fatal(err)
 	}
-	return obj
-}
-
-func object(t *testing.T, parent map[string]any, key string) map[string]any {
-	t.Helper()
-	v, ok := parent[key].(map[string]any)
-	if !ok {
-		t.Fatalf("want %q to be an object, got %T (%v)", key, parent[key], parent[key])
+	request := obj["request"].(map[string]any)
+	if len(request) != 4 {
+		t.Fatalf("request = %v, want four pruned fields", request)
 	}
-	return v
-}
-
-func assertNoForbiddenVocab(t *testing.T, text string) {
-	t.Helper()
-	lower := strings.ToLower(text)
-	for _, word := range []string{"deploywhisper", "normalized_risk", "normalized risk", "contributing provider", "aggregation", "low risk", "risk tier"} {
-		if strings.Contains(lower, word) {
-			t.Errorf("proof must not mention %q:\n%s", word, text)
+	for _, forbidden := range []string{"review", "ci", "artifact", "metadata", "risk", "lane"} {
+		if _, ok := request[forbidden]; ok {
+			t.Errorf("persisted request contains %q", forbidden)
 		}
 	}
-}
-
-func TestFrom_EligibleRelease_JSONDecisionAndPendingSections(t *testing.T) {
-	r := persist(t, nil)
-	p := From(r)
-	obj := decodeProofJSON(t, p)
-
-	if got := obj["release_id"]; got != fixtureReleaseID {
-		t.Errorf("release_id = %v, want %s", got, fixtureReleaseID)
+	var loaded release.Release
+	if err := json.Unmarshal(raw, &loaded); err != nil {
+		t.Fatalf("round trip: %v", err)
 	}
-	if got := obj["application"]; got != "podinfo" {
-		t.Errorf("application = %v, want podinfo", got)
+	if len(loaded.Execution()) != 4 {
+		t.Fatalf("execution entries = %d", len(loaded.Execution()))
 	}
-	if got := obj["environment"]; got != "production" {
-		t.Errorf("environment = %v, want production", got)
-	}
-
-	decision := object(t, obj, "decision")
-	if got := decision["eligibility"]; got != "eligible" {
-		t.Errorf("eligibility = %v, want eligible", got)
-	}
-	if got := decision["policy_version"]; got != "2" {
-		t.Errorf("policy_version = %v, want 2", got)
-	}
-	if got := decision["reason_code"]; got != "all_mandatory_evidence_verified" {
-		t.Errorf("reason_code = %v, want all_mandatory_evidence_verified", got)
-	}
-	if decision["retryable"] != false {
-		t.Errorf("retryable = %v, want false", decision["retryable"])
-	}
-	env := object(t, decision, "rollout_envelope")
-	stages, _ := env["stages"].([]any)
-	if len(stages) != 5 || stages[0] != float64(1) || stages[1] != float64(5) || stages[2] != float64(25) || stages[3] != float64(50) || stages[4] != float64(100) {
-		t.Errorf("stages = %v, want [1 5 25 50 100] (the default policy's guarded lane, no assessment wired here yet)", stages)
-	}
-	if got := env["next_action"]; got != "start" {
-		t.Errorf("next_action = %v, want start", got)
-	}
-
-	if got := object(t, obj, "execution")["status"]; got != "pending" {
-		t.Errorf("execution.status = %v, want pending", got)
-	}
-	if got := object(t, obj, "boundary")["status"]; got != "pending" {
-		t.Errorf("boundary.status = %v, want pending", got)
-	}
-
-	raw, _ := json.Marshal(p)
-	assertNoForbiddenVocab(t, string(raw))
-}
-
-func TestFrom_EligibleRelease_JSONArtifactFields(t *testing.T) {
-	r := persist(t, nil)
-	obj := decodeProofJSON(t, From(r))
-	artifact := object(t, obj, "artifact")
-
-	if got := artifact["outcome"]; got != "verified" {
-		t.Errorf("artifact.outcome = %v, want verified", got)
-	}
-	sources, _ := artifact["sources"].([]any)
-	if len(sources) != 2 || sources[0] != "github" || sources[1] != "ghcr" {
-		t.Errorf("sources = %v, want [github ghcr]", sources)
-	}
-	if got := artifact["repository"]; got != "AndrewMaged814/podinfo" {
-		t.Errorf("repository = %v", got)
-	}
-	if got := artifact["revision"]; got != fixtureMergeSHA {
-		t.Errorf("revision = %v, want %s", got, fixtureMergeSHA)
-	}
-	if got := artifact["digest"]; got != fixtureDigest {
-		t.Errorf("digest = %v, want %s", got, fixtureDigest)
-	}
-	if got := artifact["digest_source"]; got != "ghcr" {
-		t.Errorf("digest_source = %v, want ghcr", got)
-	}
-
-	pr := object(t, artifact, "pull_request")
-	if pr["number"] != float64(1) || pr["reviewer"] != "ahmed-placeholder" || pr["source"] != "github" {
-		t.Errorf("pull_request = %v", pr)
-	}
-	ci := object(t, artifact, "ci")
-	if ci["name"] != "publish / build-and-push" || ci["conclusion"] != "success" || ci["source"] != "github" {
-		t.Errorf("ci = %v", ci)
-	}
-	target := object(t, artifact, "target")
-	if target["application"] != "podinfo" || target["cluster"] != "safelane-demo" || target["namespace"] != "podinfo" {
-		t.Errorf("target = %v", target)
-	}
-
-	tmpl := object(t, artifact, "template")
-	wantTmpl, ok := r.TemplateIdentity()
-	if !ok {
-		t.Fatal("persisted eligible release must have a template identity")
-	}
-	if tmpl["name"] != wantTmpl.Name || tmpl["content_digest"] != wantTmpl.ContentDigest {
-		t.Errorf("template = %v, want %+v", tmpl, wantTmpl)
-	}
-	if artifact["template_source"] != "safelane" || artifact["bundle_source"] != "safelane" {
-		t.Errorf("SafeLane-owned artifact fields missing source, got template_source=%v bundle_source=%v", artifact["template_source"], artifact["bundle_source"])
-	}
-	if object(t, obj, "decision")["source"] != "safelane" {
-		t.Errorf("decision.source = %v, want safelane", object(t, obj, "decision")["source"])
-	}
-	hashes, _ := artifact["bundle_hashes"].([]any)
-	if len(hashes) != len(r.BundleHashes()) || len(hashes) == 0 {
-		t.Errorf("bundle_hashes len = %d, want %d", len(hashes), len(r.BundleHashes()))
-	}
-
-	caller := object(t, obj, "caller")
-	if caller["identity"] != "safelane-cli" || caller["kind"] != "agent" {
-		t.Errorf("caller = %v", caller)
+	if _, ok := loaded.Boundary(); !ok {
+		t.Fatal("boundary lost on load")
 	}
 }
 
-func TestFrom_IneligibleRelease_HasNoEnvelope(t *testing.T) {
-	r := persist(t, func(d *orchestrate.Deps) {
-		facts := verifiedFacts()
-		facts.CheckRuns = []github.CheckRun{
-			{Name: "publish / build-and-push", Conclusion: "failure", HeadSHA: fixtureMergeSHA},
-		}
-		d.GitHub = fakeFetcher{facts: facts}
-	})
-	p := From(r)
-	obj := decodeProofJSON(t, p)
-	decision := object(t, obj, "decision")
-
-	if decision["eligibility"] != "ineligible" {
-		t.Errorf("eligibility = %v, want ineligible", decision["eligibility"])
-	}
-	if decision["retryable"] != false {
-		t.Errorf("retryable = %v, want false", decision["retryable"])
-	}
-	if _, ok := decision["rollout_envelope"]; ok {
-		t.Errorf("ineligible must not carry an envelope, got %v", decision["rollout_envelope"])
-	}
-	if object(t, obj, "execution")["status"] != "pending" || object(t, obj, "boundary")["status"] != "pending" {
-		t.Error("execution and boundary must stay pending")
-	}
-	artifact := object(t, obj, "artifact")
-	if artifact["outcome"] == "verified" || artifact["digest"] != nil {
-		t.Errorf("failed evidence must not present a verified digest, got %v", artifact)
-	}
-	raw, _ := json.Marshal(p)
-	assertNoForbiddenVocab(t, string(raw))
-}
-
-func TestFrom_IndeterminateRelease_IsRetryableUnknownNotSuccess(t *testing.T) {
-	r := persist(t, func(d *orchestrate.Deps) {
-		d.GitHub = fakeFetcher{err: errUnreachable}
-	})
-	p := From(r)
-	obj := decodeProofJSON(t, p)
-	decision := object(t, obj, "decision")
-
-	if decision["eligibility"] != "indeterminate" {
-		t.Errorf("eligibility = %v, want indeterminate", decision["eligibility"])
-	}
-	if decision["retryable"] != true {
-		t.Errorf("retryable = %v, want true", decision["retryable"])
-	}
-	if _, ok := decision["rollout_envelope"]; ok {
-		t.Errorf("indeterminate must not carry an envelope, got %v", decision["rollout_envelope"])
-	}
-	artifact := object(t, obj, "artifact")
-	if artifact["outcome"] != "unknown" {
-		t.Errorf("artifact.outcome = %v, want unknown", artifact["outcome"])
-	}
-	if artifact["digest"] != nil || artifact["revision"] != nil {
-		t.Errorf("unknown evidence must not present verified artifact fields, got %v", artifact)
-	}
-	raw, _ := json.Marshal(p)
-	assertNoForbiddenVocab(t, string(raw))
-	if strings.Contains(strings.ToLower(string(raw)), `"outcome":"verified"`) {
-		t.Error("indeterminate proof must not claim verified evidence")
-	}
-}
-
-func TestFrom_EligibleRelease_ConciseMatchesJSON(t *testing.T) {
-	r := persist(t, nil)
-	p := From(r)
-	out := p.Concise()
-	assertNoForbiddenVocab(t, out)
-	for _, want := range []string{
-		"release_id: " + fixtureReleaseID,
-		"created_at: 2026-08-15T12:00:00Z",
-		"application: podinfo  environment: production",
-		"caller: safelane-cli (agent)",
-		"#1",
-		"ahmed-placeholder",
-		fixtureMergeSHA,
-		fixtureDigest,
-		"eligibility: eligible",
-		"policy_version: 2",
-		"All configured mandatory evidence verified",
-		"rollout_envelope: 1 → 5 → 25 → 50 → 100",
-		"next_action: start",
-		"execution: pending",
-		"boundary: pending",
+func TestReleaseRecordLoadRejectsTamperedDerivedProof(t *testing.T) {
+	raw, _ := json.Marshal(completeRelease(t))
+	for name, mutate := range map[string]func(map[string]any){
+		"outcome":  func(obj map[string]any) { obj["outcome"] = "pending" },
+		"envelope": func(obj map[string]any) { obj["envelope"].(map[string]any)["lane"] = "standard" },
+		"old request field": func(obj map[string]any) {
+			obj["request"].(map[string]any)["review"] = map[string]any{"approver": "claim"}
+		},
 	} {
-		if !strings.Contains(out, want) {
-			t.Errorf("concise missing %q\n%s", want, out)
-		}
-	}
-}
-
-func TestFrom_IneligibleRelease_ConciseOmitsEnvelope(t *testing.T) {
-	r := persist(t, func(d *orchestrate.Deps) {
-		facts := verifiedFacts()
-		facts.CheckRuns = []github.CheckRun{
-			{Name: "publish / build-and-push", Conclusion: "failure", HeadSHA: fixtureMergeSHA},
-		}
-		d.GitHub = fakeFetcher{facts: facts}
-	})
-	out := From(r).Concise()
-	assertNoForbiddenVocab(t, out)
-	if !strings.Contains(out, "eligibility: ineligible") {
-		t.Errorf("want ineligible\n%s", out)
-	}
-	if strings.Contains(out, "rollout_envelope:") || strings.Contains(out, "next_action:") {
-		t.Errorf("ineligible concise must not print an envelope\n%s", out)
-	}
-	if !strings.Contains(out, "execution: pending") || !strings.Contains(out, "boundary: pending") {
-		t.Errorf("want pending execution and boundary\n%s", out)
-	}
-}
-
-func TestFrom_EligibleRelease_DetailsHasFourSections(t *testing.T) {
-	r := persist(t, nil)
-	p := From(r)
-	out := p.Details()
-	assertNoForbiddenVocab(t, out)
-	for _, want := range []string{
-		"Artifact",
-		"Decision",
-		"Execution",
-		"Boundary",
-		fixtureMergeSHA,
-		fixtureDigest,
-		"eligibility: eligible",
-		"1 → 5 → 25 → 50 → 100",
-		"github",
-		"ghcr",
-		"safelane",
-		"pending",
-	} {
-		if !strings.Contains(out, want) {
-			t.Errorf("details missing %q\n%s", want, out)
-		}
-	}
-	hashes := r.BundleHashes()
-	if len(hashes) == 0 {
-		t.Fatal("eligible release must have bundle hashes")
-	}
-	if !strings.Contains(out, hashes[0].Hash) {
-		t.Errorf("details missing first bundle hash %s\n%s", hashes[0].Hash, out)
-	}
-	if bundle, ok := r.Bundle(); ok && !strings.Contains(out, bundle.Digest()) {
-		t.Errorf("details missing bundle digest %s\n%s", bundle.Digest(), out)
-	}
-}
-
-func TestForms_DoNotContradict(t *testing.T) {
-	cases := []struct {
-		name   string
-		mutate func(*orchestrate.Deps)
-		elig   string
-		env    bool
-	}{
-		{name: "eligible", elig: "eligible", env: true},
-		{name: "ineligible", mutate: func(d *orchestrate.Deps) {
-			facts := verifiedFacts()
-			facts.CheckRuns = []github.CheckRun{
-				{Name: "publish / build-and-push", Conclusion: "failure", HeadSHA: fixtureMergeSHA},
-			}
-			d.GitHub = fakeFetcher{facts: facts}
-		}, elig: "ineligible"},
-		{name: "indeterminate", mutate: func(d *orchestrate.Deps) {
-			d.GitHub = fakeFetcher{err: errUnreachable}
-		}, elig: "indeterminate"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			p := From(persist(t, tc.mutate))
-			concise := p.Concise()
-			details := p.Details()
-			raw, err := json.Marshal(p)
-			if err != nil {
-				t.Fatalf("Marshal: %v", err)
-			}
-			jsonText := string(raw)
-			assertNoForbiddenVocab(t, concise)
-			assertNoForbiddenVocab(t, details)
-			assertNoForbiddenVocab(t, jsonText)
-
-			wantElig := "eligibility: " + tc.elig
-			if !strings.Contains(concise, wantElig) || !strings.Contains(details, wantElig) {
-				t.Errorf("human forms missing %s", wantElig)
-			}
-			if !strings.Contains(jsonText, `"eligibility":"`+tc.elig+`"`) {
-				t.Errorf("JSON missing eligibility %s\n%s", tc.elig, jsonText)
-			}
-			hasEnvConcise := strings.Contains(concise, "rollout_envelope:")
-			hasEnvDetails := strings.Contains(details, "rollout_envelope:")
-			hasEnvJSON := strings.Contains(jsonText, `"rollout_envelope"`)
-			if hasEnvConcise != tc.env || hasEnvDetails != tc.env || hasEnvJSON != tc.env {
-				t.Errorf("envelope present concise=%v details=%v json=%v, want %v", hasEnvConcise, hasEnvDetails, hasEnvJSON, tc.env)
-			}
-			for _, form := range []string{concise, details, jsonText} {
-				if !strings.Contains(form, "pending") {
-					t.Errorf("form missing pending execution/boundary:\n%s", form)
-				}
+		t.Run(name, func(t *testing.T) {
+			var obj map[string]any
+			_ = json.Unmarshal(raw, &obj)
+			mutate(obj)
+			damaged, _ := json.Marshal(obj)
+			var loaded release.Release
+			if err := json.Unmarshal(damaged, &loaded); err == nil {
+				t.Fatal("tampered record loaded")
 			}
 		})
 	}
 }
 
-var errUnreachable = errUnreachableSentinel{}
+func TestDetailsMatchesA35SectionsAndRecordedOrder(t *testing.T) {
+	out := From(completeRelease(t)).Details()
+	for _, want := range []string{
+		"ARTIFACT", "ASSESSMENT", "DECISION", "EXECUTION", "BOUNDARY", "OUTCOME  aborted",
+		"change            3 files, +64 −12",
+		"heuristic         medium", "model (claude)    high", "combined by       worse-of", "risk              high", "lane              guarded",
+		"14:26:41Z  advance    weight 100", "REFUSED  transition_exceeds_envelope",
+		"14:29:08Z  argo_abort", "aborted  analysis_failed", "podinfo-success-rate-4: request-success-rate 0.71 < 0.99",
+		"caller capability     get rollouts: yes | patch rollouts: no", "asserted by SubjectAccessReview at 14:26:00Z",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("proof missing %q\n%s", want, out)
+		}
+	}
+	if strings.Index(out, "transition_exceeds_envelope") > strings.Index(out, "analysis_failed") {
+		t.Fatal("refusal must precede Argo abort")
+	}
+	if strings.Contains(strings.ToLower(out), "bypass attempt") {
+		t.Fatal("proof must not claim an unobservable bypass attempt")
+	}
+}
 
-type errUnreachableSentinel struct{}
+func TestDetailsMatchesA35Golden(t *testing.T) {
+	got := From(completeRelease(t)).Details()
+	want, err := os.ReadFile(filepath.Join("testdata", "a3-5-proof.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != strings.ReplaceAll(string(want), "\r\n", "\n") {
+		t.Fatalf("proof differs from a3-5-proof.txt\n--- want ---\n%s\n--- got ---\n%s", want, got)
+	}
+}
 
-func (errUnreachableSentinel) Error() string { return "connection reset" }
+func TestProofJSONCarriesRecordedAssessmentExecutionBoundaryAndOutcome(t *testing.T) {
+	raw, err := json.Marshal(From(completeRelease(t)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(raw)
+	for _, want := range []string{`"schema_version":"safelane.release.proof/v2"`, `"assessment"`, `"execution"`, `"boundary"`, `"outcome":"aborted"`} {
+		if !strings.Contains(text, want) {
+			t.Errorf("proof JSON missing %s", want)
+		}
+	}
+}

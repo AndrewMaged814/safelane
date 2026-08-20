@@ -77,5 +77,11 @@ func (e ExecutionEntry) Validate() error {
 		errs = append(errs, Internal("invalid_execution_outcome",
 			fmt.Sprintf("%q is not a recognised execution outcome", e.Outcome)))
 	}
+	if e.Outcome == OutcomeRefused && e.ReasonCode == "" {
+		errs = append(errs, Internal("refusal_without_reason_code", "a refused transition must record its reason code"))
+	}
+	if e.Verb == VerbArgoAbort && e.ReasonCode == "" {
+		errs = append(errs, Internal("argo_abort_without_reason_code", "an Argo abort must record its reason code"))
+	}
 	return errs.OrNil()
 }

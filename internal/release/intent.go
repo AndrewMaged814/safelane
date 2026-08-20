@@ -53,3 +53,8 @@ func (in Intent) Validate() error {
 
 	return errs.OrNil()
 }
+
+// ValidateIdentity validates the exact caller snapshot persisted in a Release Record.
+// It is deliberately the same contract as intake: persistence must not acquire a
+// second, wider request shape.
+func (in Intent) ValidateIdentity() error { return in.Validate() }

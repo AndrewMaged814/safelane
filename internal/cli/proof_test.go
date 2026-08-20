@@ -194,9 +194,8 @@ func TestProofCommand_ConciseAndDetails_FromPersistedEligibleRelease(t *testing.
 		t.Fatalf("details: want ExitOK, got %d", code)
 	}
 	shared := []string{
-		"eligibility: eligible",
-		"rollout_envelope: 1 → 5 → 25 → 50 → 100",
-		"next_action: start",
+		"eligibility       eligible",
+		"envelope          1 → 5 → 25 → 50 → 100, 4 gates",
 		proofFixtureDigest,
 	}
 	for _, want := range shared {
@@ -207,10 +206,10 @@ func TestProofCommand_ConciseAndDetails_FromPersistedEligibleRelease(t *testing.
 			t.Errorf("details missing %q\n%s", want, details.String())
 		}
 	}
-	if !strings.Contains(concise.String(), "execution: pending") || !strings.Contains(concise.String(), "boundary: pending") {
+	if !strings.Contains(concise.String(), "EXECUTION\n  pending") || !strings.Contains(concise.String(), "BOUNDARY\n  pending") {
 		t.Errorf("concise missing pending sections\n%s", concise.String())
 	}
-	if !strings.Contains(details.String(), "Execution") || !strings.Contains(details.String(), "Boundary") || !strings.Contains(details.String(), "pending") {
+	if !strings.Contains(details.String(), "EXECUTION") || !strings.Contains(details.String(), "BOUNDARY") || !strings.Contains(details.String(), "pending") {
 		t.Errorf("details missing pending Execution/Boundary\n%s", details.String())
 	}
 }

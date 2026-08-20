@@ -6,141 +6,126 @@ import (
 	"strings"
 )
 
-// Concise is the 10–15 second live summary: identity, artifact evidence,
-// eligibility, static envelope when eligible, and pending execution/boundary.
-func (p Proof) Concise() string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "release_id: %s\n", p.releaseID)
-	fmt.Fprintf(&b, "created_at: %s\n", p.createdAt.UTC().Format("2006-01-02T15:04:05Z"))
-	fmt.Fprintf(&b, "application: %s  environment: %s\n", p.application, p.environment)
-	fmt.Fprintf(&b, "caller: %s (%s)\n", p.caller.Identity, p.caller.Kind)
-	writeArtifactConcise(&b, p.artifact)
-	fmt.Fprintf(&b, "eligibility: %s\n", p.decision.Eligibility)
-	fmt.Fprintf(&b, "policy_version: %s\n", p.decision.PolicyVersion)
-	fmt.Fprintf(&b, "reason: %s\n", p.decision.ReasonCode)
-	if p.decision.Message != "" {
-		fmt.Fprintf(&b, "  %s\n", p.decision.Message)
-	}
-	fmt.Fprintf(&b, "retryable: %v\n", p.decision.Retryable)
-	if p.decision.Envelope != nil {
-		fmt.Fprintf(&b, "rollout_envelope: %s\n", joinStages(p.decision.Envelope.Stages()))
-		fmt.Fprintf(&b, "next_action: %s\n", p.decision.Envelope.NextAction())
-	}
-	fmt.Fprintf(&b, "execution: %s\n", p.execution.Status)
-	fmt.Fprintf(&b, "boundary: %s\n", p.boundary.Status)
-	return b.String()
-}
+func (p Proof) Concise() string { return p.Details() }
 
-func writeArtifactConcise(b *strings.Builder, a Artifact) {
-	fmt.Fprintf(b, "artifact: %s\n", a.Outcome)
-	if a.PullRequest != nil {
-		reviewer := a.PullRequest.Reviewer
-		if reviewer == "" {
-			fmt.Fprintf(b, "  pull request: #%d\n", a.PullRequest.Number)
-		} else {
-			fmt.Fprintf(b, "  pull request: #%d (approved by %s)\n", a.PullRequest.Number, reviewer)
-		}
-	}
-	if a.Revision != "" {
-		fmt.Fprintf(b, "  merge: %s\n", a.Revision)
-	}
-	if a.Digest != "" {
-		fmt.Fprintf(b, "  digest: %s\n", a.Digest)
-	}
-	if a.Outcome != "verified" {
-		for _, reason := range a.Reasons {
-			fmt.Fprintf(b, "  - [%s] %s: %s\n", reason.Category, reason.Code, reason.Message)
-		}
-	}
-}
-
-// Details is the complete human-readable record: all four sections, with
-// Artifact and Decision populated and Execution/Boundary explicitly pending.
+// Details renders Appendix A3.5's sections using recorded values only.
 func (p Proof) Details() string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "release_id: %s\n", p.releaseID)
-	fmt.Fprintf(&b, "created_at: %s\n", p.createdAt.UTC().Format("2006-01-02T15:04:05Z"))
-	fmt.Fprintf(&b, "application: %s  environment: %s\n", p.application, p.environment)
-	fmt.Fprintf(&b, "caller: %s (%s)\n", p.caller.Identity, p.caller.Kind)
-	if p.caller.Tool != "" {
-		fmt.Fprintf(&b, "  tool: %s %s\n", p.caller.Tool, p.caller.ToolVersion)
-	}
-
-	fmt.Fprintln(&b)
-	fmt.Fprintln(&b, "Artifact")
-	fmt.Fprintf(&b, "  outcome: %s\n", p.artifact.Outcome)
-	fmt.Fprintf(&b, "  sources: %s\n", strings.Join(p.artifact.Sources, ", "))
-	fmt.Fprintf(&b, "  target: %s\n", p.artifact.Target)
+	fmt.Fprintf(&b, "Release Proof                             %s\n\n", p.releaseID)
+	fmt.Fprintln(&b, "ARTIFACT")
 	if p.artifact.Repository != "" {
-		fmt.Fprintf(&b, "  repository: %s\n", p.artifact.Repository)
-	}
-	if p.artifact.Revision != "" {
-		fmt.Fprintf(&b, "  merge: %s\n", p.artifact.Revision)
+		fmt.Fprintf(&b, "  repository        %s\n", p.artifact.Repository)
 	}
 	if pr := p.artifact.PullRequest; pr != nil {
-		fmt.Fprintf(&b, "  pull request: #%d %s\n", pr.Number, pr.URL)
-		fmt.Fprintf(&b, "    author: %s\n", pr.Author)
-		if pr.Reviewer != "" {
-			fmt.Fprintf(&b, "    reviewer: %s\n", pr.Reviewer)
-		}
-		fmt.Fprintf(&b, "    source: %s\n", pr.Source)
+		fmt.Fprintf(&b, "  pull request      #%d, merged into %s\n", pr.Number, pr.BaseBranch)
+	}
+	if p.artifact.Revision != "" {
+		fmt.Fprintf(&b, "  merge commit      %s\n", p.artifact.Revision)
 	}
 	if ci := p.artifact.CI; ci != nil {
-		fmt.Fprintf(&b, "  required check: %s (%s)\n", ci.Name, ci.Conclusion)
-		fmt.Fprintf(&b, "    source: %s\n", ci.Source)
+		fmt.Fprintf(&b, "  required check    %s (%s)\n", ci.Name, ci.Conclusion)
 	}
-	if p.artifact.Digest != "" {
-		fmt.Fprintf(&b, "  digest: %s\n", p.artifact.Digest)
-		fmt.Fprintf(&b, "    source: %s\n", p.artifact.DigestSource)
-	}
-	if tmpl := p.artifact.Template; tmpl != nil {
-		fmt.Fprintf(&b, "  template: %s %s\n", tmpl.Name, tmpl.Version)
-		fmt.Fprintf(&b, "    content_digest: %s\n", tmpl.ContentDigest)
-		fmt.Fprintf(&b, "    source: safelane\n")
+	if p.artifact.Image != "" {
+		fmt.Fprintf(&b, "  image             %s\n", p.artifact.Image)
 	}
 	if p.artifact.BundleDigest != "" {
-		fmt.Fprintf(&b, "  bundle_digest: %s\n", p.artifact.BundleDigest)
-		fmt.Fprintf(&b, "    source: safelane\n")
-	}
-	for _, h := range p.artifact.BundleHashes {
-		fmt.Fprintf(&b, "  hash %s: %s\n", h.Ref, h.Hash)
+		fmt.Fprintf(&b, "  bundle            %d resources, template digest %s\n", len(p.artifact.BundleHashes), p.artifact.BundleDigest)
 	}
 	for _, reason := range p.artifact.Reasons {
-		fmt.Fprintf(&b, "  - [%s] %s: %s\n", reason.Category, reason.Code, reason.Message)
+		fmt.Fprintf(&b, "  evidence          [%s] %s: %s\n", reason.Category, reason.Code, reason.Message)
 	}
 
-	fmt.Fprintln(&b)
-	fmt.Fprintln(&b, "Decision")
-	fmt.Fprintf(&b, "  eligibility: %s\n", p.decision.Eligibility)
-	fmt.Fprintf(&b, "  source: safelane\n")
-	fmt.Fprintf(&b, "  policy_version: %s\n", p.decision.PolicyVersion)
-	fmt.Fprintf(&b, "  reason: %s\n", p.decision.ReasonCode)
-	if p.decision.Message != "" {
-		fmt.Fprintf(&b, "    %s\n", p.decision.Message)
+	fmt.Fprintln(&b, "\nASSESSMENT")
+	if a := p.assessment; a != nil {
+		fmt.Fprintf(&b, "  change            %d files, +%d −%d\n", a.Facts.FilesChanged, a.Facts.Additions, a.Facts.Deletions)
+		if a.Facts.AgentAuthored {
+			fmt.Fprintf(&b, "  authored by       agent (%s)\n", a.Facts.AgentEvidence)
+		}
+		fmt.Fprintf(&b, "  heuristic         %s", a.Heuristic.Risk)
+		if len(a.Heuristic.Rules) > 0 {
+			fmt.Fprintf(&b, "   rules: %s", strings.Join(a.Heuristic.Rules, ", "))
+		}
+		fmt.Fprintln(&b)
+		fmt.Fprintf(&b, "  model (%s)    %s     %q\n", a.Model.Assessor, a.Model.Risk, a.Model.Rationale)
+		fmt.Fprintf(&b, "  combined by       %s\n  risk              %s\n  lane              %s\n", a.CombinedBy, a.Risk, a.Lane)
+	} else {
+		fmt.Fprintln(&b, "  unavailable")
 	}
-	fmt.Fprintf(&b, "  retryable: %v\n", p.decision.Retryable)
+
+	fmt.Fprintln(&b, "\nDECISION")
+	fmt.Fprintf(&b, "  eligibility       %s (policy %s)\n  evidence          %s\n", p.decision.Eligibility, p.decision.PolicyVersion, p.artifact.Outcome)
+	if p.artifact.Outcome == "verified" {
+		fmt.Fprintf(&b, "                    %d verified, %d failed, %d unavailable\n",
+			p.artifact.Evidence.Verified, p.artifact.Evidence.Failed, p.artifact.Evidence.Unavailable)
+	}
 	if p.decision.Envelope != nil {
-		fmt.Fprintf(&b, "  rollout_envelope: %s\n", joinStages(p.decision.Envelope.Stages()))
-		fmt.Fprintf(&b, "  next_action: %s\n", p.decision.Envelope.NextAction())
+		stages := p.decision.Envelope.Stages()
+		fmt.Fprintf(&b, "  envelope          %s, %d gates\n", joinStages(stages), len(stages)-1)
+		if p.artifact.BundleDigest != "" {
+			fmt.Fprintf(&b, "                    read from the hashed bundle, digest %s\n", p.artifact.BundleDigest)
+		}
 	}
 
-	fmt.Fprintln(&b)
-	fmt.Fprintln(&b, "Execution")
-	fmt.Fprintf(&b, "  status: %s\n", p.execution.Status)
+	fmt.Fprintln(&b, "\nEXECUTION")
+	if len(p.execution) == 0 {
+		fmt.Fprintln(&b, "  pending")
+	}
+	for _, e := range p.execution {
+		fmt.Fprintf(&b, "  %s  %-10s", e.At.UTC().Format("15:04:05Z"), e.Verb)
+		if e.RequestedWeight != 0 {
+			fmt.Fprintf(&b, " weight %-5d", e.RequestedWeight)
+		} else {
+			fmt.Fprint(&b, "              ")
+		}
+		outcome := string(e.Outcome)
+		if e.Outcome == "refused" {
+			outcome = "REFUSED"
+		}
+		fmt.Fprintf(&b, " %s", outcome)
+		if e.ReasonCode != "" {
+			fmt.Fprintf(&b, "  %s", e.ReasonCode)
+		}
+		fmt.Fprintln(&b)
+		if e.Analysis != "" || e.Detail != "" {
+			fmt.Fprintf(&b, "                         %s", e.Analysis)
+			if e.Analysis != "" && e.Detail != "" {
+				fmt.Fprint(&b, ": ")
+			}
+			fmt.Fprintln(&b, e.Detail)
+		}
+	}
 
-	fmt.Fprintln(&b)
-	fmt.Fprintln(&b, "Boundary")
-	fmt.Fprintf(&b, "  status: %s\n", p.boundary.Status)
+	fmt.Fprintln(&b, "\nBOUNDARY")
+	if p.boundary == nil {
+		fmt.Fprintln(&b, "  pending")
+	} else {
+		fmt.Fprintf(&b, "  controller identity   %s  (from controller.kubeconfig)\n  caller identity       %s\n", shortServiceAccount(p.boundary.ControllerIdentity), shortServiceAccount(p.boundary.CallerIdentity))
+		fmt.Fprintf(&b, "  caller capability     get rollouts: %s | patch rollouts: %s\n", yesNo(p.boundary.CallerCapability.GetRollouts), yesNo(p.boundary.CallerCapability.PatchRollouts))
+		fmt.Fprintf(&b, "                        asserted by %s at %s\n", p.boundary.CallerCapability.Method, p.boundary.CallerCapability.AssertedAt.UTC().Format("15:04:05Z"))
+	}
+	fmt.Fprintf(&b, "\nOUTCOME  %s\n", p.outcome)
 	return b.String()
+}
+
+func yesNo(v bool) string {
+	if v {
+		return "yes"
+	}
+	return "no"
+}
+
+func shortServiceAccount(identity string) string {
+	parts := strings.Split(identity, ":")
+	if len(parts) == 4 && parts[0] == "system" && parts[1] == "serviceaccount" {
+		return "sa/" + parts[3]
+	}
+	return identity
 }
 
 func joinStages(stages []int) string {
-	if len(stages) == 0 {
-		return ""
-	}
 	parts := make([]string, len(stages))
-	for i, s := range stages {
-		parts[i] = strconv.Itoa(s)
+	for i, stage := range stages {
+		parts[i] = strconv.Itoa(stage)
 	}
 	return strings.Join(parts, " → ")
 }

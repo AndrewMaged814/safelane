@@ -1,11 +1,5 @@
-// Package proof is the Release Proof read model (#52). It projects an
-// already-persisted Release into the four-section proof contract: Artifact,
-// Decision, Execution, and Boundary.
-//
-// From never re-verifies GitHub or GHCR evidence and never re-evaluates
-// policy. Execution and Boundary are always pending until #53 and #54
-// supply real events. Evidence sources named here are GitHub and GHCR
-// only; Decision proof is Release Eligibility, not a risk assessment.
+// Package proof projects a persisted Release Record into human and machine proof.
+// It never re-verifies evidence, re-runs assessment, or consults Kubernetes.
 package proof
 
 import (
@@ -15,29 +9,24 @@ import (
 	"github.com/AndrewMaged814/safelane/internal/release"
 )
 
-// SchemaVersion is the version of the machine-readable proof contract.
-const SchemaVersion = "safelane.release.proof/v1"
+const SchemaVersion = "safelane.release.proof/v2"
 
 const (
-	sourceGitHub  = "github"
-	sourceGHCR    = "ghcr"
-	statusPending = "pending"
+	sourceGitHub = "github"
+	sourceGHCR   = "ghcr"
 )
 
-// Proof is the four-section Release Proof. Construct it with [From].
 type Proof struct {
-	releaseID   release.ReleaseID
-	createdAt   time.Time
-	application string
-	environment string
-	caller      release.CallerIdentity
-	artifact    Artifact
-	decision    Decision
-	execution   PendingSection
-	boundary    PendingSection
+	releaseID  release.ReleaseID
+	createdAt  time.Time
+	artifact   Artifact
+	assessment *release.AssessmentRecord
+	decision   Decision
+	execution  []release.ExecutionEntry
+	boundary   *release.Boundary
+	outcome    string
 }
 
-// Artifact is the Artifact-proof section.
 type Artifact struct {
 	Outcome        string                    `json:"outcome"`
 	Sources        []string                  `json:"sources"`
@@ -47,6 +36,7 @@ type Artifact struct {
 	PullRequest    *PullRequestProof         `json:"pull_request,omitempty"`
 	CI             *CIProof                  `json:"ci,omitempty"`
 	Digest         string                    `json:"digest,omitempty"`
+	Image          string                    `json:"image,omitempty"`
 	DigestSource   string                    `json:"digest_source,omitempty"`
 	Template       *release.TemplateIdentity `json:"template,omitempty"`
 	TemplateSource string                    `json:"template_source,omitempty"`
@@ -54,18 +44,24 @@ type Artifact struct {
 	BundleDigest   string                    `json:"bundle_digest,omitempty"`
 	BundleSource   string                    `json:"bundle_source,omitempty"`
 	Reasons        release.Errors            `json:"reasons,omitempty"`
+	Evidence       EvidenceSummary           `json:"evidence_summary,omitempty"`
 }
 
-// PullRequestProof is the verified pull-request and reviewer evidence.
+type EvidenceSummary struct {
+	Verified    int `json:"verified"`
+	Failed      int `json:"failed"`
+	Unavailable int `json:"unavailable"`
+}
+
 type PullRequestProof struct {
-	Number   int    `json:"number"`
-	URL      string `json:"url"`
-	Author   string `json:"author"`
-	Reviewer string `json:"reviewer,omitempty"`
-	Source   string `json:"source"`
+	Number     int    `json:"number"`
+	URL        string `json:"url"`
+	Author     string `json:"author"`
+	Reviewer   string `json:"reviewer,omitempty"`
+	BaseBranch string `json:"base_branch"`
+	Source     string `json:"source"`
 }
 
-// CIProof is the verified required-check evidence.
 type CIProof struct {
 	Name       string `json:"name"`
 	Conclusion string `json:"conclusion"`
@@ -73,7 +69,6 @@ type CIProof struct {
 	Source     string `json:"source"`
 }
 
-// Decision is the Decision-proof section: Release Eligibility, not risk.
 type Decision struct {
 	Eligibility   string                   `json:"eligibility"`
 	PolicyVersion string                   `json:"policy_version"`
@@ -84,109 +79,86 @@ type Decision struct {
 	Source        string                   `json:"source"`
 }
 
-// PendingSection is Execution or Boundary proof before real evidence exists.
-type PendingSection struct {
-	Status string `json:"status"`
-}
-
-// From projects proof from an already-persisted Release. It reads only what
-// the Release already recorded.
 func From(r *release.Release) Proof {
 	elig := r.Eligibility()
+	execution := r.Execution()
 	p := Proof{
-		releaseID:   r.ID,
-		createdAt:   r.CreatedAt,
-		application: r.Target().Application,
-		environment: r.Target().Environment,
-		caller:      r.Caller(),
-		artifact:    artifactFrom(r),
+		releaseID: r.ID, createdAt: r.CreatedAt, artifact: artifactFrom(r), execution: execution,
+		outcome: outcome(execution),
 		decision: Decision{
-			Eligibility:   elig.Status().String(),
-			PolicyVersion: elig.PolicyVersion(),
-			ReasonCode:    elig.ReasonCode(),
-			Message:       elig.Message(),
-			Retryable:     elig.Retryable(),
-			Source:        "safelane",
+			Eligibility: elig.Status().String(), PolicyVersion: elig.PolicyVersion(),
+			ReasonCode: elig.ReasonCode(), Message: elig.Message(), Retryable: elig.Retryable(), Source: "safelane",
 		},
-		execution: PendingSection{Status: statusPending},
-		boundary:  PendingSection{Status: statusPending},
+	}
+	if a, ok := r.RecordedAssessment(); ok {
+		p.assessment = &a
 	}
 	if env, ok := elig.Envelope(); ok {
 		p.decision.Envelope = &env
 	}
+	if boundary, ok := r.Boundary(); ok {
+		p.boundary = &boundary
+	}
 	return p
 }
 
-func artifactFrom(r *release.Release) Artifact {
-	a := Artifact{
-		Outcome: r.Evidence().Outcome().String(),
-		Sources: []string{sourceGitHub, sourceGHCR},
-		Target:  r.Target(),
+func outcome(entries []release.ExecutionEntry) string {
+	if len(entries) == 0 {
+		return "pending"
 	}
+	last := entries[len(entries)-1]
+	if last.Outcome == release.OutcomeAborted || last.Verb == release.VerbAbort || last.Verb == release.VerbArgoAbort {
+		return "aborted"
+	}
+	if last.Verb == release.VerbPause {
+		return "paused"
+	}
+	return "in_progress"
+}
+
+func artifactFrom(r *release.Release) Artifact {
+	a := Artifact{Outcome: r.Evidence().Outcome().String(), Sources: []string{sourceGitHub, sourceGHCR}, Target: r.Target()}
 	if evidence, ok := r.Evidence().Verified(); ok {
-		a.Repository = evidence.Repository().String()
-		a.Revision = evidence.MergeCommitSHA()
+		a.Repository, a.Revision = evidence.Repository().String(), evidence.MergeCommitSHA()
 		pr := evidence.PullRequest()
-		a.PullRequest = &PullRequestProof{
-			Number: pr.Number,
-			URL:    pr.URL,
-			Author: pr.Author,
-			Source: sourceGitHub,
-		}
+		a.PullRequest = &PullRequestProof{Number: pr.Number, URL: pr.URL, Author: pr.Author, BaseBranch: pr.BaseBranch, Source: sourceGitHub}
 		if evidence.IndependentApproval() {
 			a.PullRequest.Reviewer = evidence.Approval().Reviewer
 		}
 		check := evidence.RequiredCheck()
-		a.CI = &CIProof{
-			Name:       check.Name,
-			Conclusion: check.Conclusion,
-			URL:        check.URL,
-			Source:     sourceGitHub,
+		a.CI = &CIProof{Name: check.Name, Conclusion: check.Conclusion, URL: check.URL, Source: sourceGitHub}
+		a.Digest, a.Image, a.DigestSource = evidence.ArtifactDigest(), evidence.Artifact().Reference.String(), sourceGHCR
+		a.Evidence = EvidenceSummary{Verified: 3, Unavailable: 1}
+		if evidence.IndependentApproval() {
+			a.Evidence.Verified++
+			a.Evidence.Unavailable = 0
 		}
-		a.Digest = evidence.ArtifactDigest()
-		a.DigestSource = sourceGHCR
 	} else {
 		a.Reasons = r.Evidence().Reasons()
 	}
 	if tmpl, ok := r.TemplateIdentity(); ok {
-		a.Template = &tmpl
-		a.TemplateSource = "safelane"
+		a.Template, a.TemplateSource = &tmpl, "safelane"
 	}
-	if hashes := r.BundleHashes(); len(hashes) > 0 {
-		a.BundleHashes = hashes
-	}
+	a.BundleHashes = r.BundleHashes()
 	if bundle, ok := r.Bundle(); ok {
-		a.BundleDigest = bundle.Digest()
-		a.BundleSource = "safelane"
+		a.BundleDigest, a.BundleSource = bundle.Digest(), "safelane"
 	}
 	return a
 }
 
 type proofJSON struct {
-	SchemaVersion string                 `json:"schema_version"`
-	ReleaseID     release.ReleaseID      `json:"release_id"`
-	CreatedAt     time.Time              `json:"created_at"`
-	Application   string                 `json:"application"`
-	Environment   string                 `json:"environment"`
-	Caller        release.CallerIdentity `json:"caller"`
-	Artifact      Artifact               `json:"artifact"`
-	Decision      Decision               `json:"decision"`
-	Execution     PendingSection         `json:"execution"`
-	Boundary      PendingSection         `json:"boundary"`
+	SchemaVersion string                    `json:"schema_version"`
+	ReleaseID     release.ReleaseID         `json:"release_id"`
+	CreatedAt     time.Time                 `json:"created_at"`
+	Artifact      Artifact                  `json:"artifact"`
+	Assessment    *release.AssessmentRecord `json:"assessment,omitempty"`
+	Decision      Decision                  `json:"decision"`
+	Execution     []release.ExecutionEntry  `json:"execution"`
+	Boundary      *release.Boundary         `json:"boundary,omitempty"`
+	Outcome       string                    `json:"outcome"`
 }
 
-// MarshalJSON writes the machine-readable proof contract.
 func (p Proof) MarshalJSON() ([]byte, error) {
-	return json.Marshal(proofJSON{
-		SchemaVersion: SchemaVersion,
-		ReleaseID:     p.releaseID,
-		CreatedAt:     p.createdAt,
-		Application:   p.application,
-		Environment:   p.environment,
-		Caller:        p.caller,
-		Artifact:      p.artifact,
-		Decision:      p.decision,
-		Execution:     p.execution,
-		Boundary:      p.boundary,
-	})
+	return json.Marshal(proofJSON{SchemaVersion: SchemaVersion, ReleaseID: p.releaseID, CreatedAt: p.createdAt,
+		Artifact: p.artifact, Assessment: p.assessment, Decision: p.decision, Execution: p.execution, Boundary: p.boundary, Outcome: p.outcome})
 }

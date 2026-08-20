@@ -1,0 +1,40 @@
+Release Proof                             rel_00000000000000000000000000
+
+ARTIFACT
+  repository        AndrewMaged814/podinfo
+  pull request      #4, merged into master
+  merge commit      4f0c1b9e7ac2d5386b1d9f4a5c8e2b7d3a6f0e91
+  required check    build-and-push (success)
+  image             ghcr.io/andrewmaged814/podinfo@sha256:3fbc1d9a7e42c8056d1f9b3e7a5c204d8e6b1f39a7c50d28e4b6f19a3c7d50e8
+  bundle            5 resources, template digest sha256:b97a88c46c66aea385f5497be3446891892eb320aff5bd42c1a2b0254f1f432b
+
+ASSESSMENT
+  change            3 files, +64 −12
+  authored by       agent (Co-authored-by: Claude <noreply@anthropic.com>)
+  heuristic         medium   rules: agent_authored, path:pkg/api/**
+  model (claude)    high     "error path returns before writing a status"
+  combined by       worse-of
+  risk              high
+  lane              guarded
+
+DECISION
+  eligibility       eligible (policy 2)
+  evidence          verified
+                    3 verified, 0 failed, 1 unavailable
+  envelope          1 → 5 → 25 → 50 → 100, 4 gates
+                    read from the hashed bundle, digest sha256:b97a88c46c66aea385f5497be3446891892eb320aff5bd42c1a2b0254f1f432b
+
+EXECUTION
+  14:26:03Z  start      weight 1     granted
+  14:26:41Z  advance    weight 100   REFUSED  transition_exceeds_envelope
+  14:26:48Z  advance    weight 5     granted
+  14:29:08Z  argo_abort               aborted  analysis_failed
+                         podinfo-success-rate-4: request-success-rate 0.71 < 0.99
+
+BOUNDARY
+  controller identity   sa/safelane-controller  (from controller.kubeconfig)
+  caller identity       sa/safelane-caller
+  caller capability     get rollouts: yes | patch rollouts: no
+                        asserted by SubjectAccessReview at 14:26:00Z
+
+OUTCOME  aborted

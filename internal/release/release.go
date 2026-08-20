@@ -1,8 +1,10 @@
 package release
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"time"
 
 	"github.com/AndrewMaged814/safelane/internal/assess"
@@ -14,7 +16,7 @@ import (
 // by *adding* sections - a new field on [Release] and a new key in its JSON - which is
 // a backwards-compatible change that does not need a new version. Bump this only if
 // identity, evidence or the artifact/target/bundle binding below ever changes shape.
-const RecordSchemaVersion = "safelane.release.record/v1"
+const RecordSchemaVersion = "safelane.release.record/v2"
 
 // ReleaseParams is the argument to [NewRelease].
 type ReleaseParams struct {
@@ -22,10 +24,19 @@ type ReleaseParams struct {
 	// eligibility is recorded, so it is an input here rather than something
 	// this constructor invents at an arbitrary point in the flow.
 	ID ReleaseID
-	// Request is the caller's submission, recorded verbatim. Keeping the claims lets
-	// proof show "claimed X, verified Y" instead of only the verified half, which is
-	// what makes a rejection legible.
+	// Intent is the caller's pruned request, recorded verbatim. Evidence collected by
+	// SafeLane belongs in Evidence, never back inside this snapshot.
+	Intent Intent
+	// Request is the transient evidence-collection shape retained for internal
+	// construction compatibility. New orchestration supplies Intent. It is converted
+	// to the pruned record request and is never persisted.
 	Request ReleaseRequest
+	// Target is resolved from operator configuration. It is separate from Request
+	// because cluster, namespace and application are not caller-authorized claims.
+	Target Target
+	// Caller is audit metadata owned by the transport, not part of the caller's
+	// release intent. It is persisted outside request.
+	Caller CallerIdentity
 	// Evidence is the verification outcome. A non-verified outcome is legitimate: the
 	// Release still gets a record, an ID and proof, and withholds authority.
 	Evidence EvidenceResult
@@ -39,11 +50,17 @@ type ReleaseParams struct {
 	// present only for an eligible release: assessment is a question about a
 	// change that may ship at all. The zero value means "not assessed".
 	Assessment assess.Assessment
+	// RecordedAssessment is used when rebuilding a persisted v2 record. Normal
+	// orchestration supplies Assessment and NewRelease prunes it into this shape.
+	RecordedAssessment AssessmentRecord
 	// Execution is the ordered history of what happened after eligibility:
 	// a granted start, a refused advance, Argo's own abort. It is present
 	// only for an eligible release -- nothing may start against a release
 	// that never earned a lane and an envelope. Nil means "never started".
 	Execution []ExecutionEntry
+	// Boundary is the live capability assertion recorded immediately before start.
+	// It is absent until a rollout is started.
+	Boundary Boundary
 	// CreatedAt is SafeLane's own timestamp, distinct from the caller's claimed
 	// metadata.submitted_at.
 	CreatedAt time.Time
@@ -60,39 +77,65 @@ type ReleaseParams struct {
 //     rendered-and-hashed bundle sitting on a release with unknown evidence;
 //   - the bundle's pinned digest must equal the verified artifact digest, so a bundle
 //     rendered for one artifact cannot be recorded against another;
-//   - the bundle's target must equal the request's target, so a bundle rendered for
+//   - the bundle's target must equal the operator-resolved target, so a bundle rendered for
 //     one cluster/namespace cannot be recorded against another;
 //   - the verified merge commit must equal the claimed merge commit, so evidence
 //     verified for a different change cannot be combined with this request.
 //
 // Together these are the "evidence from another change or target cannot be silently
 // combined" requirement, enforced at construction rather than checked by convention.
-//
-// # What is deliberately absent
-//
-// No execution or boundary evidence either; those are #53/#54, rendered by #52.
 type Release struct {
 	// ID is the stable release identity.
 	ID ReleaseID `json:"release_id"`
 	// CreatedAt is when SafeLane created the record.
 	CreatedAt time.Time `json:"created_at"`
 
-	request     ReleaseRequest
-	evidence    EvidenceResult
-	bundle      *RenderedBundle
-	eligibility Eligibility
-	assessment  assess.Assessment
-	execution   []ExecutionEntry
+	request          Intent
+	target           Target
+	caller           CallerIdentity
+	evidence         EvidenceResult
+	bundle           *RenderedBundle
+	eligibility      Eligibility
+	assessment       assess.Assessment
+	assessmentRecord AssessmentRecord
+	execution        []ExecutionEntry
+	boundary         Boundary
 }
 
 // NewRelease validates and assembles the Release record.
 func NewRelease(p ReleaseParams) (*Release, error) {
 	var errs Errors
+	request := p.Intent
+	target := p.Target
+	caller := p.Caller
+	legacyRequest := p.Request.SchemaVersion != ""
+	assessment := p.RecordedAssessment
+	if assessment.IsZero() && !p.Assessment.IsZero() {
+		assessment = assessmentRecordFrom(p.Assessment)
+	}
+	if request == (Intent{}) && legacyRequest {
+		request = Intent{
+			SchemaVersion: p.Request.SchemaVersion,
+			Repository:    p.Request.Source.Repository,
+			PullRequest:   p.Request.Review.PullRequestNumber,
+			Environment:   p.Request.Target.Environment,
+			Image:         p.Request.Artifact.ImageReference,
+		}
+		if target.IsZero() {
+			target = p.Request.Target
+		}
+		if caller.Identity == "" {
+			caller = p.Request.Caller
+		}
+	}
 
 	if err := p.ID.Validate(); err != nil {
 		errs = append(errs, flatten(err)...)
 	}
-	if err := p.Request.ValidateIdentity(); err != nil {
+	if err := request.ValidateIdentity(); err != nil {
+		errs = append(errs, flatten(err)...)
+	}
+	if err := target.Validate(); err != nil {
 		errs = append(errs, flatten(err)...)
 	}
 	if p.CreatedAt.IsZero() {
@@ -129,27 +172,29 @@ func NewRelease(p ReleaseParams) (*Release, error) {
 	}
 
 	if isVerified {
-		if verified.MergeCommitSHA() != p.Request.Source.MergeCommitSHA {
+		if legacyRequest && verified.MergeCommitSHA() != p.Request.Source.MergeCommitSHA {
 			errs = append(errs, FailedEvidenceError("source_revision_mismatch", "evidence.merge_commit_sha",
-				fmt.Sprintf("verified merge commit %s does not match the requested %s",
-					verified.MergeCommitSHA(), p.Request.Source.MergeCommitSHA),
-				"Verify evidence for the merge commit in this request. Evidence from another change cannot be combined with it."))
+				fmt.Sprintf("verified merge commit %s does not match the collected %s", verified.MergeCommitSHA(), p.Request.Source.MergeCommitSHA),
+				"Verify evidence for this pull request. Evidence from another change cannot be combined with it."))
 		}
-		if claimed, err := p.Request.ImageReference(); err == nil {
-			if verified.ArtifactDigest() != claimed.Digest {
-				errs = append(errs, FailedEvidenceError("artifact_mismatch", "evidence.artifact.reference.digest",
-					fmt.Sprintf("verified digest %s does not match the requested %s", verified.ArtifactDigest(), claimed.Digest),
-					"Verify the artifact named in this request. Evidence for another artifact cannot be combined with it."))
-			}
-			if verified.Artifact().Reference.Repository != claimed.Repository ||
-				verified.Artifact().Reference.Registry != claimed.Registry {
-				errs = append(errs, FailedEvidenceError("artifact_repository_mismatch", "evidence.artifact.reference",
-					fmt.Sprintf("verified artifact %s does not match the requested %s",
-						verified.Artifact().Reference, claimed),
-					"Resolve the digest in the repository named in the request."))
+		if request.Image != "" {
+			claimed, err := ParseImageReference(request.Image)
+			if err == nil {
+				if verified.ArtifactDigest() != claimed.Digest {
+					errs = append(errs, FailedEvidenceError("artifact_mismatch", "evidence.artifact.reference.digest",
+						fmt.Sprintf("verified digest %s does not match the requested %s", verified.ArtifactDigest(), claimed.Digest),
+						"Verify the artifact named in this request. Evidence for another artifact cannot be combined with it."))
+				}
+				if verified.Artifact().Reference.Repository != claimed.Repository ||
+					verified.Artifact().Reference.Registry != claimed.Registry {
+					errs = append(errs, FailedEvidenceError("artifact_repository_mismatch", "evidence.artifact.reference",
+						fmt.Sprintf("verified artifact %s does not match the requested %s",
+							verified.Artifact().Reference, claimed),
+						"Resolve the digest in the repository named in the request."))
+				}
 			}
 		}
-		if repo, err := p.Request.Repository(); err == nil && verified.Repository() != repo {
+		if repo, err := ParseRepositoryRef(request.Repository); err == nil && verified.Repository() != repo {
 			errs = append(errs, FailedEvidenceError("repository_mismatch", "evidence.repository",
 				fmt.Sprintf("verified repository %s does not match the requested %s", verified.Repository(), repo),
 				"Verify the pull request in the repository named in the request."))
@@ -161,13 +206,18 @@ func NewRelease(p ReleaseParams) (*Release, error) {
 	// would be a width decision attached to a change that never earned one.
 	// An ineligible or indeterminate release is not assessed at all -- no
 	// risk, no lane, no envelope.
-	if !p.Assessment.IsZero() && p.Eligibility.Status() != EligibilityEligible {
+	if !assessment.IsZero() && p.Eligibility.Status() != EligibilityEligible {
 		errs = append(errs, Internal("assessment_without_eligibility",
 			fmt.Sprintf("an assessment was attached to a %s release; assessment is a question about an eligible change", p.Eligibility.Status())))
 	}
-	if !p.Assessment.IsZero() && p.Assessment.Lane == "" {
+	if !assessment.IsZero() && assessment.Lane == "" {
 		errs = append(errs, Internal("assessment_without_lane",
 			"an assessment must record the lane its risk resolved to"))
+	}
+	if !assessment.IsZero() {
+		if err := assessment.Validate(); err != nil {
+			errs = append(errs, flatten(err)...)
+		}
 	}
 
 	// The execution invariant mirrors the assessment one just above: a
@@ -180,6 +230,19 @@ func NewRelease(p ReleaseParams) (*Release, error) {
 	for _, entry := range p.Execution {
 		if err := entry.Validate(); err != nil {
 			errs = append(errs, flatten(err)...)
+		}
+	}
+	if !p.Boundary.IsZero() {
+		if p.Eligibility.Status() != EligibilityEligible {
+			errs = append(errs, Internal("boundary_without_eligibility",
+				"a capability assertion may be attached only to an eligible release"))
+		}
+		if err := p.Boundary.Validate(); err != nil {
+			errs = append(errs, flatten(err)...)
+		}
+		if len(p.Execution) > 0 && p.Boundary.CallerCapability.AssertedAt.After(p.Execution[0].At) {
+			errs = append(errs, Internal("boundary_asserted_after_start",
+				"caller capability must be asserted no later than the start transition"))
 		}
 	}
 
@@ -199,9 +262,9 @@ func NewRelease(p ReleaseParams) (*Release, error) {
 					fmt.Sprintf("the bundle pins %s but the verified artifact is %s", p.Bundle.PinnedDigest(), verified.ArtifactDigest()),
 					"Render the bundle from the verified digest for this release."))
 			}
-			if p.Bundle.Target() != p.Request.Target {
+			if p.Bundle.Target() != target {
 				errs = append(errs, FailedEvidenceError("bundle_target_mismatch", "bundle.target",
-					fmt.Sprintf("the bundle was rendered for %s but the release targets %s", p.Bundle.Target(), p.Request.Target),
+					fmt.Sprintf("the bundle was rendered for %s but the release targets %s", p.Bundle.Target(), target),
 					"Render the bundle for this release's target. A bundle rendered for another target cannot be recorded here."))
 			}
 		}
@@ -212,12 +275,16 @@ func NewRelease(p ReleaseParams) (*Release, error) {
 	}
 
 	r := &Release{
-		ID:          p.ID,
-		CreatedAt:   p.CreatedAt.UTC(),
-		request:     p.Request,
-		evidence:    p.Evidence,
-		eligibility: p.Eligibility,
-		assessment:  p.Assessment,
+		ID:               p.ID,
+		CreatedAt:        p.CreatedAt.UTC(),
+		request:          request,
+		target:           target,
+		caller:           caller,
+		evidence:         p.Evidence,
+		eligibility:      p.Eligibility,
+		assessment:       p.Assessment,
+		assessmentRecord: assessment,
+		boundary:         p.Boundary,
 	}
 	if len(p.Execution) > 0 {
 		r.execution = append([]ExecutionEntry{}, p.Execution...)
@@ -230,17 +297,13 @@ func NewRelease(p ReleaseParams) (*Release, error) {
 }
 
 // Request returns the caller's submission as recorded.
-func (r *Release) Request() ReleaseRequest { return r.request }
+func (r *Release) Request() Intent { return r.request }
 
-// Target returns the release target. It is the request's target; there is one copy of
-// it on the record so it cannot drift.
-func (r *Release) Target() Target { return r.request.Target }
+// Target returns the operator-resolved release target, stored outside request.
+func (r *Release) Target() Target { return r.target }
 
-// Caller returns the submitting caller's identity.
-func (r *Release) Caller() CallerIdentity { return r.request.Caller }
-
-// RequestID returns the caller's correlation id.
-func (r *Release) RequestID() string { return r.request.Metadata.RequestID }
+// Caller returns transport-stamped audit metadata. It is not part of request.
+func (r *Release) Caller() CallerIdentity { return r.caller }
 
 // Evidence returns the verification outcome. Read the evidence itself through
 // [EvidenceResult.Verified], which yields nothing unless the outcome is verified.
@@ -291,6 +354,14 @@ func (r *Release) Assessment() (assess.Assessment, bool) {
 	return r.assessment, true
 }
 
+// RecordedAssessment returns Appendix C2's pruned, persisted assessment proof.
+func (r *Release) RecordedAssessment() (AssessmentRecord, bool) {
+	if r.assessmentRecord.IsZero() {
+		return AssessmentRecord{}, false
+	}
+	return r.assessmentRecord, true
+}
+
 // Execution returns the release's execution history, in order. It is empty
 // for a release that never started.
 func (r *Release) Execution() []ExecutionEntry {
@@ -298,6 +369,14 @@ func (r *Release) Execution() []ExecutionEntry {
 		return nil
 	}
 	return append([]ExecutionEntry{}, r.execution...)
+}
+
+// Boundary returns the recorded capability assertion. ok is false before start.
+func (r *Release) Boundary() (Boundary, bool) {
+	if r.boundary.IsZero() {
+		return Boundary{}, false
+	}
+	return r.boundary, true
 }
 
 // WithExecution returns a new Release with entry appended to the execution
@@ -313,14 +392,31 @@ func (r *Release) WithExecution(entry ExecutionEntry) (*Release, error) {
 		bundlePtr = &b
 	}
 	return NewRelease(ReleaseParams{
-		ID:          r.ID,
-		Request:     r.request,
-		Evidence:    r.evidence,
-		Bundle:      bundlePtr,
-		Eligibility: r.eligibility,
-		Assessment:  r.assessment,
-		Execution:   execution,
-		CreatedAt:   r.CreatedAt,
+		ID:                 r.ID,
+		Intent:             r.request,
+		Target:             r.target,
+		Caller:             r.caller,
+		Evidence:           r.evidence,
+		Bundle:             bundlePtr,
+		Eligibility:        r.eligibility,
+		Assessment:         r.assessment,
+		RecordedAssessment: r.assessmentRecord,
+		Execution:          execution,
+		Boundary:           r.boundary,
+		CreatedAt:          r.CreatedAt,
+	})
+}
+
+// WithBoundary returns a new Release carrying the live assertion made before start.
+func (r *Release) WithBoundary(boundary Boundary) (*Release, error) {
+	var bundlePtr *RenderedBundle
+	if b, ok := r.Bundle(); ok {
+		bundlePtr = &b
+	}
+	return NewRelease(ReleaseParams{
+		ID: r.ID, Intent: r.request, Target: r.target, Caller: r.caller, Evidence: r.evidence,
+		Bundle: bundlePtr, Eligibility: r.eligibility, Assessment: r.assessment, RecordedAssessment: r.assessmentRecord,
+		Execution: r.execution, Boundary: boundary, CreatedAt: r.CreatedAt,
 	})
 }
 
@@ -342,29 +438,48 @@ func (r *Release) BundleHashes() []ResourceHash {
 }
 
 type releaseJSON struct {
-	SchemaVersion string            `json:"schema_version"`
-	ID            ReleaseID         `json:"release_id"`
-	CreatedAt     time.Time         `json:"created_at"`
-	Request       ReleaseRequest    `json:"request"`
-	Evidence      EvidenceResult    `json:"evidence"`
-	Bundle        *RenderedBundle   `json:"bundle"`
-	Eligibility   Eligibility       `json:"eligibility"`
-	Assessment    assess.Assessment `json:"assessment,omitempty"`
-	Execution     []ExecutionEntry  `json:"execution,omitempty"`
+	SchemaVersion string           `json:"schema_version"`
+	ID            ReleaseID        `json:"release_id"`
+	CreatedAt     time.Time        `json:"created_at"`
+	Request       Intent           `json:"request"`
+	Target        Target           `json:"target"`
+	Caller        CallerIdentity   `json:"caller,omitempty"`
+	Evidence      EvidenceResult   `json:"evidence"`
+	Bundle        *RenderedBundle  `json:"bundle"`
+	Eligibility   Eligibility      `json:"eligibility"`
+	Assessment    AssessmentRecord `json:"assessment,omitempty"`
+	Execution     []ExecutionEntry `json:"execution,omitempty"`
+	Boundary      Boundary         `json:"boundary,omitempty"`
+	Envelope      *EnvelopeRecord  `json:"envelope,omitempty"`
+	Outcome       string           `json:"outcome"`
 }
 
 // MarshalJSON writes the persisted record.
 func (r *Release) MarshalJSON() ([]byte, error) {
+	var envelope *EnvelopeRecord
+	if assessment, ok := r.RecordedAssessment(); ok {
+		if bundle, hasBundle := r.Bundle(); hasBundle {
+			if rollout, hasEnvelope := r.eligibility.Envelope(); hasEnvelope {
+				record := NewEnvelopeRecord(assessment.Lane, rollout.Stages(), bundle.Digest())
+				envelope = &record
+			}
+		}
+	}
 	return json.Marshal(releaseJSON{
 		SchemaVersion: RecordSchemaVersion,
 		ID:            r.ID,
 		CreatedAt:     r.CreatedAt,
 		Request:       r.request,
+		Target:        r.target,
+		Caller:        r.caller,
 		Evidence:      r.evidence,
 		Bundle:        r.bundle,
 		Eligibility:   r.eligibility,
-		Assessment:    r.assessment,
+		Assessment:    r.assessmentRecord,
 		Execution:     r.execution,
+		Boundary:      r.boundary,
+		Envelope:      envelope,
+		Outcome:       outcomeFrom(r.execution),
 	})
 }
 
@@ -384,18 +499,50 @@ func (r *Release) UnmarshalJSON(data []byte) error {
 			fmt.Sprintf("record schema version %q is not supported", w.SchemaVersion),
 			fmt.Sprintf("This build reads %q records.", RecordSchemaVersion))
 	}
+	var raw struct {
+		Request json.RawMessage `json:"request"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw.Request))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&w.Request); err != nil {
+		return Malformed("malformed_record_request", "request",
+			"the stored request is not the pruned Release Request v2 shape",
+			"Regenerate the record; v1 evidence-dossier request fields are not accepted.").WithCause(err)
+	}
 	built, err := NewRelease(ReleaseParams{
-		ID:          w.ID,
-		Request:     w.Request,
-		Evidence:    w.Evidence,
-		Bundle:      w.Bundle,
-		Eligibility: w.Eligibility,
-		Assessment:  w.Assessment,
-		Execution:   w.Execution,
-		CreatedAt:   w.CreatedAt,
+		ID:                 w.ID,
+		Intent:             w.Request,
+		Target:             w.Target,
+		Caller:             w.Caller,
+		Evidence:           w.Evidence,
+		Bundle:             w.Bundle,
+		Eligibility:        w.Eligibility,
+		RecordedAssessment: w.Assessment,
+		Execution:          w.Execution,
+		Boundary:           w.Boundary,
+		CreatedAt:          w.CreatedAt,
 	})
 	if err != nil {
 		return err
+	}
+	var expectedEnvelope *EnvelopeRecord
+	if assessment, ok := built.RecordedAssessment(); ok {
+		if bundle, hasBundle := built.Bundle(); hasBundle {
+			if rollout, hasEnvelope := built.eligibility.Envelope(); hasEnvelope {
+				record := NewEnvelopeRecord(assessment.Lane, rollout.Stages(), bundle.Digest())
+				expectedEnvelope = &record
+			}
+		}
+	}
+	if !reflect.DeepEqual(w.Envelope, expectedEnvelope) {
+		return Internal("envelope_record_mismatch", "stored envelope does not match the assessed lane and hashed bundle")
+	}
+	if expected := outcomeFrom(w.Execution); w.Outcome != expected {
+		return Internal("outcome_record_mismatch",
+			fmt.Sprintf("stored outcome %q does not match execution outcome %q", w.Outcome, expected))
 	}
 	*r = *built
 	return nil

@@ -226,7 +226,9 @@ func Submit(ctx context.Context, intent release.Intent, d Deps) (Inspection, err
 
 	r, err := release.NewRelease(release.ReleaseParams{
 		ID:          id,
-		Request:     req,
+		Intent:      intent,
+		Target:      req.Target,
+		Caller:      d.caller(),
 		Evidence:    evidenceResult,
 		Bundle:      bundlePtr,
 		Eligibility: elig,

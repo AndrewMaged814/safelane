@@ -222,6 +222,24 @@ func startRollout(ctx context.Context, r *release.Release, ex *execute.Executor,
 		return startResult{}, release.Internal("empty_rollout_envelope", "the release's envelope has no weights")
 	}
 
+	// The capability assertion sits immediately before the first mutating
+	// kubectl call. Separate controller credentials are the signal that the
+	// two-identity boundary is configured; legacy ambient-context setups have
+	// no honest caller identity to assert and therefore record no boundary.
+	if ex.ControllerKubeconfig != "" || ex.ControllerContext != "" {
+		namespace := r.Target().Namespace
+		boundary, err := ex.AssertBoundary(ctx,
+			"system:serviceaccount:"+namespace+":safelane-controller",
+			"system:serviceaccount:"+namespace+":safelane-caller")
+		if err != nil {
+			return startResult{}, err
+		}
+		r, err = r.WithBoundary(boundary)
+		if err != nil {
+			return startResult{}, err
+		}
+	}
+
 	rows, err := ex.Apply(ctx, bundle)
 	if err != nil {
 		return startResult{}, err
