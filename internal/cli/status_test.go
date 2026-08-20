@@ -90,6 +90,67 @@ func TestStatusJSONReportsLaneRiskEnvelopeAndGate(t *testing.T) {
 	}
 }
 
+func TestStatusReportsWhetherLiveStateBelongsToTheRelease(t *testing.T) {
+	r := fastLaneStarted(t)
+	bundle, ok := r.Bundle()
+	if !ok {
+		t.Fatal("test release has no bundle")
+	}
+
+	matched := buildStatusReport(r, execute.Status{
+		State: execute.StateAtGate, ImageDigest: bundle.PinnedDigest(),
+		Generation: 8, ObservedGeneration: 8,
+	})
+	if matched.ReleaseMatch == nil || !*matched.ReleaseMatch {
+		t.Fatalf("release_match = %v, want true", matched.ReleaseMatch)
+	}
+
+	stale := buildStatusReport(r, execute.Status{
+		State: execute.StateAborted, ImageDigest: bundle.PinnedDigest(),
+		Generation: 8, ObservedGeneration: 7,
+	})
+	if stale.ReleaseMatch == nil || *stale.ReleaseMatch {
+		t.Fatalf("release_match = %v, want false for an unobserved generation", stale.ReleaseMatch)
+	}
+}
+
+func TestStatusJSONIncludesFailedAnalysisMeasurement(t *testing.T) {
+	r := fastLaneStarted(t)
+	projectFile, storeDir := statusRuntime(t, r)
+	q := &queueRunner{}
+	q.enqueue(`{"status":{"phase":"Degraded","abort":true,"canary":`+
+		`{"currentBackgroundAnalysisRunStatus":{"name":"podinfo-abc-2","status":"Failed"}}}}`, nil)
+	q.enqueue(`{"status":{"phase":"Failed","metricResults":[{"name":"request-success-rate",`+
+		`"count":2,"successful":0,"measurements":[{"value":"[0.74]"}]}]},`+
+		`"spec":{"metrics":[{"name":"request-success-rate",`+
+		`"successCondition":"len(result) > 0 && result[0] >= 0.99","failureLimit":1}]}}`, nil)
+
+	originalNewExecutor := newExecutor
+	t.Cleanup(func() { newExecutor = originalNewExecutor })
+	newExecutor = func(cfg execute.Config) *execute.Executor {
+		ex := execute.New(cfg)
+		ex.Run = q.run
+		return ex
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := runStatus(context.Background(), []string{
+		string(r.ID), "--json", "--project", projectFile, "--store-dir", storeDir,
+	}, &stdout, &stderr, ".", "", time.Now)
+	if code != ExitOK {
+		t.Fatalf("status exit = %d, stderr: %s", code, stderr.String())
+	}
+	var got statusReport
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.AnalysisRun != "podinfo-abc-2" || got.AnalysisPhase != "Failed" ||
+		got.AnalysisMetric != "request-success-rate" || got.AnalysisMeasured == nil || *got.AnalysisMeasured != 0.74 ||
+		got.AnalysisCondition != ">= 0.99" || got.AnalysisCount != 2 || got.AnalysisFailureLimit != 1 {
+		t.Fatalf("analysis diagnostics = %+v", got)
+	}
+}
+
 func TestStatusListUsesStoredRecordOnlyAndFormatsStalledDuration(t *testing.T) {
 	r := fastLaneStarted(t)
 	projectFile, storeDir := statusRuntime(t, r)

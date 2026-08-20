@@ -110,13 +110,31 @@ func runStatus(ctx context.Context, args []string, stdout, stderr io.Writer, roo
 		fmt.Fprintf(stderr, "safelane status: %v\n", err)
 		return ExitFail
 	}
-	ex := newExecutor(execute.Config{Namespace: cfg.Target.Namespace, Rollout: cfg.Target.Rollout})
+	controllerKubeconfig, controllerContext := paths.controllerCredentials("", "")
+	ex := newExecutor(execute.Config{
+		Namespace: cfg.Target.Namespace, Rollout: cfg.Target.Rollout,
+		ControllerKubeconfig: controllerKubeconfig, ControllerContext: controllerContext,
+	})
 	live, err := ex.GetStatus(ctx)
 	if err != nil {
 		printRolloutRejection(stderr, err)
 		return ExitFail
 	}
 	report := buildStatusReport(r, live)
+	if live.AnalysisRunName != "" {
+		run, analysisErr := ex.GetAnalysisRun(ctx, live.AnalysisRunName)
+		if analysisErr != nil {
+			report.AnalysisDetailError = analysisErr.Error()
+		} else {
+			report.AnalysisPhase = run.Phase
+			report.AnalysisMetric = run.Metric.Name
+			report.AnalysisMeasured = &run.Metric.Measured
+			report.AnalysisCondition = run.Metric.Condition
+			report.AnalysisCount = run.Metric.Count
+			report.AnalysisSuccessful = run.Metric.Successful
+			report.AnalysisFailureLimit = run.Metric.FailureLimit
+		}
+	}
 	if f.jsonOut {
 		if err := writeJSON(stdout, report); err != nil {
 			fmt.Fprintf(stderr, "safelane status: could not encode the result: %v\n", err)
@@ -129,18 +147,42 @@ func runStatus(ctx context.Context, args []string, stdout, stderr io.Writer, roo
 }
 
 type statusReport struct {
-	ReleaseID         release.ReleaseID `json:"release_id"`
-	State             execute.State     `json:"state"`
-	Lane              string            `json:"lane"`
-	Risk              string            `json:"risk"`
-	Weight            int               `json:"weight"`
-	NextAllowedWeight *int              `json:"next_allowed_weight"`
-	Gate              int               `json:"gate"`
-	GateCount         int               `json:"gate_count"`
+	ReleaseID            release.ReleaseID `json:"release_id"`
+	State                execute.State     `json:"state"`
+	Lane                 string            `json:"lane"`
+	Risk                 string            `json:"risk"`
+	Weight               int               `json:"weight"`
+	NextAllowedWeight    *int              `json:"next_allowed_weight"`
+	Gate                 int               `json:"gate"`
+	GateCount            int               `json:"gate_count"`
+	Generation           int64             `json:"generation,omitempty"`
+	ObservedGeneration   int64             `json:"observed_generation,omitempty"`
+	ObservedDigest       string            `json:"observed_digest,omitempty"`
+	ReleaseMatch         *bool             `json:"release_match,omitempty"`
+	ArgoMessage          string            `json:"argo_message,omitempty"`
+	AnalysisRun          string            `json:"analysis_run,omitempty"`
+	AnalysisPhase        string            `json:"analysis_phase,omitempty"`
+	AnalysisMetric       string            `json:"analysis_metric,omitempty"`
+	AnalysisMeasured     *float64          `json:"analysis_measured,omitempty"`
+	AnalysisCondition    string            `json:"analysis_condition,omitempty"`
+	AnalysisCount        int               `json:"analysis_count,omitempty"`
+	AnalysisSuccessful   int               `json:"analysis_successful,omitempty"`
+	AnalysisFailureLimit int               `json:"analysis_failure_limit,omitempty"`
+	AnalysisDetailError  string            `json:"analysis_detail_error,omitempty"`
 }
 
 func buildStatusReport(r *release.Release, live execute.Status) statusReport {
-	report := statusReport{ReleaseID: r.ID, State: live.State, Weight: live.CurrentWeight, Gate: live.Gate}
+	report := statusReport{
+		ReleaseID: r.ID, State: live.State, Weight: live.CurrentWeight, Gate: live.Gate,
+		Generation: live.Generation, ObservedGeneration: live.ObservedGeneration,
+		ObservedDigest: live.ImageDigest, ArgoMessage: live.Message,
+		AnalysisRun: live.AnalysisRunName, AnalysisPhase: live.AnalysisRunPhase,
+	}
+	if bundle, ok := r.Bundle(); ok && live.ImageDigest != "" {
+		match := bundle.PinnedDigest() == live.ImageDigest &&
+			(live.Generation == 0 || live.ObservedGeneration >= live.Generation)
+		report.ReleaseMatch = &match
+	}
 	if a, ok := r.RecordedAssessment(); ok {
 		report.Lane, report.Risk = a.Lane, fmt.Sprint(a.Risk)
 	}
@@ -177,6 +219,26 @@ func (r statusReport) Render() string {
 		fmt.Fprintf(&b, "next          %d%%\n", *r.NextAllowedWeight)
 	}
 	fmt.Fprintf(&b, "gate          %d of %d\n", r.Gate, r.GateCount)
+	if r.Generation > 0 {
+		fmt.Fprintf(&b, "generation    %d (observed %d)\n", r.Generation, r.ObservedGeneration)
+	}
+	if r.ReleaseMatch != nil {
+		fmt.Fprintf(&b, "release match %t\n", *r.ReleaseMatch)
+	}
+	if r.ArgoMessage != "" {
+		fmt.Fprintf(&b, "Argo message  %s\n", r.ArgoMessage)
+	}
+	if r.AnalysisRun != "" || r.AnalysisPhase != "" {
+		fmt.Fprintf(&b, "analysis      %s %s\n", r.AnalysisRun, r.AnalysisPhase)
+	}
+	if r.AnalysisMetric != "" && r.AnalysisMeasured != nil {
+		fmt.Fprintf(&b, "measurement   %s %.2f %s (%d/%d successful, failure limit %d)\n",
+			r.AnalysisMetric, *r.AnalysisMeasured, r.AnalysisCondition,
+			r.AnalysisSuccessful, r.AnalysisCount, r.AnalysisFailureLimit)
+	}
+	if r.AnalysisDetailError != "" {
+		fmt.Fprintf(&b, "measurement   unavailable: %s\n", r.AnalysisDetailError)
+	}
 	return b.String()
 }
 
@@ -231,6 +293,9 @@ func storedOpenStatus(r *release.Release) (openStatus, bool) {
 	last := history[len(history)-1]
 	view.stalledAt = last.At
 	if last.Outcome == release.OutcomeAborted || last.Verb == release.VerbAbort || last.Verb == release.VerbArgoAbort {
+		return openStatus{}, false
+	}
+	if last.Outcome == release.OutcomeFailed {
 		return openStatus{}, false
 	}
 	for _, entry := range history {

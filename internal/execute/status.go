@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -29,8 +30,15 @@ const (
 // Status is one read of the Rollout's status.
 type Status struct {
 	State State
+	// Generation is the Rollout spec generation returned by Kubernetes.
+	// ObservedGeneration is the latest generation Argo has reconciled. A
+	// terminal state is stale while ObservedGeneration trails Generation.
+	Generation         int64
+	ObservedGeneration int64
 	// Phase is Argo's raw phase for human diagnostics such as doctor.
 	Phase string
+	// Message is Argo's own human-readable explanation of the live phase.
+	Message string
 	// ImageDigest is the immutable digest observed in the Rollout pod template.
 	ImageDigest string
 	// CurrentWeight is the canary weight Argo has actually granted,
@@ -72,18 +80,21 @@ type Status struct {
 // package reads. Everything else in the document is ignored.
 type rolloutStatusDoc struct {
 	Metadata struct {
+		Generation  flexibleInt64 `json:"generation"`
 		Annotations struct {
 			Revision string `json:"rollout.argoproj.io/revision"`
 		} `json:"annotations"`
 	} `json:"metadata"`
 	Status struct {
-		Phase            string `json:"phase"`
-		Abort            bool   `json:"abort"`
-		StableRS         string `json:"stableRS"`
-		CurrentPodHash   string `json:"currentPodHash"`
-		CurrentStepIndex *int   `json:"currentStepIndex"`
-		PauseConditions  []any  `json:"pauseConditions"`
-		Canary           struct {
+		ObservedGeneration flexibleInt64 `json:"observedGeneration"`
+		Phase              string        `json:"phase"`
+		Message            string        `json:"message"`
+		Abort              bool          `json:"abort"`
+		StableRS           string        `json:"stableRS"`
+		CurrentPodHash     string        `json:"currentPodHash"`
+		CurrentStepIndex   *int          `json:"currentStepIndex"`
+		PauseConditions    []any         `json:"pauseConditions"`
+		Canary             struct {
 			CurrentStepAnalysisRunStatus struct {
 				Status string `json:"status"`
 			} `json:"currentStepAnalysisRunStatus"`
@@ -116,6 +127,24 @@ type rolloutStatusDoc struct {
 	} `json:"spec"`
 }
 
+// flexibleInt64 accepts both Kubernetes' ordinary JSON number encoding and
+// CRDs that expose an integer field as a quoted JSON string.
+type flexibleInt64 int64
+
+func (n *flexibleInt64) UnmarshalJSON(raw []byte) error {
+	value := strings.Trim(string(raw), `"`)
+	if value == "" || value == "null" {
+		*n = 0
+		return nil
+	}
+	parsed, err := strconv.ParseInt(value, 10, 64)
+	if err != nil {
+		return fmt.Errorf("parse integer %q: %w", value, err)
+	}
+	*n = flexibleInt64(parsed)
+	return nil
+}
+
 // GetStatus reads the Rollout's status. It is an unprivileged call
 // (Appendix C5: "caller identity is enough"), so it never carries the
 // controller kubeconfig/context flags.
@@ -136,15 +165,18 @@ func parseStatus(raw []byte) (Status, error) {
 	}
 	weight, stepsCompleted := currentWeight(doc)
 	return Status{
-		State:            classifyState(doc),
-		Phase:            doc.Status.Phase,
-		ImageDigest:      rolloutImageDigest(doc),
-		CurrentWeight:    weight,
-		Gate:             stepsCompleted,
-		AnalysisRunName:  doc.Status.Canary.CurrentBackgroundAnalysisRunStatus.Name,
-		AnalysisRunPhase: doc.Status.Canary.CurrentBackgroundAnalysisRunStatus.Status,
-		CurrentPodHash:   doc.Status.CurrentPodHash,
-		Revision:         doc.Metadata.Annotations.Revision,
+		State:              classifyState(doc),
+		Generation:         int64(doc.Metadata.Generation),
+		ObservedGeneration: int64(doc.Status.ObservedGeneration),
+		Phase:              doc.Status.Phase,
+		Message:            doc.Status.Message,
+		ImageDigest:        rolloutImageDigest(doc),
+		CurrentWeight:      weight,
+		Gate:               stepsCompleted,
+		AnalysisRunName:    doc.Status.Canary.CurrentBackgroundAnalysisRunStatus.Name,
+		AnalysisRunPhase:   doc.Status.Canary.CurrentBackgroundAnalysisRunStatus.Status,
+		CurrentPodHash:     doc.Status.CurrentPodHash,
+		Revision:           doc.Metadata.Annotations.Revision,
 	}, nil
 }
 
@@ -223,6 +255,17 @@ func (e *Executor) WaitForGate(ctx context.Context, timeout time.Duration, onTra
 		st, err := e.GetStatus(ctx)
 		if err != nil {
 			return Status{}, err
+		}
+		// kubectl apply updates metadata.generation before Argo has necessarily
+		// reconciled it. Ignore the preceding generation's terminal state until
+		// status.observedGeneration catches up; otherwise a new release can
+		// inherit an abort from the release before it.
+		if st.Generation > 0 && st.ObservedGeneration < st.Generation {
+			if !e.now().Before(deadline) {
+				return st, ErrGateTimeout
+			}
+			e.sleep(e.pollInterval())
+			continue
 		}
 		if first || st.State != last {
 			if onTransition != nil {

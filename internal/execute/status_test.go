@@ -71,6 +71,21 @@ func TestGetStatus_CurrentWeight_PrefersTheObservedTrafficWeight(t *testing.T) {
 	}
 }
 
+func TestGetStatus_ReportsGenerationAndArgoMessage(t *testing.T) {
+	fr := &fakeRunner{}
+	fr.enqueue(`{"metadata":{"generation":8},"status":{"observedGeneration":"7","phase":"Degraded",`+
+		`"abort":true,"message":"Rollout aborted update to revision 4"}}`, nil)
+	ex := newTestExecutor(fr)
+
+	st, err := ex.GetStatus(context.Background())
+	if err != nil {
+		t.Fatalf("GetStatus: %v", err)
+	}
+	if st.Generation != 8 || st.ObservedGeneration != 7 || st.Message != "Rollout aborted update to revision 4" {
+		t.Fatalf("status diagnostics = %+v", st)
+	}
+}
+
 func TestGetStatus_CurrentWeight_FallsBackToTheLastCompletedStep(t *testing.T) {
 	// No trafficRouting weight reported (no nginx/istio in play); fall
 	// back to scanning steps up to currentStepIndex for the last

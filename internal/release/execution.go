@@ -34,6 +34,7 @@ const (
 	OutcomeGranted ExecutionOutcome = "granted"
 	OutcomeRefused ExecutionOutcome = "refused"
 	OutcomeAborted ExecutionOutcome = "aborted"
+	OutcomeFailed  ExecutionOutcome = "failed"
 )
 
 // ExecutionEntry is one row of Appendix C2's execution[] array: one verb
@@ -72,13 +73,16 @@ func (e ExecutionEntry) Validate() error {
 			fmt.Sprintf("%q is not a recognised execution verb", e.Verb)))
 	}
 	switch e.Outcome {
-	case OutcomeGranted, OutcomeRefused, OutcomeAborted:
+	case OutcomeGranted, OutcomeRefused, OutcomeAborted, OutcomeFailed:
 	default:
 		errs = append(errs, Internal("invalid_execution_outcome",
 			fmt.Sprintf("%q is not a recognised execution outcome", e.Outcome)))
 	}
 	if e.Outcome == OutcomeRefused && e.ReasonCode == "" {
 		errs = append(errs, Internal("refusal_without_reason_code", "a refused transition must record its reason code"))
+	}
+	if e.Outcome == OutcomeFailed && e.ReasonCode == "" {
+		errs = append(errs, Internal("failed_execution_without_reason_code", "a failed transition must record its reason code"))
 	}
 	if e.Verb == VerbArgoAbort && e.ReasonCode == "" {
 		errs = append(errs, Internal("argo_abort_without_reason_code", "an Argo abort must record its reason code"))

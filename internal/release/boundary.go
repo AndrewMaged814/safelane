@@ -81,6 +81,9 @@ func outcomeFrom(execution []ExecutionEntry) string {
 	if last.Outcome == OutcomeAborted || last.Verb == VerbAbort || last.Verb == VerbArgoAbort {
 		return "aborted"
 	}
+	if last.Outcome == OutcomeFailed {
+		return "failed"
+	}
 	if last.Verb == VerbPause {
 		return "paused"
 	}

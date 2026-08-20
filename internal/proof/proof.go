@@ -111,6 +111,9 @@ func outcome(entries []release.ExecutionEntry, envelope *release.RolloutEnvelope
 	if last.Outcome == release.OutcomeAborted || last.Verb == release.VerbAbort || last.Verb == release.VerbArgoAbort {
 		return "aborted"
 	}
+	if last.Outcome == release.OutcomeFailed {
+		return "failed"
+	}
 	if last.Verb == release.VerbPause {
 		return "paused"
 	}

@@ -139,13 +139,24 @@ func runRolloutStart(ctx context.Context, args []string, stdout, stderr io.Write
 	})
 
 	result, err := startRollout(ctx, r, ex, f.timeout, time.Now)
+	if err != nil && result.release != nil {
+		if serr := st.Update(result.release); serr != nil {
+			fmt.Fprintf(stderr, "safelane rollout start: the attempted start could not be persisted: %v\n", serr)
+			return ExitFail
+		}
+	}
 	if errors.Is(err, execute.ErrGateTimeout) {
-		fmt.Fprintf(stdout, "\nThe promotion was sent, but the rollout did not reach its first gate within %s.\n"+
+		fmt.Fprintf(stdout, "\nThe bundle was applied, but the rollout did not reach its first gate within %s.\n"+
 			"SafeLane does not know whether it succeeded. Read status. Do not retry.\n", f.timeout)
 		return ExitTimeout
 	}
 	if err != nil {
-		printRolloutRejection(stderr, err)
+		if len(result.applyRows) > 0 {
+			fmt.Fprint(stdout, result.RenderFailure())
+			printRolloutFailure(stderr, err)
+		} else {
+			printRolloutRejection(stderr, err)
+		}
 		return ExitFail
 	}
 
@@ -193,6 +204,16 @@ func printRolloutRejection(w io.Writer, err error) {
 	fmt.Fprintf(w, "safelane rollout: %v\n", err)
 }
 
+func printRolloutFailure(w io.Writer, err error) {
+	fmt.Fprintln(w, "safelane rollout: failed after applying the Rendered Manifest Bundle:")
+	var single *release.Error
+	if errors.As(err, &single) {
+		printError(w, single)
+		return
+	}
+	fmt.Fprintf(w, "  %v\n", err)
+}
+
 // startResult is the whole `rollout start` outcome, before any of it is a
 // string: the release with its granted execution entry appended, plus the
 // observed apply and wait detail Appendix A2.2/A3.2 print.
@@ -201,6 +222,25 @@ type startResult struct {
 	applyRows         []execute.ApplyRow
 	progressingWeight int
 	grantedAt         time.Time
+	final             execute.Status
+}
+
+// RenderFailure makes the mutation boundary explicit. A start that reaches
+// this report was not a pre-apply refusal: the exact bundle was applied and
+// the terminal observation was persisted for proof.
+func (s startResult) RenderFailure() string {
+	var b strings.Builder
+	bundle, _ := s.release.Bundle()
+	fmt.Fprintln(&b)
+	fmt.Fprintln(&b, "Applied the Rendered Manifest Bundle before the rollout stopped:")
+	renderApplyRows(&b, s.applyRows, bundle.PinnedDigest())
+	fmt.Fprintf(&b, "Argo Rollouts: %s at generation %d (observed %d)\n",
+		s.final.State, s.final.Generation, s.final.ObservedGeneration)
+	if s.final.Message != "" {
+		fmt.Fprintf(&b, "Argo message: %s\n", s.final.Message)
+	}
+	fmt.Fprintf(&b, "The failed start was recorded. Run: safelane proof --details %s\n\n", s.release.ID)
+	return b.String()
 }
 
 // startRollout applies r's already-hashed bundle -- never a re-render --
@@ -242,8 +282,9 @@ func startRollout(ctx context.Context, r *release.Release, ex *execute.Executor,
 
 	rows, err := ex.Apply(ctx, bundle)
 	if err != nil {
-		return startResult{}, err
+		return startResult{release: r}, err
 	}
+	result := startResult{release: r, applyRows: rows}
 
 	var progressingWeight int
 	status, err := ex.WaitForGate(ctx, timeout, func(st execute.Status) {
@@ -252,12 +293,31 @@ func startRollout(ctx context.Context, r *release.Release, ex *execute.Executor,
 		}
 	})
 	if err != nil {
-		return startResult{}, err
+		return result, err
 	}
+	result.final = status
 	if status.State != execute.StateAtGate {
-		return startResult{}, release.Invalid("rollout_did_not_reach_a_gate", "",
+		outcome := release.OutcomeFailed
+		reasonCode := "rollout_did_not_reach_a_gate"
+		if status.State == execute.StateAborted || status.State == execute.StateDegraded {
+			outcome = release.OutcomeAborted
+			reasonCode = "rollout_" + string(status.State) + "_before_first_gate"
+		}
+		detail := fmt.Sprintf("Argo state %s at generation %d (observed %d)", status.State, status.Generation, status.ObservedGeneration)
+		if status.Message != "" {
+			detail += ": " + status.Message
+		}
+		updated, updateErr := r.WithExecution(release.ExecutionEntry{
+			At: now(), Verb: release.VerbStart, RequestedWeight: weights[0],
+			Outcome: outcome, ReasonCode: reasonCode, Detail: detail,
+		})
+		if updateErr != nil {
+			return result, updateErr
+		}
+		result.release = updated
+		return result, release.Invalid("rollout_did_not_reach_a_gate", "",
 			fmt.Sprintf("the rollout reached state %q instead of pausing at its first gate", status.State),
-			"Read `safelane status` for detail. This release did not start cleanly.")
+			"Read `safelane status <id>` and `safelane proof --details <id>`. This release did not start cleanly.")
 	}
 	if progressingWeight == 0 {
 		// The very first observed status was already at_gate -- a fast
@@ -279,9 +339,10 @@ func startRollout(ctx context.Context, r *release.Release, ex *execute.Executor,
 
 	return startResult{
 		release:           updated,
-		applyRows:         rows,
+		applyRows:         result.applyRows,
 		progressingWeight: progressingWeight,
 		grantedAt:         grantedAt,
+		final:             status,
 	}, nil
 }
 

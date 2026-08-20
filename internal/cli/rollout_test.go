@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -196,6 +197,107 @@ func TestRolloutStart_RiskyChange_MatchesA32(t *testing.T) {
 	entries := result.release.Execution()
 	if len(entries) != 1 || entries[0].RequestedWeight != 1 {
 		t.Errorf("execution history = %+v, want one granted start at weight 1", entries)
+	}
+}
+
+func TestRolloutStart_IgnoresAnAbortFromThePreviousObservedGeneration(t *testing.T) {
+	rel := inspectCase{
+		id:     "rel_01M0F3QD9NBV6JKC2WS8XA7TR4",
+		pr:     4,
+		github: fakeGitHub{facts: mergedFacts(4, riskyMergeSHA)},
+		ghcr:   fakeGHCR{digest: riskyDigest},
+		facts: fakeChangeFacts{facts: assess.Facts{
+			Files:          []assess.FileChange{{Path: "pkg/api/http/info.go", Additions: 9, Deletions: 2}},
+			TotalAdditions: 9, TotalDeletions: 2, MergeCommitSHA: riskyMergeSHA,
+		}},
+		model: assess.Verdict{Risk: assess.RiskHigh, Rationale: riskyRationale, Available: true, Assessor: "claude"},
+	}.buildRelease(t)
+
+	steps := `{"setWeight":1},{"pause":{}},{"setWeight":5},{"pause":{}}`
+	q := &queueRunner{}
+	q.enqueue(applyUnchangedFour+"rollout.argoproj.io/podinfo configured\n", nil)
+	// The apply advanced metadata.generation to 8, but Argo's first read still
+	// carries generation 7's abort. This is the live sequence that caused a new
+	// release to inherit the preceding release's terminal state.
+	q.enqueue(`{"metadata":{"generation":8},"status":{"observedGeneration":7,"phase":"Degraded","abort":true},`+
+		`"spec":{"strategy":{"canary":{"steps":[`+steps+`]}}}}`, nil)
+	q.enqueue(`{"metadata":{"generation":8},"status":{"observedGeneration":8,"phase":"Progressing"},`+
+		`"spec":{"strategy":{"canary":{"steps":[`+steps+`]}}}}`, nil)
+	q.enqueue(`{"metadata":{"generation":8},"status":{"observedGeneration":8,"phase":"Paused",`+
+		`"pauseConditions":[{"reason":"CanaryPauseStep"}],"currentStepIndex":0},`+
+		`"spec":{"strategy":{"canary":{"steps":[`+steps+`]}}}}`, nil)
+
+	ex := execute.New(execute.Config{Namespace: "podinfo", Rollout: "podinfo"})
+	ex.Run = q.run
+	ex.Sleep = func(time.Duration) {}
+	grantedAt := time.Date(2026, 8, 20, 14, 26, 3, 0, time.UTC)
+
+	result, err := startRollout(context.Background(), rel, ex, time.Minute, func() time.Time { return grantedAt })
+	if err != nil {
+		t.Fatalf("startRollout treated the previous generation's abort as this release's outcome: %v", err)
+	}
+	entries := result.release.Execution()
+	if len(entries) != 1 || entries[0].Verb != release.VerbStart || entries[0].Outcome != release.OutcomeGranted {
+		t.Fatalf("execution history = %+v, want one granted start", entries)
+	}
+}
+
+func TestRolloutStart_FreshAbortIsPersistedAndReportedAsPostApplyFailure(t *testing.T) {
+	rel := inspectCase{
+		id:     "rel_01M0F3QD9NBV6JKC2WS8XA7TR4",
+		pr:     4,
+		github: fakeGitHub{facts: mergedFacts(4, riskyMergeSHA)},
+		ghcr:   fakeGHCR{digest: riskyDigest},
+		facts: fakeChangeFacts{facts: assess.Facts{
+			Files:          []assess.FileChange{{Path: "pkg/api/http/info.go", Additions: 9, Deletions: 2}},
+			TotalAdditions: 9, TotalDeletions: 2, MergeCommitSHA: riskyMergeSHA,
+		}},
+		model: assess.Verdict{Risk: assess.RiskHigh, Rationale: riskyRationale, Available: true, Assessor: "claude"},
+	}.buildRelease(t)
+	projectFile, storeDir := statusRuntime(t, rel)
+
+	q := &queueRunner{}
+	q.enqueue(`{"status":{"userInfo":{"username":"system:serviceaccount:podinfo:safelane-controller"}}}`, nil)
+	q.enqueue("yes\n", nil)
+	q.enqueue(`{"status":{"userInfo":{"username":"system:serviceaccount:podinfo:safelane-caller"}}}`, nil)
+	q.enqueue("yes\n", nil)
+	q.enqueue("no\n", nil)
+	q.enqueue(applyUnchangedFour+"rollout.argoproj.io/podinfo configured\n", nil)
+	q.enqueue(`{"metadata":{"generation":8},"status":{"observedGeneration":8,"phase":"Degraded",`+
+		`"abort":true,"message":"Rollout aborted update to revision 4"}}`, nil)
+	originalNewExecutor := newExecutor
+	t.Cleanup(func() { newExecutor = originalNewExecutor })
+	newExecutor = func(cfg execute.Config) *execute.Executor {
+		ex := execute.New(cfg)
+		ex.Run = q.run
+		ex.Sleep = func(time.Duration) {}
+		return ex
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := runRolloutStart(context.Background(), []string{
+		"--project", projectFile, "--store-dir", storeDir, string(rel.ID),
+	}, &stdout, &stderr, ".", "")
+	if code != ExitFail {
+		t.Fatalf("exit = %d, want ExitFail\nstdout:\n%s\nstderr:\n%s", code, stdout.String(), stderr.String())
+	}
+	for _, want := range []string{"Applied the Rendered Manifest Bundle", "Argo Rollouts: aborted", "failed start was recorded"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Errorf("stdout missing %q:\n%s", want, stdout.String())
+		}
+	}
+	if !strings.Contains(stderr.String(), "failed after applying the Rendered Manifest Bundle") {
+		t.Errorf("stderr described a post-apply failure as a refusal:\n%s", stderr.String())
+	}
+
+	stored, err := (&store.FileStore{Dir: storeDir}).Load(rel.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries := stored.Execution()
+	if len(entries) != 1 || entries[0].Verb != release.VerbStart || entries[0].Outcome != release.OutcomeAborted ||
+		entries[0].ReasonCode != "rollout_aborted_before_first_gate" {
+		t.Fatalf("persisted execution = %+v", entries)
 	}
 }
 
