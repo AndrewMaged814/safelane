@@ -87,7 +87,7 @@ func From(r *release.Release) Proof {
 	}
 	p := Proof{
 		releaseID: r.ID, createdAt: r.CreatedAt, artifact: artifactFrom(r), execution: execution,
-		outcome: outcome(execution, envelope),
+		outcome: outcome(execution, envelope, r.State()),
 		decision: Decision{
 			Eligibility: elig.Status().String(), PolicyVersion: elig.PolicyVersion(),
 			ReasonCode: elig.ReasonCode(), Message: elig.Message(), Retryable: elig.Retryable(), Envelope: envelope, Source: "safelane",
@@ -102,7 +102,7 @@ func From(r *release.Release) Proof {
 	return p
 }
 
-func outcome(entries []release.ExecutionEntry, envelope *release.RolloutEnvelope) string {
+func outcome(entries []release.ExecutionEntry, envelope *release.RolloutEnvelope, state release.State) string {
 	if len(entries) == 0 {
 		return "pending"
 	}
@@ -115,6 +115,12 @@ func outcome(entries []release.ExecutionEntry, envelope *release.RolloutEnvelope
 	}
 	if last.Verb == release.VerbPause {
 		return "paused"
+	}
+	// A granted final weight means SafeLane accepted the transition request;
+	// it does not prove Argo reached a promoted/healthy terminal state. Only
+	// the persisted promoted state can support a complete proof.
+	if state != release.StatePromoted {
+		return "in_progress"
 	}
 	if envelope != nil && last.Outcome == release.OutcomeGranted {
 		stages := envelope.Stages()

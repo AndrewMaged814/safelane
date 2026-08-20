@@ -229,8 +229,21 @@ func TestOutcomeIsCompleteWhenFinalEnvelopeWeightWasGranted(t *testing.T) {
 		{At: time.Now(), Verb: release.VerbStart, RequestedWeight: 5, Outcome: release.OutcomeGranted},
 		{At: time.Now(), Verb: release.VerbAdvance, RequestedWeight: 100, Outcome: release.OutcomeGranted},
 	}
-	if got := outcome(entries, &envelope); got != "complete" {
+	if got := outcome(entries, &envelope, release.StatePromoted); got != "complete" {
 		t.Fatalf("outcome = %q, want complete", got)
+	}
+}
+
+func TestOutcomeFinalWeightAtGateIsInProgress(t *testing.T) {
+	envelope, err := release.NewRolloutEnvelope([]int{100}, "start")
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries := []release.ExecutionEntry{
+		{At: time.Now(), Verb: release.VerbStart, RequestedWeight: 100, Outcome: release.OutcomeGranted},
+	}
+	if got := outcome(entries, &envelope, release.StateAtGate); got != "in_progress" {
+		t.Fatalf("outcome = %q, want in_progress", got)
 	}
 }
 
