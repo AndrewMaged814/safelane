@@ -209,6 +209,16 @@ func buildStatusReport(r *release.Release, live execute.Status) statusReport {
 		stages := env.Stages()
 		if len(stages) > 0 {
 			report.GateCount = len(stages) - 1
+			// Argo's final promotion is implicit when the last configured
+			// step is a pause: after Promote it reports Healthy while its
+			// currentStepIndex/current canary weight can still read as the
+			// preceding 50% setWeight. SafeLane's public status must describe
+			// the completed envelope, not that internal step index.
+			if live.State == execute.StateComplete {
+				report.Weight = stages[len(stages)-1]
+				report.NextAllowedWeight = nil
+				return report
+			}
 		}
 		for _, weight := range stages {
 			if weight > live.CurrentWeight {

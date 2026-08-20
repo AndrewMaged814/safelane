@@ -91,6 +91,17 @@ func TestStatusJSONReportsLaneRiskEnvelopeAndGate(t *testing.T) {
 	}
 }
 
+func TestStatusCompleteNormalizesImplicitFinalPromotion(t *testing.T) {
+	r := fastLaneStarted(t)
+	report := buildStatusReport(r, execute.Status{State: execute.StateComplete, CurrentWeight: 50, Gate: 3})
+	if report.State != execute.StateComplete || report.Weight != 100 {
+		t.Fatalf("report = %+v, want complete at 100%%", report)
+	}
+	if report.NextAllowedWeight != nil {
+		t.Fatalf("next_allowed_weight = %v, want nil for a complete rollout", report.NextAllowedWeight)
+	}
+}
+
 func TestStatusReportsWhetherLiveStateBelongsToTheRelease(t *testing.T) {
 	r := fastLaneStarted(t)
 	bundle, ok := r.Bundle()
