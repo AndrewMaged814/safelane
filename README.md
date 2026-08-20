@@ -53,21 +53,21 @@ safelane setup
 ```
 
 SafeLane discovers the repository, CI check names, default branch, and image repository locally.
-It asks Claude for a project-shaped Release Policy and Release Template, shows the recommendation,
-and writes operator-owned configuration only after one approval. Claude receives a bounded, read-only
-snapshot and has no tools, so it cannot edit the application repository. If Claude is unavailable,
-SafeLane offers a conservative repository-derived proposal instead. Use `safelane setup --no-agent`
-to choose that fallback directly.
+It asks Claude for a project-shaped Release Policy and Release Template, shows a structured summary,
+and automatically writes the validated operator-owned configuration during this phase-one flow.
+Claude receives a bounded, read-only snapshot and has no tools, so it cannot edit the application
+repository. If Claude is unavailable or its recommendation is invalid, SafeLane offers a conservative
+repository-derived proposal instead. Use `safelane setup --no-agent` to choose that fallback directly.
 
 Setup writes under `~/.safelane/apps/<application>/`; it never creates `.safelane` files in the
 application repository and never provisions credentials or a cluster. Existing `project.yml` files
-are not overwritten. After approval, run:
+are not overwritten. After setup completes, run:
 
 ```bash
 safelane doctor
 ```
 
-`doctor` remains a deterministic readiness check. It validates the approved policy, Release Template,
+`doctor` remains a deterministic readiness check. It validates the generated policy, Release Template,
 GitHub/GHCR access, and target identities; it is not another conversational setup step. See the
 [setup guide](docs/setup.md) for the exact flow and fallback behavior.
 

@@ -7,12 +7,13 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/AndrewMaged814/safelane/internal/project"
 	setupengine "github.com/AndrewMaged814/safelane/internal/setup"
 )
 
-func TestSetupDiscoversRepoAndActivatesApprovedProposalOutsideAppRepo(t *testing.T) {
+func TestSetupDiscoversRepoAndActivatesProposalOutsideAppRepo(t *testing.T) {
 	root := t.TempDir()
 	home := t.TempDir()
 	userHome := t.TempDir()
@@ -36,7 +37,6 @@ func TestSetupDiscoversRepoAndActivatesApprovedProposalOutsideAppRepo(t *testing
 		recommend: func(context.Context, setupengine.Snapshot) (setupengine.Proposal, error) {
 			return proposal, nil
 		},
-		input: strings.NewReader("y\n"),
 	}).Run(context.Background(), nil, &stdout, &stderr)
 	if code != ExitOK {
 		t.Fatalf("setup exit = %d, stderr: %s\nstdout: %s", code, stderr.String(), stdout.String())
@@ -58,9 +58,17 @@ func TestSetupDiscoversRepoAndActivatesApprovedProposalOutsideAppRepo(t *testing
 	if !strings.Contains(stdout.String(), "setup ready") {
 		t.Fatalf("setup output missing completion: %s", stdout.String())
 	}
+	if strings.Contains(stdout.String(), "Apply this setup?") {
+		t.Fatalf("setup still asked for approval: %s", stdout.String())
+	}
+	for _, section := range []string{"Recommendation", "Policy:", "Release Template", "- Default lane"} {
+		if !strings.Contains(stdout.String(), section) {
+			t.Fatalf("setup output missing structured section %q: %s", section, stdout.String())
+		}
+	}
 }
 
-func TestSetupDeclinesWithoutWritingOperatorFiles(t *testing.T) {
+func TestSetupAutomaticallyActivatesWithoutApproval(t *testing.T) {
 	root := t.TempDir()
 	home := t.TempDir()
 	t.Setenv(project.HomeEnv, home)
@@ -70,13 +78,31 @@ func TestSetupDeclinesWithoutWritingOperatorFiles(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := setupCommand(root, setupDeps{
 		recommend: func(context.Context, setupengine.Snapshot) (setupengine.Proposal, error) { return proposal, nil },
-		input:     strings.NewReader("n\n"),
 	}).Run(context.Background(), nil, &stdout, &stderr)
-	if code != ExitFail {
-		t.Fatalf("setup decline exit = %d, want %d", code, ExitFail)
+	if code != ExitOK {
+		t.Fatalf("setup auto-apply exit = %d, stderr: %s\nstdout: %s", code, stderr.String(), stdout.String())
 	}
-	if _, err := os.Stat(filepath.Join(home, "apps")); !os.IsNotExist(err) {
-		t.Fatalf("declined setup wrote operator files: %v", err)
+	loc := project.ForApp(home, "safelane-demo-api")
+	if _, err := os.Stat(loc.ProjectFile); err != nil {
+		t.Fatalf("auto-apply did not write operator project: %v", err)
+	}
+	if strings.Contains(stdout.String(), "Apply this setup?") {
+		t.Fatalf("setup still asked for approval: %s", stdout.String())
+	}
+}
+
+func TestSetupRecommendationProgressUsesChangingStatuses(t *testing.T) {
+	var stdout bytes.Buffer
+	want := setupengine.ConservativeProposal(setupengine.Snapshot{Application: "app"})
+	_, err := recommendWithProgress(context.Background(), setupengine.Snapshot{}, func(context.Context, setupengine.Snapshot) (setupengine.Proposal, error) {
+		time.Sleep(1100 * time.Millisecond)
+		return want, nil
+	}, &stdout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout.String(), "Claude is") {
+		t.Fatalf("progress output did not show a changing Claude status: %q", stdout.String())
 	}
 }
 

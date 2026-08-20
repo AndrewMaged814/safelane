@@ -1,9 +1,7 @@
 package cli
 
 import (
-	"bufio"
 	"context"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -18,25 +16,23 @@ import (
 
 // SetupCommand is the one-command, repository-aware entry point for humans.
 // It discovers facts, asks a bounded agent for a proposal, and activates only
-// after one explicit approval. It never writes inside the application repo.
+// after validating the recommendation. It never writes inside the application repo.
 func SetupCommand(root string) Command {
 	return setupCommand(root, setupDeps{
 		recommend: func(ctx context.Context, snapshot setupengine.Snapshot) (setupengine.Proposal, error) {
 			return setupengine.Recommend(ctx, snapshot, setupengine.RealRunner)
 		},
-		input: os.Stdin,
 	})
 }
 
 type setupDeps struct {
 	recommend func(context.Context, setupengine.Snapshot) (setupengine.Proposal, error)
-	input     io.Reader
 }
 
 func setupCommand(root string, deps setupDeps) Command {
 	return Command{
 		Name:    "setup",
-		Summary: "discover the repository and create approved operator configuration",
+		Summary: "discover the repository and create operator configuration",
 		Run: func(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 			return runSetup(ctx, args, stdout, stderr, root, deps)
 		},
@@ -88,28 +84,18 @@ func runSetup(ctx context.Context, args []string, stdout, stderr io.Writer, root
 
 	fmt.Fprintln(stdout, "SafeLane setup")
 	fmt.Fprintln(stdout)
-	fmt.Fprintf(stdout, "  repository       %s\n", snapshot.Repository)
-	fmt.Fprintf(stdout, "  default branch   %s\n", snapshot.DefaultBranch)
-	fmt.Fprintf(stdout, "  image repository %s\n", snapshot.ImageRepository)
-	fmt.Fprintf(stdout, "  required checks  %s\n", strings.Join(proposal.RequiredChecks, ", "))
-	fmt.Fprintf(stdout, "  policy           recommended\n")
-	fmt.Fprintf(stdout, "  release template %d files recommended\n", len(proposal.TemplateFiles))
-	if proposal.Summary != "" {
-		fmt.Fprintf(stdout, "\n%s\n", proposal.Summary)
-	}
-	fmt.Fprintln(stdout)
-	fmt.Fprintln(stdout, "Apply this setup? [Y/n]")
-	reader := bufio.NewReader(deps.input)
-	answer, readErr := reader.ReadString('\n')
-	if readErr != nil && !errors.Is(readErr, io.EOF) {
-		fmt.Fprintf(stderr, "safelane setup: read approval: %v\n", readErr)
-		return ExitFail
-	}
-	answer = strings.ToLower(strings.TrimSpace(answer))
-	if answer != "" && answer != "y" && answer != "yes" {
-		fmt.Fprintln(stderr, "safelane setup: cancelled; no operator files were written")
-		return ExitFail
-	}
+	fmt.Fprintln(stdout, "Repository")
+	fmt.Fprintf(stdout, "  name:          %s\n", snapshot.Repository)
+	fmt.Fprintf(stdout, "  default branch: %s\n", snapshot.DefaultBranch)
+	fmt.Fprintf(stdout, "  image:         %s\n", snapshot.ImageRepository)
+	fmt.Fprintf(stdout, "  required CI:   %s\n", strings.Join(proposal.RequiredChecks, ", "))
+	fmt.Fprintln(stdout, "\nRecommendation")
+	fmt.Fprintf(stdout, "  Summary: %s\n", proposal.Summary)
+	fmt.Fprintln(stdout, "  Policy:")
+	printSetupBullets(stdout, proposal.PolicyHighlights)
+	fmt.Fprintf(stdout, "  Release Template (%d files):\n", len(proposal.TemplateFiles))
+	printSetupBullets(stdout, proposal.TemplateHighlights)
+	fmt.Fprintln(stdout, "\nApplying validated setup...")
 
 	home, err := project.Home()
 	if err != nil {
@@ -133,17 +119,31 @@ func runSetup(ctx context.Context, args []string, stdout, stderr io.Writer, root
 	return ExitOK
 }
 
+func printSetupBullets(stdout io.Writer, items []string) {
+	for _, item := range items {
+		fmt.Fprintf(stdout, "    - %s\n", item)
+	}
+}
+
 func recommendWithProgress(ctx context.Context, snapshot setupengine.Snapshot, recommend func(context.Context, setupengine.Snapshot) (setupengine.Proposal, error), stdout io.Writer) (setupengine.Proposal, error) {
 	done := make(chan struct{})
 	stopped := make(chan struct{})
+	statuses := []string{
+		"Claude is reading the repository shape",
+		"Claude is mapping CI checks to release evidence",
+		"Claude is tuning conservative policy floors",
+		"Claude is designing the rollout template",
+	}
 	go func() {
 		defer close(stopped)
-		ticker := time.NewTicker(700 * time.Millisecond)
+		ticker := time.NewTicker(900 * time.Millisecond)
 		defer ticker.Stop()
+		index := 0
 		for {
 			select {
 			case <-ticker.C:
-				fmt.Fprint(stdout, ".")
+				fmt.Fprintf(stdout, "\r  %-58s", statuses[index%len(statuses)])
+				index++
 			case <-done:
 				return
 			}
@@ -152,7 +152,7 @@ func recommendWithProgress(ctx context.Context, snapshot setupengine.Snapshot, r
 	proposal, err := recommend(ctx, snapshot)
 	close(done)
 	<-stopped
-	fmt.Fprintln(stdout)
+	fmt.Fprintln(stdout, "\r  Claude recommendation received.                              ")
 	return proposal, err
 }
 

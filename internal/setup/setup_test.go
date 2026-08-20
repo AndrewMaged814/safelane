@@ -54,6 +54,9 @@ func TestConservativeProposalIsProjectShapedAndValid(t *testing.T) {
 	if !strings.Contains(proposal.PolicyYAML, `glob: "Dockerfile"`) {
 		t.Fatal("fallback policy did not use repository-shaped Dockerfile rule")
 	}
+	if len(proposal.PolicyHighlights) == 0 || len(proposal.TemplateHighlights) == 0 {
+		t.Fatal("fallback proposal did not include structured recommendation highlights")
+	}
 }
 
 func TestRecommendExtractsStructuredResultNestedInStreamEvent(t *testing.T) {
@@ -69,7 +72,7 @@ func TestRecommendExtractsStructuredResultNestedInStreamEvent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Summary != want.Summary || len(got.TemplateFiles) != len(want.TemplateFiles) {
+	if got.Summary != want.Summary || len(got.TemplateFiles) != len(want.TemplateFiles) || len(got.PolicyHighlights) != len(want.PolicyHighlights) || len(got.TemplateHighlights) != len(want.TemplateHighlights) {
 		t.Fatalf("got %+v, want %+v", got, want)
 	}
 }
