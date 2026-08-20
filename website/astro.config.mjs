@@ -10,6 +10,9 @@ export default defineConfig({
     starlight({
       title: "SafeLane",
       customCss: ["./src/styles/custom.css"],
+      components: {
+        SiteTitle: "./src/components/SiteTitle.astro"
+      },
       social: {
         github: "https://github.com/AndrewMaged814/safelane"
       },

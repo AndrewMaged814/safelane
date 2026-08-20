@@ -6,6 +6,7 @@ const dist = new URL("../dist/", import.meta.url);
 const docs = new URL("../src/content/docs/", import.meta.url);
 const canonicalOrigin = "https://andrewmaged814.github.io";
 const canonicalBase = "/safelane";
+const canonicalHome = `${canonicalOrigin}${canonicalBase}/`;
 
 async function findHtmlFiles(directory) {
   const entries = await readdir(directory, { withFileTypes: true });
@@ -27,12 +28,21 @@ function decodeHtml(value) {
 
 const htmlFiles = await findHtmlFiles(fileURLToPath(dist));
 let diagramCount = 0;
+let siteTitleCount = 0;
 
 for (const file of htmlFiles) {
   const html = await readFile(file, "utf8");
 
   if (html.includes("qualityteam.me")) {
     throw new Error(`${file} contains the retired qualityteam.me domain`);
+  }
+
+  const siteTitle = html.match(/<a href="([^"]+)" class="site-title\b/);
+  if (siteTitle) {
+    siteTitleCount += 1;
+    if (siteTitle[1] !== canonicalHome) {
+      throw new Error(`${file} has a non-canonical site title link: ${siteTitle[1]}`);
+    }
   }
 
   for (const match of html.matchAll(/<pre\b(?=[^>]*\bclass="mermaid")[^>]*>([\s\S]*?)<\/pre>/g)) {
@@ -50,6 +60,10 @@ for (const file of htmlFiles) {
 const index = await readFile(new URL("index.html", dist), "utf8");
 if (!index.includes(`<link rel="canonical" href="${canonicalOrigin}${canonicalBase}"`)) {
   throw new Error("The generated homepage does not use the canonical GitHub Pages URL");
+}
+
+if (siteTitleCount !== htmlFiles.length) {
+  throw new Error(`Expected a site title link in ${htmlFiles.length} pages, found ${siteTitleCount}`);
 }
 
 const markdownFiles = await (async function findMarkdownFiles(directory) {
