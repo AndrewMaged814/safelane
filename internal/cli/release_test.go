@@ -138,7 +138,7 @@ func mustCLIRelease(t *testing.T, eligible bool) *release.Release {
 		SchemaVersion: release.RequestSchemaVersion,
 		Target:        release.Target{Application: "podinfo", Environment: "production", Cluster: "safelane-demo", Namespace: "podinfo"},
 		Source:        release.ClaimedSource{Repository: "AndrewMaged814/podinfo", BaseBranch: "main", MergeCommitSHA: cliMergeSHA},
-		Review:        release.ClaimedReview{PullRequestNumber: 1, PullRequestURL: "https://github.com/AndrewMaged814/podinfo/pull/1", Author: "AndrewMaged814", Approver: "ahmed"},
+		PullRequest:   release.ClaimedPullRequest{PullRequestNumber: 1, PullRequestURL: "https://github.com/AndrewMaged814/podinfo/pull/1", Author: "AndrewMaged814"},
 		CI:            release.ClaimedCI{Workflow: "publish", CheckName: "publish / build-and-push", RunID: 1},
 		Artifact:      release.ClaimedArtifact{ImageReference: "ghcr.io/andrewmaged814/podinfo@" + cliDigest},
 		Caller:        release.CallerIdentity{Identity: "codex-cli", Kind: release.CallerAgent},
@@ -155,8 +155,7 @@ func mustCLIRelease(t *testing.T, eligible bool) *release.Release {
 	if eligible {
 		ev, err := release.NewReleaseEvidence(release.EvidenceInput{
 			Repository:     release.RepositoryRef{Owner: "AndrewMaged814", Name: "podinfo"},
-			PullRequest:    release.VerifiedPullRequest{Number: 1, URL: req.Review.PullRequestURL, Author: "AndrewMaged814", BaseBranch: "main", MergedAt: now},
-			Approval:       release.VerifiedApproval{Reviewer: "ahmed", ApprovedAt: now},
+			PullRequest:    release.VerifiedPullRequest{Number: 1, URL: req.PullRequest.PullRequestURL, Author: "AndrewMaged814", BaseBranch: "main", MergedAt: now},
 			MergeCommitSHA: cliMergeSHA,
 			RequiredCheck:  release.VerifiedCheckRun{Name: "publish / build-and-push", HeadSHA: cliMergeSHA, Conclusion: release.CheckConclusionSuccess, CompletedAt: now},
 			Artifact:       release.VerifiedArtifact{Reference: release.ImageReference{Registry: "ghcr.io", Repository: "andrewmaged814/podinfo", Digest: cliDigest}, ObservedDigest: cliDigest, ResolvedAt: now},

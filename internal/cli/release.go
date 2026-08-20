@@ -155,7 +155,7 @@ func runRelease(ctx context.Context, args []string, stdout, stderr io.Writer, ro
 			observed.Release = existing
 			in := buildInspection(observed, cfg, pol, time.Now().UTC())
 			if observed.GitHub.Facts == nil {
-				in.checks = persistedEvidenceChecks(existing, cfg, pol)
+				in.checks = persistedEvidenceChecks(existing, cfg)
 			}
 			in.history = history
 			if existing.State().Active() {
@@ -385,16 +385,7 @@ func printSummary(w io.Writer, r *release.Release) {
 
 	if evidence, ok := r.Evidence().Verified(); ok {
 		fmt.Fprintf(w, "  source revision: %s\n", evidence.MergeCommitSHA())
-		// The approver is printed only when there is one. A policy that does
-		// not require independent approval leaves it empty, and "approved by
-		// ," is worse than saying nothing.
-		if approver := evidence.Approval().Reviewer; approver != "" {
-			fmt.Fprintf(w, "  pull request: #%d (approved by %s, independent of author: %v)\n",
-				evidence.PullRequest().Number, approver, evidence.IndependentApproval())
-		} else {
-			fmt.Fprintf(w, "  pull request: #%d (independent approval not required by this policy)\n",
-				evidence.PullRequest().Number)
-		}
+		fmt.Fprintf(w, "  pull request: #%d\n", evidence.PullRequest().Number)
 		fmt.Fprintf(w, "  required check: %s (%s)\n", evidence.RequiredCheck().Name, evidence.RequiredCheck().Conclusion)
 		fmt.Fprintf(w, "  artifact digest: %s\n", evidence.ArtifactDigest())
 	} else {

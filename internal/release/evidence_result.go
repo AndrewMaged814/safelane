@@ -25,11 +25,11 @@ const (
 	// EvidenceVerified means every required check passed and a [ReleaseEvidence]
 	// exists. This is the only outcome that carries evidence.
 	EvidenceVerified
-	// EvidenceMissing means required evidence does not exist: no approving review,
-	// no check run for the merge commit.
+	// EvidenceMissing means required evidence does not exist: no check run for
+	// the merge commit.
 	EvidenceMissing
 	// EvidenceFailed means required evidence exists and is negative: the check
-	// failed, the pull request is not merged, the approver is the author.
+	// failed, or the pull request is not merged.
 	EvidenceFailed
 )
 

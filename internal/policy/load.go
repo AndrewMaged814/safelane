@@ -16,11 +16,8 @@ import (
 // so it is not carried onto Policy, and yaml.Unmarshal ignores unknown
 // fields on Policy's side without complaint either way.
 type yamlPolicy struct {
-	Version               string `yaml:"version"`
-	IndependentPRApproval struct {
-		Required bool `yaml:"required"`
-	} `yaml:"independent_pr_approval"`
-	Lanes map[string]struct {
+	Version string `yaml:"version"`
+	Lanes   map[string]struct {
 		Weights []int `yaml:"weights"`
 	} `yaml:"lanes"`
 	RiskToLane  map[string]string `yaml:"risk_to_lane"`
@@ -71,11 +68,10 @@ func Load(path string) (Policy, error) {
 	}
 
 	p := Policy{
-		Version:                       y.Version,
-		IndependentPRApprovalRequired: y.IndependentPRApproval.Required,
-		Lanes:                         make(map[string]Lane, len(y.Lanes)),
-		RiskToLane:                    y.RiskToLane,
-		DefaultLane:                   y.DefaultLane,
+		Version:     y.Version,
+		Lanes:       make(map[string]Lane, len(y.Lanes)),
+		RiskToLane:  y.RiskToLane,
+		DefaultLane: y.DefaultLane,
 	}
 	for name, l := range y.Lanes {
 		p.Lanes[name] = Lane{Weights: l.Weights}

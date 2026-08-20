@@ -8,7 +8,6 @@ Failed
 Unavailable
   – Required publish check        skipped (no merge commit)
   – Immutable GHCR digest         skipped (no merge commit)
-  – Independent PR approval       not required by this policy
 
 Assessment
   not performed   an ineligible release receives no lane

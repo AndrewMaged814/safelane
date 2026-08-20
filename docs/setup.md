@@ -19,8 +19,7 @@ safelane setup
    are preserved: `merged_commit_on_default_branch`, `passing_publish_workflow`, and
    `immutable_ghcr_digest`.
 4. SafeLane shows a structured summary and automatically applies the validated setup. It writes files
-   under `~/.safelane/apps/<application>/` without an interactive approval prompt in this phase-one
-   flow; an explicit approval gate is planned for a later phase.
+   under `~/.safelane/apps/<application>/` and does not modify the application checkout.
 
 The setup command does not write `.safelane` files into the application repository. It also does not
 deploy anything. It creates the operator project record, policy, Release Template directory, and

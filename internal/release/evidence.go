@@ -21,18 +21,6 @@ type VerifiedPullRequest struct {
 	MergedAt   time.Time `json:"merged_at"`
 }
 
-// VerifiedApproval is an approving review SafeLane read from GitHub.
-//
-// There is no "approver is not the author" boolean here on purpose. A boolean can be
-// set to true by whoever builds the struct. Instead [NewReleaseEvidence] refuses to
-// construct evidence whose reviewer equals the pull request author. An independent
-// approval is required only when the Release Policy configures it; the evidence
-// value may omit approval when that check is off.
-type VerifiedApproval struct {
-	Reviewer   string    `json:"reviewer"`
-	ApprovedAt time.Time `json:"approved_at"`
-}
-
 // VerifiedCheckRun is a check run SafeLane read from GitHub.
 //
 // HeadSHA is the commit the check actually ran against. [NewReleaseEvidence] requires
@@ -66,7 +54,6 @@ type VerifiedArtifact struct {
 type EvidenceInput struct {
 	Repository     RepositoryRef
 	PullRequest    VerifiedPullRequest
-	Approval       VerifiedApproval
 	MergeCommitSHA string
 	RequiredCheck  VerifiedCheckRun
 	RequiredChecks []VerifiedCheckRun
@@ -92,7 +79,6 @@ type EvidenceInput struct {
 //   - repository, pull request, merge commit, required check and artifact
 //     are all present;
 //   - the merge commit SHA is a full 40-hex object id;
-//   - if an approving reviewer is recorded, they are not the pull request author;
 //   - the required check ran against the merge commit SHA, not the pull request head;
 //   - the required check concluded "success";
 //   - the artifact reference is an immutable sha256 digest, and the digest the
@@ -105,7 +91,6 @@ type ReleaseEvidence struct {
 	validated      bool
 	repository     RepositoryRef
 	pullRequest    VerifiedPullRequest
-	approval       VerifiedApproval
 	mergeCommitSHA string
 	requiredCheck  VerifiedCheckRun
 	requiredChecks []VerifiedCheckRun
@@ -129,13 +114,7 @@ func NewReleaseEvidence(in EvidenceInput) (ReleaseEvidence, error) {
 	}
 	if in.PullRequest.MergedAt.IsZero() {
 		errs = append(errs, FailedEvidenceError("pull_request_not_merged", "evidence.pull_request.merged_at",
-			"the pull request is not merged", "Merge the pull request. An unmerged change is not a reviewed change."))
-	}
-	if in.Approval.Reviewer != "" && in.PullRequest.Author != "" &&
-		strings.EqualFold(in.Approval.Reviewer, in.PullRequest.Author) {
-		errs = append(errs, FailedEvidenceError("self_approval", "evidence.approval.reviewer",
-			fmt.Sprintf("%q approved their own pull request", in.Approval.Reviewer),
-			"Obtain an approving review from a different account. Self-approval is not review evidence."))
+			"the pull request is not merged", "Merge the pull request. An unmerged change is not release evidence."))
 	}
 	if !IsCommitSHA(in.MergeCommitSHA) {
 		errs = append(errs, FailedEvidenceError("malformed_merge_commit_sha", "evidence.merge_commit_sha",
@@ -195,7 +174,6 @@ func NewReleaseEvidence(in EvidenceInput) (ReleaseEvidence, error) {
 		validated:      true,
 		repository:     in.Repository,
 		pullRequest:    in.PullRequest,
-		approval:       in.Approval,
 		mergeCommitSHA: in.MergeCommitSHA,
 		requiredCheck:  checks[0],
 		requiredChecks: append([]VerifiedCheckRun(nil), checks...),
@@ -209,9 +187,6 @@ func (e ReleaseEvidence) Repository() RepositoryRef { return e.repository }
 
 // PullRequest returns the verified merged pull request.
 func (e ReleaseEvidence) PullRequest() VerifiedPullRequest { return e.pullRequest }
-
-// Approval returns the verified approving review.
-func (e ReleaseEvidence) Approval() VerifiedApproval { return e.approval }
 
 // MergeCommitSHA returns the verified source revision: the merge commit on the base
 // branch. This, not the pull request head, is SafeLane's source identity.
@@ -233,12 +208,6 @@ func (e ReleaseEvidence) ArtifactDigest() string { return e.artifact.Reference.D
 // VerifiedAt returns when verification completed.
 func (e ReleaseEvidence) VerifiedAt() time.Time { return e.verifiedAt }
 
-// IndependentApproval reports whether a recorded approving reviewer differs from
-// the pull request author. It is false when no approval was recorded.
-func (e ReleaseEvidence) IndependentApproval() bool {
-	return e.validated && e.approval.Reviewer != "" && !strings.EqualFold(e.approval.Reviewer, e.pullRequest.Author)
-}
-
 // IsZero reports whether this is the unset zero value rather than verified evidence.
 func (e ReleaseEvidence) IsZero() bool { return !e.validated }
 
@@ -246,7 +215,6 @@ func (e ReleaseEvidence) IsZero() bool { return !e.validated }
 type evidenceJSON struct {
 	Repository     RepositoryRef       `json:"repository"`
 	PullRequest    VerifiedPullRequest `json:"pull_request"`
-	Approval       VerifiedApproval    `json:"approval"`
 	MergeCommitSHA string              `json:"merge_commit_sha"`
 	RequiredCheck  *VerifiedCheckRun   `json:"required_check,omitempty"`
 	RequiredChecks []VerifiedCheckRun  `json:"required_checks,omitempty"`
@@ -263,7 +231,6 @@ func (e ReleaseEvidence) MarshalJSON() ([]byte, error) {
 	return json.Marshal(evidenceJSON{
 		Repository:     e.repository,
 		PullRequest:    e.pullRequest,
-		Approval:       e.approval,
 		MergeCommitSHA: e.mergeCommitSHA,
 		RequiredChecks: e.requiredChecks,
 		Artifact:       e.artifact,
@@ -291,7 +258,6 @@ func (e *ReleaseEvidence) UnmarshalJSON(data []byte) error {
 	built, err := NewReleaseEvidence(EvidenceInput{
 		Repository:     w.Repository,
 		PullRequest:    w.PullRequest,
-		Approval:       w.Approval,
 		MergeCommitSHA: w.MergeCommitSHA,
 		RequiredCheck: func() VerifiedCheckRun {
 			if w.RequiredCheck != nil {

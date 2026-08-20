@@ -175,7 +175,7 @@ Three rules make it safe, and all three are cheap:
 
 Add to that: SafeLane's assessor never runs with the repository checked out. It receives
 the diff as data on stdin, with no working directory and no tools. `no-mistakes` has to
-run its reviewer inside the checkout because it fixes code; SafeLane only reads a diff,
+run its code-quality check inside the checkout because it fixes code; SafeLane only reads a diff,
 so it can be stricter than its own copy source. Say that on stage — it is the strongest
 30 seconds in the demo, and it answers the question the evaluator is most likely to ask.
 
@@ -592,7 +592,7 @@ anything.
       produce a lane wider than the heuristic floor.
 
 - [ ] **17. `policy.yml` is read for the first time.** New `internal/policy/load.go`.
-      Keys: `mandatory_evidence`, `independent_pr_approval`, `lanes`, `risk_to_lane`,
+      Keys: `mandatory_evidence`, `lanes`, `risk_to_lane`,
       `default_lane`, `assessment`. Delete `Policy.Stages` and `Policy.NextAction` and the
       old `rollout:` block, or the drift returns. Shape in Appendix C3.
       *Accept:* editing `policy.yml` changes the rendered weights; a missing file gives a
@@ -606,10 +606,8 @@ anything.
       and carries the template digest.
 
 - [ ] **19. New `inspect` output.** Sections: Target, Detected, Failed, Unavailable,
-      **Assessment**, Bundle, Decision. Plus `--json`. Guard the approval line in
-      `printSummary` (`release.go:198`) so it prints only when the policy requires it —
-      today it renders `approved by ,`.
-      *Accept:* golden-file test matches Appendix A; no `approved by ,` line ever renders.
+**Assessment**, Bundle, Decision. Plus `--json`.
+      *Accept:* golden-file test matches Appendix A.
 
 ---
 
@@ -841,9 +839,6 @@ Detected
   ✓ Required publish check        build-and-push  (success)
   ✓ Immutable GHCR digest         sha256:1f4827c4…30f5f
 
-Unavailable
-  – Independent PR approval       not required by this policy
-
 Assessment
   change            1 file, +1 −1
                     pkg/version/version.go
@@ -944,9 +939,6 @@ Detected
   ✓ Merged commit on master       7a19c4dbe0f38512a4c76b9e2d05fa1c3e8b7460
   ✓ Required publish check        build-and-push  (success)
   ✓ Immutable GHCR digest         sha256:c30fb712…8ea1
-
-Unavailable
-  – Independent PR approval       not required by this policy
 
 Assessment
   change            3 files, +64 −12
@@ -1271,8 +1263,6 @@ Failed
 Unavailable
   – Required publish check        skipped (no merge commit)
   – Immutable GHCR digest         skipped (no merge commit)
-  – Independent PR approval       not required by this policy
-
 Assessment
   not performed   an ineligible release receives no lane
 
@@ -1624,7 +1614,7 @@ type Assessment struct {
 
 `schema_version: "safelane.release.record/v2"`. Changes from v1:
 
-**Removed from `request`:** `review.approver`, `review.author`, `ci.workflow`,
+**Removed from `request`:** `ci.workflow`,
 `ci.check_name`, `ci.run_id`, `ci.run_url`, `artifact.image_reference`,
 `metadata.reason`. A Release Request is repository + pull request + environment, and
 optionally a digest pin. Nothing else. A request carrying `risk` or `lane` is rejected
@@ -1740,9 +1730,6 @@ mandatory_evidence:
   - merged_commit_on_default_branch
   - passing_publish_workflow
   - immutable_ghcr_digest
-
-independent_pr_approval:
-  required: false
 
 # The operator declares every lane. An assessment selects among these by name.
 # No assessor may emit weights, and no caller may name a lane.

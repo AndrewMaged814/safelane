@@ -9,11 +9,6 @@ mandatory_evidence:
   - passing_publish_workflow
   - immutable_ghcr_digest
 
-# Optional. Phase one leaves this off so GitHub and GHCR evidence can be
-# tested without an independent reviewer. Turn it on in a later phase.
-independent_pr_approval:
-  required: false
-
 lanes:
   fast:
     weights: [5, 100]

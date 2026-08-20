@@ -153,7 +153,7 @@ func NewRelease(p ReleaseParams) (*Release, error) {
 		request = Intent{
 			SchemaVersion: p.Request.SchemaVersion,
 			Repository:    p.Request.Source.Repository,
-			PullRequest:   p.Request.Review.PullRequestNumber,
+			PullRequest:   p.Request.PullRequest.PullRequestNumber,
 			Environment:   p.Request.Target.Environment,
 			Image:         p.Request.Artifact.ImageReference,
 		}

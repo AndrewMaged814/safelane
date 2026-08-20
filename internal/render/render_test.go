@@ -51,7 +51,6 @@ func testEvidence(t *testing.T, digest string) release.ReleaseEvidence {
 			BaseBranch: "main",
 			MergedAt:   now,
 		},
-		Approval:       release.VerifiedApproval{Reviewer: "ahmed", ApprovedAt: now},
 		MergeCommitSHA: mergeSHA,
 		RequiredCheck: release.VerifiedCheckRun{
 			Name:        "publish / build-and-push",

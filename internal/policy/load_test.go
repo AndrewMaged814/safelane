@@ -20,8 +20,6 @@ func writePolicy(t *testing.T, body string) string {
 
 const validPolicy = `
 version: 2
-independent_pr_approval:
-  required: false
 lanes:
   fast:
     weights: [5, 100]

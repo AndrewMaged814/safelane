@@ -355,7 +355,7 @@ Return "summary" as one concise sentence, "policy_highlights" as 2-5 concise pla
 and "template_highlights" as 1-4 concise plain-text bullet items. Do not put paragraphs, Markdown
 headings, or YAML in those highlight arrays; keep the details structured for a terminal summary.
 policy_yaml must be a COMPLETE policy.yml, never a fragment. It MUST include all of these top-level
-sections: version, mandatory_evidence, independent_pr_approval, lanes, risk_to_lane, default_lane,
+sections: version, mandatory_evidence, lanes, risk_to_lane, default_lane,
 and assessment. The lanes section must declare fast, standard, and guarded lanes with bounded integer
 weights; risk_to_lane must map low, medium, and high to those declared lanes; default_lane must be
 guarded; assessment.heuristic must include agent_authored_minimum, paths, and size; and
@@ -402,9 +402,6 @@ mandatory_evidence:
   - merged_commit_on_default_branch
   - passing_publish_workflow
   - immutable_ghcr_digest
-
-independent_pr_approval:
-  required: false
 
 lanes:
   fast:

@@ -113,7 +113,7 @@ func ineligibleParams(t *testing.T) release.ReleaseParams {
 			SchemaVersion: release.RequestSchemaVersion,
 			Target:        release.Target{Application: "podinfo", Environment: "production", Cluster: "safelane-demo", Namespace: "podinfo"},
 			Source:        release.ClaimedSource{Repository: "AndrewMaged814/podinfo", BaseBranch: "master"},
-			Review:        release.ClaimedReview{PullRequestNumber: 9},
+			PullRequest:   release.ClaimedPullRequest{PullRequestNumber: 9},
 			Caller:        release.CallerIdentity{Identity: "safelane-cli", Kind: release.CallerAgent},
 			Metadata:      release.RequestMetadata{RequestID: "req-test", SubmittedAt: now},
 		},

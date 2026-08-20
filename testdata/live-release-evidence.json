@@ -11,11 +11,10 @@
     "base_branch": "master",
     "merge_commit_sha": "56bab3c41a6f2e0a7838d7d937f8fe9ecb34af78"
   },
-  "review": {
+  "pull_request": {
     "pull_request_number": 1,
     "pull_request_url": "https://github.com/AndrewMaged814/podinfo/pull/1",
-    "author": "AndrewMaged814",
-    "approver": "Ahmedmelenany"
+    "author": "AndrewMaged814"
   },
   "ci": {
     "workflow": "publish",
@@ -35,6 +34,6 @@
   "metadata": {
     "request_id": "req-live-20260815-0001",
     "submitted_at": "2026-08-15T20:45:00Z",
-    "reason": "Release the reviewed version/build-information change to production."
+    "reason": "Release the merged version/build-information change to production."
   }
 }

@@ -29,12 +29,12 @@ const (
 	CategoryInvalidRequest ErrorCategory = "invalid_request"
 
 	// CategoryEvidenceMissing covers required evidence that does not exist: no
-	// approving review, no check run for the merge commit, no such pull request.
+	// check run for the merge commit, no such pull request.
 	CategoryEvidenceMissing ErrorCategory = "evidence_missing"
 
 	// CategoryEvidenceFailed covers required evidence that exists and is negative:
-	// the check run failed, the pull request is not merged, the approver is the
-	// author, the digest resolves to a different repository.
+	// the check run failed, the pull request is not merged, or the digest resolves
+	// to a different repository.
 	CategoryEvidenceFailed ErrorCategory = "evidence_failed"
 
 	// CategoryEvidenceUnknown covers evidence SafeLane could not determine:

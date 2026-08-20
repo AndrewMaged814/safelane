@@ -14,7 +14,6 @@ func baseFacts() Facts {
 		BaseRef:        "main",
 		MergeCommitSHA: "merge-sha-1",
 		AuthorLogin:    "andrew",
-		Approvals:      []Approval{{Reviewer: "ahmed", State: "APPROVED", ApprovedAt: time.Date(2026, 8, 10, 10, 0, 0, 0, time.UTC)}},
 		CheckRuns: []CheckRun{
 			{Name: "publish", Conclusion: "success", HeadSHA: "merge-sha-1"},
 		},
@@ -69,43 +68,6 @@ func TestEvaluate_MergeCommitMismatch_PRHeadIsNotEnough(t *testing.T) {
 	assertRejected(t, got, ReasonMergeCommitMismatch)
 }
 
-func TestEvaluate_ApprovalMissing(t *testing.T) {
-	facts := baseFacts()
-	facts.Approvals = nil
-	got := Evaluate(baseClaim(), facts)
-	assertRejected(t, got, ReasonApprovalMissing)
-}
-
-func TestEvaluate_ApprovalMissing_SkippedWhenPolicyDoesNotRequireIt(t *testing.T) {
-	facts := baseFacts()
-	facts.Approvals = nil
-	claim := baseClaim()
-	claim.SkipIndependentApproval = true
-	got := Evaluate(claim, facts)
-	if got.Status != StatusVerified {
-		t.Fatalf("want Verified when independent approval is not required, got %+v", got)
-	}
-}
-
-func TestEvaluate_ApproverIsAuthor(t *testing.T) {
-	facts := baseFacts()
-	facts.Approvals = []Approval{{Reviewer: "andrew", State: "APPROVED"}} // same as AuthorLogin
-	got := Evaluate(baseClaim(), facts)
-	assertRejected(t, got, ReasonApproverIsAuthor)
-}
-
-func TestEvaluate_ApproverIsAuthor_AmongOthers_StillCountsOtherApprover(t *testing.T) {
-	facts := baseFacts()
-	facts.Approvals = []Approval{
-		{Reviewer: "andrew", State: "APPROVED"}, // author's own stale approval
-		{Reviewer: "ahmed", State: "APPROVED"},  // plus a real one
-	}
-	got := Evaluate(baseClaim(), facts)
-	if got.Status != StatusVerified {
-		t.Fatalf("a non-author approval among others must still verify, got %+v", got)
-	}
-}
-
 func TestEvaluate_RequiredCheckMissing(t *testing.T) {
 	facts := baseFacts()
 	facts.CheckRuns = nil
@@ -137,26 +99,6 @@ func TestEvaluate_NoRequiredCheckConfigured_IsUnknownNotPassing(t *testing.T) {
 	got := Evaluate(claim, baseFacts())
 	if got.Status != StatusUnknown {
 		t.Fatalf("missing required-check configuration must be unknown, not %v", got.Status)
-	}
-}
-
-func TestFacts_IndependentApprover_SkipsAuthorsOwnApproval(t *testing.T) {
-	facts := baseFacts()
-	facts.Approvals = []Approval{
-		{Reviewer: "andrew", State: "APPROVED", ApprovedAt: time.Date(2026, 8, 10, 9, 0, 0, 0, time.UTC)}, // author's own
-		{Reviewer: "ahmed", State: "APPROVED", ApprovedAt: time.Date(2026, 8, 10, 10, 0, 0, 0, time.UTC)},
-	}
-	got, ok := facts.IndependentApprover()
-	if !ok || got.Reviewer != "ahmed" {
-		t.Fatalf("want ahmed as the independent approver, got %+v (ok=%v)", got, ok)
-	}
-}
-
-func TestFacts_IndependentApprover_NoneWhenOnlyAuthorApproved(t *testing.T) {
-	facts := baseFacts()
-	facts.Approvals = []Approval{{Reviewer: "andrew", State: "APPROVED"}}
-	if _, ok := facts.IndependentApprover(); ok {
-		t.Fatal("want no independent approver when only the author approved")
 	}
 }
 

@@ -98,14 +98,6 @@ type pullRequestResponse struct {
 	} `json:"user"`
 }
 
-type reviewResponse struct {
-	State string `json:"state"`
-	User  struct {
-		Login string `json:"login"`
-	} `json:"user"`
-	SubmittedAt time.Time `json:"submitted_at"`
-}
-
 type checkRunsResponse struct {
 	CheckRuns []struct {
 		ID          int64     `json:"id"`
@@ -119,17 +111,11 @@ type checkRunsResponse struct {
 	} `json:"check_runs"`
 }
 
-// FetchPullRequestFacts observes a pull request's merge state, author, the
-// latest review state per reviewer, and the check runs recorded against its
-// merge commit SHA specifically (never the PR head).
+// FetchPullRequestFacts observes a pull request's merge state, author, and
+// the check runs recorded against its merge commit SHA specifically (never the PR head).
 func (c *Client) FetchPullRequestFacts(ctx context.Context, owner, repo string, number int) (Facts, error) {
 	var pr pullRequestResponse
 	if err := c.do(ctx, http.MethodGet, fmt.Sprintf("/repos/%s/%s/pulls/%d", owner, repo, number), &pr); err != nil {
-		return Facts{}, err
-	}
-
-	var reviews []reviewResponse
-	if err := c.do(ctx, http.MethodGet, fmt.Sprintf("/repos/%s/%s/pulls/%d/reviews", owner, repo, number), &reviews); err != nil {
 		return Facts{}, err
 	}
 
@@ -142,7 +128,6 @@ func (c *Client) FetchPullRequestFacts(ctx context.Context, owner, repo string, 
 		BaseRef:        pr.Base.Ref,
 		MergeCommitSHA: pr.MergeCommitSHA,
 		AuthorLogin:    pr.User.Login,
-		Approvals:      latestReviews(reviews),
 	}
 
 	// Check runs are fetched for the merge commit SHA specifically. If the
@@ -169,29 +154,6 @@ func (c *Client) FetchPullRequestFacts(ctx context.Context, owner, repo string, 
 	}
 
 	return facts, nil
-}
-
-// latestReviews collapses a pull request's review history to one Approval per
-// reviewer, keeping only their most recent review state. A later dismissal or
-// change-request from the same reviewer overrides an earlier approval.
-func latestReviews(reviews []reviewResponse) []Approval {
-	latest := make(map[string]reviewResponse)
-	order := make([]string, 0, len(reviews))
-	for _, r := range reviews {
-		login := r.User.Login
-		if _, seen := latest[login]; !seen {
-			order = append(order, login)
-		}
-		if prev, ok := latest[login]; !ok || r.SubmittedAt.After(prev.SubmittedAt) {
-			latest[login] = r
-		}
-	}
-	out := make([]Approval, 0, len(order))
-	for _, login := range order {
-		r := latest[login]
-		out = append(out, Approval{Reviewer: login, State: r.State, ApprovedAt: r.SubmittedAt})
-	}
-	return out
 }
 
 // Verify fetches Facts for claim.PullRequestNumber via fetcher and evaluates

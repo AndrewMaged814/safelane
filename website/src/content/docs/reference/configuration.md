@@ -45,7 +45,7 @@ version must be 1, 2, or 3. Version 3 uses required_checks to name every mandato
     risk_to_lane: { low: fast, medium: standard, high: guarded }
     default_lane: guarded
 
-The policy also contains independent_pr_approval and assessment.heuristic / assessment.model settings. No caller may supply or override these fields.
+The policy also contains assessment.heuristic / assessment.model settings. No caller may supply or override these fields.
 
 ## Next
 

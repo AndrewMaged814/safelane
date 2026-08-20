@@ -336,9 +336,9 @@ func collectAndVerify(ctx context.Context, intent release.Intent, d Deps) (relea
 			Repository: repoName,
 			BaseBranch: d.Project.Repository.DefaultBranch,
 		},
-		Review: release.ClaimedReview{PullRequestNumber: intent.PullRequest},
-		CI:     release.ClaimedCI{CheckName: d.Project.Release.RequiredCheckNames()[0], Workflow: d.Project.Release.RequiredCheckNames()[0]},
-		Caller: d.caller(),
+		PullRequest: release.ClaimedPullRequest{PullRequestNumber: intent.PullRequest},
+		CI:          release.ClaimedCI{CheckName: d.Project.Release.RequiredCheckNames()[0], Workflow: d.Project.Release.RequiredCheckNames()[0]},
+		Caller:      d.caller(),
 		Metadata: release.RequestMetadata{
 			RequestID:   "req_pending",
 			SubmittedAt: d.now(),
@@ -358,22 +358,18 @@ func collectAndVerify(ctx context.Context, intent release.Intent, d Deps) (relea
 		ghResult = github.Result{Status: github.StatusUnknown, Reason: fetchReason(fetchErr), Detail: fetchErr.Error()}
 	} else {
 		req.Source.MergeCommitSHA = facts.MergeCommitSHA
-		req.Review.PullRequestURL = facts.URL
-		req.Review.Author = facts.AuthorLogin
-		if appr, ok := facts.IndependentApprover(); ok {
-			req.Review.Approver = appr.Reviewer
-		}
+		req.PullRequest.PullRequestURL = facts.URL
+		req.PullRequest.Author = facts.AuthorLogin
 		if check, ok := facts.CheckRun(d.Project.Release.RequiredCheckNames()[0]); ok {
 			req.CI.RunID = check.RunID
 			req.CI.RunURL = check.URL
 		}
 		ghResult = github.Evaluate(github.Claim{
-			Repository:              repo.String(),
-			PullRequestNumber:       intent.PullRequest,
-			ExpectedMergeCommitSHA:  facts.MergeCommitSHA,
-			RequiredCheckNames:      d.Project.Release.RequiredCheckNames(),
-			ExpectedBaseRef:         d.Project.Repository.DefaultBranch,
-			SkipIndependentApproval: !d.policy().IndependentPRApprovalRequired,
+			Repository:             repo.String(),
+			PullRequestNumber:      intent.PullRequest,
+			ExpectedMergeCommitSHA: facts.MergeCommitSHA,
+			RequiredCheckNames:     d.Project.Release.RequiredCheckNames(),
+			ExpectedBaseRef:        d.Project.Repository.DefaultBranch,
 		}, facts)
 	}
 
@@ -456,19 +452,10 @@ func resolveArtifact(ctx context.Context, intent release.Intent, d Deps, mergeSH
 // buildReleaseEvidence assembles release.EvidenceInput from verified GitHub
 // Facts and the GHCR-resolved digest. It is only called when both checks
 // returned StatusVerified, so the check-run lookup below is guaranteed to
-// find what Evaluate already proved exists. An independent approver is
-// present only when the Release Policy required one.
+// find what Evaluate already proved exists.
 func buildReleaseEvidence(req release.ReleaseRequest, gh github.Result, gr ghcr.Result, requiredNames []string, now time.Time) (release.ReleaseEvidence, error) {
 	facts := *gh.Facts
 
-	approver, hasApprover := facts.IndependentApprover()
-	approval := release.VerifiedApproval{}
-	if hasApprover {
-		approval = release.VerifiedApproval{
-			Reviewer:   approver.Reviewer,
-			ApprovedAt: approver.ApprovedAt,
-		}
-	}
 	var checks []release.VerifiedCheckRun
 	for _, name := range requiredNames {
 		check, _ := facts.CheckRun(name)
@@ -487,7 +474,6 @@ func buildReleaseEvidence(req release.ReleaseRequest, gh github.Result, gr ghcr.
 			BaseBranch: facts.BaseRef,
 			MergedAt:   facts.MergedAt,
 		},
-		Approval:       approval,
 		MergeCommitSHA: facts.MergeCommitSHA,
 		RequiredChecks: checks,
 		Artifact: release.VerifiedArtifact{
@@ -573,10 +559,10 @@ func githubResultError(r github.Result) *release.Error {
 		field, missing := githubReasonField(r.Reason)
 		if missing {
 			return release.MissingEvidenceError(reasonCode(r.Reason), field, r.Detail,
-				"Provide the missing evidence: an approving review from someone other than the author, or the required check run for the merge commit SHA.")
+				"Provide the required check run for the merge commit SHA.")
 		}
 		return release.FailedEvidenceError(reasonCode(r.Reason), field, r.Detail,
-			"Correct the pull request, review, or CI evidence named above and resubmit.")
+			"Correct the pull request or CI evidence named above and resubmit.")
 	}
 }
 
@@ -608,14 +594,10 @@ func githubReasonFieldName(r github.ReasonCode) string {
 
 func githubReasonField(reason github.ReasonCode) (field string, missing bool) {
 	switch reason {
-	case github.ReasonApprovalMissing:
-		return "review.approver", true
 	case github.ReasonRequiredCheckMissing:
 		return "ci.check_name", true
 	case github.ReasonPullRequestNotFound:
-		return "review.pull_request_number", true
-	case github.ReasonApproverIsAuthor:
-		return "review.approver", false
+		return "pull_request.pull_request_number", true
 	case github.ReasonRequiredCheckFailed, github.ReasonRequiredCheckWrongSHA,
 		github.ReasonRequiredCheckIncomplete:
 		return "ci.check_name", false
@@ -654,7 +636,7 @@ func ghcrResultError(r ghcr.Result) *release.Error {
 
 func isGithubMissingReason(reason github.ReasonCode) bool {
 	switch reason {
-	case github.ReasonApprovalMissing, github.ReasonRequiredCheckMissing, github.ReasonPullRequestNotFound:
+	case github.ReasonRequiredCheckMissing, github.ReasonPullRequestNotFound:
 		return true
 	default:
 		return false

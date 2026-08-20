@@ -19,8 +19,8 @@ func fixtureRequest() release.ReleaseRequest {
 		Source: release.ClaimedSource{
 			Repository: "acme/podinfo", BaseBranch: "main", MergeCommitSHA: "4f0c1b9e7ac2d5386b1d9f4a5c8e2b7d3a6f0e91",
 		},
-		Review: release.ClaimedReview{
-			PullRequestNumber: 1, Author: "andrew", Approver: "ahmed",
+		PullRequest: release.ClaimedPullRequest{
+			PullRequestNumber: 1, Author: "andrew",
 		},
 		CI: release.ClaimedCI{Workflow: "publish", CheckName: "publish"},
 		Artifact: release.ClaimedArtifact{

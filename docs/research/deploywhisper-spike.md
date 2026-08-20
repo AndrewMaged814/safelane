@@ -215,7 +215,7 @@ The prototype policy is captured in [`docs/policy/safelane-policy.yml`](../polic
 ### Remove from SafeLane scope
 
 - rebuilding DeployWhisper-like IaC parsing, finding catalogs, risk narratives, or a second scanner UI;
-- making an LLM the release approver or asking it to write arbitrary Kubernetes patches;
+- making an LLM the release authority or asking it to write arbitrary Kubernetes patches;
 - claiming that static manifest analysis proves canary traffic safety or successful runtime promotion;
 - treating DeployWhisper's `go` as a permit or its `no-go` as a replacement for policy;
 - accepting mutable image tags or unverified artifact identity because a report exists.

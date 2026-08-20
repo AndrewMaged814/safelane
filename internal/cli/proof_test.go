@@ -57,7 +57,6 @@ func proofVerifiedFacts() github.Facts {
 		BaseRef:        "main",
 		MergeCommitSHA: proofFixtureMergeSHA,
 		AuthorLogin:    "AndrewMaged814",
-		Approvals:      []github.Approval{{Reviewer: "ahmed-placeholder", State: "APPROVED", ApprovedAt: time.Date(2026, 8, 15, 8, 0, 0, 0, time.UTC)}},
 		CheckRuns: []github.CheckRun{{
 			Name: "publish / build-and-push", Conclusion: "success", HeadSHA: proofFixtureMergeSHA,
 			RunID: 16453210987, URL: "https://github.com/AndrewMaged814/podinfo/actions/runs/16453210987",

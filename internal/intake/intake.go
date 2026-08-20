@@ -93,7 +93,7 @@ func screenForbiddenTopLevelFields(raw []byte) []*release.Error {
 // form, which is the same claim stated once.
 func forbiddenFieldMessage(key string) string {
 	switch strings.ToLower(key) {
-	case "evidence", "checks", "approved", "approval", "approvals", "approver", "digest":
+	case "evidence", "checks", "digest":
 		return "a Release Request carries no evidence claims"
 	case "risk", "severity", "risk_override", "riskoverride":
 		return "a Release Request carries no risk claims"

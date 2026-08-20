@@ -23,9 +23,6 @@ func TestDefault_MatchesOperatorPolicyFile(t *testing.T) {
 	if loaded.Version != want.Version {
 		t.Errorf("version = %q, want %q", loaded.Version, want.Version)
 	}
-	if loaded.IndependentPRApprovalRequired != want.IndependentPRApprovalRequired {
-		t.Error("phase one does not require independent PR approval; that gate is deferred")
-	}
 	if !reflect.DeepEqual(loaded.Lanes, want.Lanes) {
 		t.Errorf("lanes = %+v, want %+v", loaded.Lanes, want.Lanes)
 	}

@@ -1,8 +1,7 @@
 // Package github verifies GitHub evidence for a Release Request: that a
 // pull request exists, is merged into the expected branch, that the
-// submitted source revision is that merge's commit (not the PR head), that
-// an approval exists from someone other than the author, and that a
-// required check run succeeded for that exact merge commit SHA.
+// submitted source revision is that merge's commit (not the PR head), and that
+// required check runs succeeded for that exact merge commit SHA.
 //
 // This package never trusts a caller's declared claims. A Claim is what the
 // caller asserts; a Facts is what SafeLane itself observed by calling the
@@ -23,7 +22,7 @@ const (
 	StatusVerified Status = "verified"
 	// StatusRejected means SafeLane was able to observe the facts and they
 	// deterministically fail a rule (unmerged, wrong repo, wrong commit,
-	// self-approval, failed check, mutable check target, ...).
+	// failed check, mutable check target, ...).
 	StatusRejected Status = "rejected"
 	// StatusUnknown means SafeLane could not determine the facts at all
 	// (API error, not found, malformed response). Unknown must never be
@@ -43,8 +42,6 @@ const (
 	ReasonNotMerged             ReasonCode = "not_merged"
 	ReasonBaseRefMismatch       ReasonCode = "base_ref_mismatch"
 	ReasonMergeCommitMismatch   ReasonCode = "merge_commit_mismatch"
-	ReasonApprovalMissing       ReasonCode = "approval_missing"
-	ReasonApproverIsAuthor      ReasonCode = "approver_is_author"
 	ReasonRequiredCheckMissing  ReasonCode = "required_check_missing"
 	ReasonRequiredCheckFailed   ReasonCode = "required_check_failed"
 	ReasonRequiredCheckWrongSHA ReasonCode = "required_check_wrong_sha"
@@ -74,10 +71,6 @@ type Claim struct {
 	RequiredCheckNames []string
 	// ExpectedBaseRef is the branch the PR must have merged into, e.g. "main".
 	ExpectedBaseRef string
-	// SkipIndependentApproval, when true, means the operator Release Policy
-	// does not require an independent PR approval. The zero value keeps
-	// fail-closed required-approval behavior.
-	SkipIndependentApproval bool
 }
 
 // CheckRun is one check run GitHub reports against a commit SHA.
@@ -107,48 +100,9 @@ type Facts struct {
 	BaseRef        string
 	MergeCommitSHA string
 	AuthorLogin    string
-	// Approvals holds every reviewer's latest review state, after collapsing
-	// multiple reviews per user to their most recent one. Only entries whose
-	// State is "APPROVED" count as an approval; the others are kept so a
-	// dismissal or change-request is visible rather than discarded.
-	Approvals []Approval
 	// CheckRuns holds check runs GitHub reported for MergeCommitSHA. Runs
 	// reported against any other SHA must not appear here (see Fetcher).
 	CheckRuns []CheckRun
-}
-
-// Approval is one reviewer's latest review state on the pull request.
-type Approval struct {
-	Reviewer   string
-	State      string // "APPROVED", "CHANGES_REQUESTED", "COMMENTED", "DISMISSED"
-	ApprovedAt time.Time
-}
-
-// approvedBy returns the logins whose latest review state is APPROVED, in
-// the order they first appear -- the shape [Evaluate] reasons about.
-func (f Facts) approvedBy() []string {
-	var out []string
-	for _, a := range f.Approvals {
-		if a.State == "APPROVED" {
-			out = append(out, a.Reviewer)
-		}
-	}
-	return out
-}
-
-// IndependentApprover returns the first APPROVED review from someone other
-// than the pull request author, matching the rule [Evaluate] enforces.
-// Wiring code that has already seen StatusVerified uses this to build the
-// verified approval it records; it is meaningless before that, since
-// Evaluate is what proves an independent approver exists at all.
-func (f Facts) IndependentApprover() (Approval, bool) {
-	for _, a := range f.Approvals {
-		if a.State != "APPROVED" || a.Reviewer == f.AuthorLogin {
-			continue
-		}
-		return a, true
-	}
-	return Approval{}, false
 }
 
 // CheckRun returns the check run matching name, if any were reported for
@@ -160,16 +114,6 @@ func (f Facts) CheckRun(name string) (CheckRun, bool) {
 		}
 	}
 	return CheckRun{}, false
-}
-
-// approvalFor returns the given reviewer's latest review, if any.
-func (f Facts) approvalFor(reviewer string) (Approval, bool) {
-	for _, a := range f.Approvals {
-		if a.Reviewer == reviewer && a.State == "APPROVED" {
-			return a, true
-		}
-	}
-	return Approval{}, false
 }
 
 // Result is the typed, actionable outcome of verifying one Claim.
@@ -234,26 +178,6 @@ func Evaluate(claim Claim, facts Facts) Result {
 		return rejected(ReasonMergeCommitMismatch, facts,
 			"submitted source revision %q does not match the pull request's merge commit %q",
 			claim.ExpectedMergeCommitSHA, facts.MergeCommitSHA)
-	}
-
-	approvedBy := facts.approvedBy()
-	if !claim.SkipIndependentApproval {
-		approverFound := false
-		for _, login := range approvedBy {
-			if login == facts.AuthorLogin {
-				continue // self-approval never counts
-			}
-			approverFound = true
-			break
-		}
-		if !approverFound {
-			if len(approvedBy) == 1 && approvedBy[0] == facts.AuthorLogin {
-				return rejected(ReasonApproverIsAuthor, facts,
-					"pull request #%d is only approved by its own author %q", facts.Number, facts.AuthorLogin)
-			}
-			return rejected(ReasonApprovalMissing, facts,
-				"pull request #%d has no approval from a reviewer other than the author", facts.Number)
-		}
 	}
 
 	names := claim.RequiredCheckNames

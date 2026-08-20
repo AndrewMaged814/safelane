@@ -17,8 +17,7 @@ var testTime = time.Date(2026, 8, 15, 9, 30, 0, 0, time.UTC)
 
 func phaseOnePolicy() policy.Policy {
 	return policy.Policy{
-		Version:                       "2",
-		IndependentPRApprovalRequired: true,
+		Version: "2",
 		Lanes: map[string]policy.Lane{
 			"fast":     {Weights: []int{5, 100}},
 			"standard": {Weights: []int{5, 25, 50, 100}},
@@ -56,7 +55,6 @@ func verifiedEvidence(t *testing.T) release.EvidenceResult {
 			Number: 1, URL: "https://github.com/AndrewMaged814/podinfo/pull/1",
 			Author: "AndrewMaged814", BaseBranch: "main", MergedAt: testTime,
 		},
-		Approval:       release.VerifiedApproval{Reviewer: "ahmed", ApprovedAt: testTime},
 		MergeCommitSHA: mergeSHA,
 		RequiredCheck: release.VerifiedCheckRun{
 			Name: "publish / build-and-push", HeadSHA: mergeSHA,
@@ -81,9 +79,9 @@ func verifiedEvidence(t *testing.T) release.EvidenceResult {
 
 func TestEvaluate_MissingRequiredEvidence_IsIneligibleNotIndeterminate(t *testing.T) {
 	evidence := release.MissingEvidence(release.MissingEvidenceError(
-		"approval_missing", "review.approver",
-		"pull request has no independent approval",
-		"Obtain an approving review from someone other than the author."))
+		"missing_required_check", "ci.check_name",
+		"required check was not found",
+		"Run the required check for the merge commit."))
 
 	got, err := policy.Evaluate(phaseOnePolicy(), evidence, testEnvelope(t, "high"))
 	if err != nil {

@@ -24,10 +24,9 @@ const (
 	checkMergedCommitPrefix = "Merged commit on "
 	checkPublish            = "Required publish check"
 	checkDigest             = "Immutable GHCR digest"
-	checkApproval           = "Independent PR approval"
 )
 
-// checkOwner names which of the four checks a GitHub verification reason
+// checkOwner names which of the three checks a GitHub verification reason
 // is about. Verification stops at its first negative answer, so a reason
 // belongs to exactly one check, and every check before it in evaluation
 // order was proven on the way there.
@@ -37,7 +36,6 @@ const (
 	ownerNone checkOwner = iota
 	ownerMergedCommit
 	ownerPublish
-	ownerApproval
 )
 
 // inspection is the whole `release inspect` report as values, before any
@@ -57,7 +55,7 @@ type inspection struct {
 
 // buildInspection derives the report from one submission pass.
 func buildInspection(insp orchestrate.Inspection, cfg project.Config, pol policy.Policy, now time.Time) inspection {
-	checks := evidenceChecks(insp, cfg, pol, now)
+	checks := evidenceChecks(insp, cfg, now)
 	return inspection{
 		release: insp.Release,
 		policy:  pol,
@@ -66,18 +64,13 @@ func buildInspection(insp orchestrate.Inspection, cfg project.Config, pol policy
 	}
 }
 
-func persistedEvidenceChecks(r *release.Release, cfg project.Config, pol policy.Policy) []evidenceCheck {
+func persistedEvidenceChecks(r *release.Release, cfg project.Config) []evidenceCheck {
 	if evidence, ok := r.Evidence().Verified(); ok {
 		checks := []evidenceCheck{{label: checkMergedCommitPrefix + cfg.Repository.DefaultBranch, outcome: checkDetected, value: evidence.MergeCommitSHA()}}
 		for _, run := range evidence.RequiredChecks() {
 			checks = append(checks, evidenceCheck{label: checkPublish, outcome: checkDetected, value: run.Name, tail: "(" + run.Conclusion + ")"})
 		}
 		checks = append(checks, evidenceCheck{label: checkDigest, outcome: checkDetected, value: shortDigest(evidence.ArtifactDigest())})
-		if pol.IndependentPRApprovalRequired {
-			checks = append(checks, evidenceCheck{label: checkApproval, outcome: checkDetected, value: evidence.Approval().Reviewer})
-		} else {
-			checks = append(checks, evidenceCheck{label: checkApproval, outcome: checkUnavailable, value: "not required by this policy"})
-		}
 		return checks
 	}
 	outcome := checkFailed
@@ -100,7 +93,7 @@ func persistedEvidenceChecks(r *release.Release, cfg project.Config, pol policy.
 // "skipped", and the reason it was skipped names the check that stopped
 // it. Collapsing those into failures would claim SafeLane looked at
 // evidence it never requested.
-func evidenceChecks(insp orchestrate.Inspection, cfg project.Config, pol policy.Policy, now time.Time) []evidenceCheck {
+func evidenceChecks(insp orchestrate.Inspection, cfg project.Config, now time.Time) []evidenceCheck {
 	gh, gr := insp.GitHub, insp.GHCR
 	mergedLabel := checkMergedCommitPrefix + cfg.Repository.DefaultBranch
 
@@ -116,10 +109,9 @@ func evidenceChecks(insp orchestrate.Inspection, cfg project.Config, pol policy.
 		publishes = append(publishes, publishCheck(name, gh, facts, owner, merged.outcome, now))
 	}
 	digest := digestCheck(cfg, gr, facts, merged.outcome)
-	approval := approvalCheck(pol, gh, facts, owner)
 	checks := []evidenceCheck{merged}
 	checks = append(checks, publishes...)
-	return append(checks, digest, approval)
+	return append(checks, digest)
 }
 
 func safetySignals(insp orchestrate.Inspection, cfg project.Config) []evidenceCheck {
@@ -140,7 +132,7 @@ func safetySignals(insp orchestrate.Inspection, cfg project.Config) []evidenceCh
 	return out
 }
 
-// reasonOwner says which of the four checks a GitHub verification reason
+// reasonOwner says which of the three checks a GitHub verification reason
 // belongs to. A reason about the required check says nothing about the
 // merge commit, which was already proven by the time evaluation reached
 // it.
@@ -149,8 +141,6 @@ func reasonOwner(gh github.Result) checkOwner {
 	case github.ReasonRequiredCheckMissing, github.ReasonRequiredCheckFailed,
 		github.ReasonRequiredCheckWrongSHA, github.ReasonRequiredCheckIncomplete:
 		return ownerPublish
-	case github.ReasonApprovalMissing, github.ReasonApproverIsAuthor:
-		return ownerApproval
 	case github.ReasonNone:
 		return ownerNone
 	default:
@@ -231,27 +221,6 @@ func digestCheck(cfg project.Config, gr ghcr.Result, facts github.Facts, merged 
 		c.outcome, c.value = checkFailed, gr.Detail
 		c.remedy = "resolve the digest in the repository this application releases from"
 	}
-	return c
-}
-
-func approvalCheck(pol policy.Policy, gh github.Result, facts github.Facts, owner checkOwner) evidenceCheck {
-	c := evidenceCheck{label: checkApproval}
-	if !pol.IndependentPRApprovalRequired {
-		// Not a gap in the evidence: the operator decided this one is not
-		// mandatory, and saying so is more useful than omitting the row.
-		c.outcome, c.value = checkUnavailable, "not required by this policy"
-		return c
-	}
-	if owner == ownerApproval {
-		c.outcome, c.value = checkFailed, gh.Detail
-		c.remedy = "have someone other than the author approve the pull request"
-		return c
-	}
-	if approver, ok := facts.IndependentApprover(); ok {
-		c.outcome, c.value = checkDetected, approver.Reviewer
-		return c
-	}
-	c.outcome, c.value = checkUnavailable, "skipped (evidence not reached)"
 	return c
 }
 

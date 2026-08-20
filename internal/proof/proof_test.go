@@ -157,8 +157,8 @@ func TestReleaseRecordLoadRejectsTamperedDerivedProof(t *testing.T) {
 	for name, mutate := range map[string]func(map[string]any){
 		"outcome":  func(obj map[string]any) { obj["outcome"] = "pending" },
 		"envelope": func(obj map[string]any) { obj["envelope"].(map[string]any)["lane"] = "standard" },
-		"old request field": func(obj map[string]any) {
-			obj["request"].(map[string]any)["review"] = map[string]any{"approver": "claim"}
+		"unknown request field": func(obj map[string]any) {
+			obj["request"].(map[string]any)["unexpected"] = "claim"
 		},
 	} {
 		t.Run(name, func(t *testing.T) {

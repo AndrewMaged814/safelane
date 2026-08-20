@@ -11,9 +11,6 @@ Detected
   ✓ Required publish check        build-and-push  (success)
   ✓ Immutable GHCR digest         sha256:1f4827c4…30f5f
 
-Unavailable
-  – Independent PR approval       not required by this policy
-
 Assessment
   change            1 file, +1 −1
                     pkg/version/version.go

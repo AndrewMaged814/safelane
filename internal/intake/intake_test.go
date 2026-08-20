@@ -56,7 +56,7 @@ func TestParse_EmptyObject_IsInvalidRequest(t *testing.T) {
 
 func TestParse_EvidenceFields_Forbidden(t *testing.T) {
 	obj := validFixture(t)
-	obj["review"] = map[string]any{"approver": "ahmed-placeholder"}
+	obj["evidence"] = map[string]any{"merge_commit_sha": "claim"}
 
 	_, err := Parse(marshal(t, obj))
 	if release.Categorize(err) != release.CategoryForbiddenField {

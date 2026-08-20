@@ -58,7 +58,7 @@ func (t Target) Validate() error {
 	return errs.OrNil()
 }
 
-// ClaimedSource is the caller's assertion about the reviewed source revision.
+// ClaimedSource is the caller's assertion about the source revision.
 // Unverified. SafeLane checks it against GitHub before any of it is believed.
 type ClaimedSource struct {
 	// Repository is "owner/name" on GitHub.
@@ -70,15 +70,12 @@ type ClaimedSource struct {
 	MergeCommitSHA string `json:"merge_commit_sha"`
 }
 
-// ClaimedReview is the caller's assertion about pull-request review evidence.
+// ClaimedPullRequest is the caller's assertion identifying the pull request.
 // Unverified.
-type ClaimedReview struct {
+type ClaimedPullRequest struct {
 	PullRequestNumber int    `json:"pull_request_number"`
 	PullRequestURL    string `json:"pull_request_url"`
-	// Author and Approver are claims recorded so a rejection can name them.
-	// SafeLane re-reads both from GitHub and enforces approver != author itself.
-	Author   string `json:"author"`
-	Approver string `json:"approver"`
+	Author            string `json:"author"`
 }
 
 // ClaimedCI is the caller's assertion about the required check run. Unverified.
@@ -167,14 +164,14 @@ type RequestMetadata struct {
 // Step 2 exists for actionability, not for safety; step 1 plus this type's shape is
 // what makes the guarantee structural.
 type ReleaseRequest struct {
-	SchemaVersion string          `json:"schema_version"`
-	Target        Target          `json:"target"`
-	Source        ClaimedSource   `json:"source"`
-	Review        ClaimedReview   `json:"review"`
-	CI            ClaimedCI       `json:"ci"`
-	Artifact      ClaimedArtifact `json:"artifact"`
-	Caller        CallerIdentity  `json:"caller"`
-	Metadata      RequestMetadata `json:"metadata"`
+	SchemaVersion string             `json:"schema_version"`
+	Target        Target             `json:"target"`
+	Source        ClaimedSource      `json:"source"`
+	PullRequest   ClaimedPullRequest `json:"pull_request"`
+	CI            ClaimedCI          `json:"ci"`
+	Artifact      ClaimedArtifact    `json:"artifact"`
+	Caller        CallerIdentity     `json:"caller"`
+	Metadata      RequestMetadata    `json:"metadata"`
 }
 
 // ForbiddenRequestKeys lists the JSON keys intake screens for at the request's top
@@ -209,7 +206,7 @@ func ForbiddenRequestKeys() []string {
 		// Policy selection.
 		"policy", "policies", "policyRef", "policy_ref", "policyVersion",
 		"policy_version", "riskOverride", "risk_override", "severity", "risk",
-		"approval", "approvals", "waiver", "exception",
+		"waiver", "exception",
 		// Lane selection. The lane is selected by assessment, never
 		// requested: a caller naming one is the schema-level form of asking
 		// for a wider rollout than its change earned.
@@ -219,9 +216,9 @@ func ForbiddenRequestKeys() []string {
 		"autoPromote", "auto_promote",
 		// Evidence and operator facts. The caller submits intent only;
 		// SafeLane collects these itself.
-		"target", "source", "review", "ci", "artifact", "caller", "metadata",
-		"approver", "merge_commit_sha", "check_name", "run_id", "cluster",
-		"namespace", "evidence", "checks", "digest", "approved",
+		"target", "source", "ci", "artifact", "caller", "metadata",
+		"merge_commit_sha", "check_name", "run_id", "cluster", "namespace",
+		"evidence", "checks", "digest",
 	}
 }
 
@@ -258,20 +255,15 @@ func (r ReleaseRequest) Validate() error {
 			"Supply the full merge commit SHA on the base branch. The pull request head SHA is not the verified source revision."))
 	}
 
-	if r.Review.PullRequestNumber <= 0 {
-		errs = append(errs, Invalid("missing_pull_request", "review.pull_request_number",
+	if r.PullRequest.PullRequestNumber <= 0 {
+		errs = append(errs, Invalid("missing_pull_request", "pull_request.pull_request_number",
 			"no pull request number was supplied",
 			"Supply the number of the merged pull request that produced the merge commit."))
 	}
-	if !isGitHubLogin(r.Review.Author) {
-		errs = append(errs, Invalid("missing_pull_request_author", "review.author",
+	if !isGitHubLogin(r.PullRequest.Author) {
+		errs = append(errs, Invalid("missing_pull_request_author", "pull_request.author",
 			"no pull request author was supplied",
 			"Supply the pull request author's GitHub login."))
-	}
-	if !isGitHubLogin(r.Review.Approver) {
-		errs = append(errs, Invalid("missing_reviewer", "review.approver",
-			"no approving reviewer was supplied",
-			"Supply the approving reviewer's GitHub login. Self-approval is not review evidence."))
 	}
 
 	if r.CI.CheckName == "" {
@@ -300,7 +292,7 @@ func (r ReleaseRequest) Validate() error {
 
 // ValidateIdentity checks the fields SafeLane records on every Release:
 // schema, target, repository, pull request, caller, and request id.
-// Merge SHA, approver, check name, and image are evidence, not identity.
+// Merge SHA, check name, and image are evidence, not identity.
 func (r ReleaseRequest) ValidateIdentity() error {
 	var errs Errors
 
@@ -317,8 +309,8 @@ func (r ReleaseRequest) ValidateIdentity() error {
 			errs = append(errs, flatten(err)...)
 		}
 	}
-	if r.Review.PullRequestNumber <= 0 {
-		errs = append(errs, Invalid("missing_pull_request", "review.pull_request_number",
+	if r.PullRequest.PullRequestNumber <= 0 {
+		errs = append(errs, Invalid("missing_pull_request", "pull_request.pull_request_number",
 			"no pull request number was supplied",
 			"Supply the number of the merged pull request."))
 	}

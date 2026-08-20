@@ -6,10 +6,10 @@
 
 The progress meeting succeeds when the team can show this chain:
 
-1. A real Podinfo PR in the public fork was merged to the default branch. Independent PR approval is deferred to a later phase.
+1. A real Podinfo PR in the public fork was merged to the default branch.
 2. A minimal GitHub Actions workflow ran for that merge commit and published an image to a public GHCR package, exposing an immutable OCI digest.
 3. Codex, Claude Code, CI, or another caller invokes the neutral SafeLane CLI, submitting release identity and evidence only.
-4. SafeLane verifies the merged commit on `main`, the publish workflow on that commit, the immutable digest, and independent PR approval when configured.
+4. SafeLane verifies the merged commit on `main`, the publish workflow on that commit, and the immutable digest.
 5. SafeLane renders the deployment bundle from the operator-owned Release Template, pinned to the verified digest, and hashes every rendered resource. It does not scan that YAML.
 6. SafeLane records Release Eligibility from that evidence. It does not treat evidence completeness as risk and does not choose an envelope from it.
 7. SafeLane returns eligibility, and, when eligible, the operator's static rollout envelope, then persists the Release record.
@@ -28,7 +28,7 @@ Present these as roadmap, not as gaps:
 
 - scanning the rendered YAML — SafeLane renders the bundle and proceeds from GitHub and GHCR evidence;
 - the HTTP API and MCP adapter — the CLI is the surface; the intake boundary stays transport-neutral;
-- build-provenance and attestation verification — required evidence is merged commit, passing publish workflow, and immutable digest; independent approval only when configured;
+- build-provenance and attestation verification — required evidence is merged commit, passing publish workflow, and immutable digest;
 - risk-based or dynamically chosen rollout envelopes;
 - Execution and Boundary proof ingestion, which waits for real Argo and runtime evidence.
 

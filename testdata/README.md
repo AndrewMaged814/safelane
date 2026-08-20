@@ -9,7 +9,7 @@ safelane release --file testdata/release-request.json
 ```
 
 It carries identifiers and intent only: repository, pull request, and environment.
-Every evidence field — merge SHA, reviewer, check run, digest, cluster, caller
+Every evidence field — merge SHA, check run, digest, cluster, caller
 identity, request id — is collected by SafeLane from GitHub, GHCR, and
 `.safelane/project.yml`. The agent must not author those claims.
 

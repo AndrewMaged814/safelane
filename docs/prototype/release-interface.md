@@ -25,7 +25,7 @@ The caller may be Codex, Claude Code, CI, an MCP adapter, another agent, or a hu
 
 It contains no evidence claims, Kubernetes objects, YAML or JSON patches, template selection, or policy selection. Those fields are rejected rather than ignored.
 
-SafeLane loads operator configuration from `.safelane/project.yml`, then collects and verifies the merge commit, required check, review (when policy requires it), and GHCR digest.
+SafeLane loads operator configuration from `.safelane/project.yml`, then collects and verifies the merge commit, required check, and GHCR digest.
 
 ## Trusted bundle
 
@@ -53,7 +53,7 @@ The live command presents a concise summary readable in 10–15 seconds:
 
 - release ID, application, and environment;
 - caller identity;
-- PR approval, merged commit, and immutable OCI digest;
+- merged commit, and immutable OCI digest;
 - eligibility, policy version, and static envelope when eligible;
 - allowed rollout path;
 - stage-by-stage health outcome;

@@ -20,7 +20,7 @@ ASSESSMENT
 DECISION
   eligibility       eligible (policy 2)
   evidence          verified
-                    3 verified, 0 failed, 1 unavailable
+                    3 verified, 0 failed, 0 unavailable
   envelope          1 → 5 → 25 → 50 → 100, 4 gates
                     read from the hashed bundle, digest sha256:22149f9f2192f02adf3492fb3a8541a25717f3dbcae09e6ca8d9b10d95c27cdc
 

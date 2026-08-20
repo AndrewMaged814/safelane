@@ -116,7 +116,7 @@ OCI association is not authentication. Fetch the referenced bytes, verify their 
 Standards deliberately leave the following decisions open, so these are the actual SafeLane policy inputs:
 
 - trusted issuers, builders, source-control systems, and identity mappings;
-- required review topology, reviewer eligibility, and revision-change invalidation;
+- required change provenance and revision-change invalidation;
 - required test suites, configurations, freshness, allowed warnings, and retry semantics;
 - SARIF tools, versions, rule profiles, severity thresholds, and suppressions;
 - accepted SLSA source/build levels and expected build types/parameters;

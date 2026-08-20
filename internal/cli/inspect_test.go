@@ -427,26 +427,6 @@ func TestInspect_UnrunChecksAreUnavailableNotFailed(t *testing.T) {
 	}
 }
 
-// No `approved by ,`. The policy does not require independent approval,
-// so there is no approver, and the report must not print an empty one.
-func TestInspect_NeverPrintsAnEmptyApprover(t *testing.T) {
-	out := inspectCase{
-		id:     "rel_01M0F2K7RXQW3HDN8YT4B1MPZE",
-		pr:     3,
-		github: fakeGitHub{facts: mergedFacts(3, safeMergeSHA)},
-		ghcr:   fakeGHCR{digest: safeDigest},
-		facts: fakeChangeFacts{facts: assess.Facts{
-			Files:          []assess.FileChange{{Path: "pkg/version/version.go", Additions: 1, Deletions: 1}},
-			TotalAdditions: 1, TotalDeletions: 1, MergeCommitSHA: safeMergeSHA,
-		}},
-		model: assess.Verdict{Risk: assess.RiskLow, Rationale: safeRationale, Available: true, Assessor: "claude"},
-	}.run(t)
-
-	if strings.Contains(out, "approved by ,") || strings.Contains(out, "approved by  ") {
-		t.Errorf("the report must never print an empty approver:\n%s", out)
-	}
-}
-
 // An unavailable model is not a low verdict: the heuristic's floor stands
 // alone and the lane is the one that floor bought, not a wider one.
 func TestInspect_ModelUnavailable_KeepsTheHeuristicFloor(t *testing.T) {
@@ -512,8 +492,8 @@ func TestInspectJSON_CarriesTheSameDecision(t *testing.T) {
 	if j.Assessment == nil || j.Assessment.Risk != assess.RiskLow {
 		t.Fatalf("want a low risk assessment, got %+v", j.Assessment)
 	}
-	if len(j.Checks) != 4 {
-		t.Fatalf("want all four checks reported, got %d", len(j.Checks))
+	if len(j.Checks) != 3 {
+		t.Fatalf("want all three checks reported, got %d", len(j.Checks))
 	}
 	if j.NextCommand == "" {
 		t.Fatal("want the next command an agent should run")

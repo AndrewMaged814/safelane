@@ -36,11 +36,10 @@ func validRequest() release.ReleaseRequest {
 			BaseBranch:     "main",
 			MergeCommitSHA: mergeSHA,
 		},
-		Review: release.ClaimedReview{
+		PullRequest: release.ClaimedPullRequest{
 			PullRequestNumber: 1,
 			PullRequestURL:    "https://github.com/AndrewMaged814/podinfo/pull/1",
 			Author:            "AndrewMaged814",
-			Approver:          "ahmed",
 		},
 		CI:       release.ClaimedCI{Workflow: "publish", CheckName: "publish / build-and-push", RunID: 16453210987},
 		Artifact: release.ClaimedArtifact{ImageReference: imageRef},
@@ -56,7 +55,6 @@ func validEvidenceInput() release.EvidenceInput {
 			Number: 1, URL: "https://github.com/AndrewMaged814/podinfo/pull/1",
 			Author: "AndrewMaged814", BaseBranch: "main", MergedAt: testTime,
 		},
-		Approval:       release.VerifiedApproval{Reviewer: "ahmed", ApprovedAt: testTime},
 		MergeCommitSHA: mergeSHA,
 		RequiredCheck: release.VerifiedCheckRun{
 			Name: "publish / build-and-push", HeadSHA: mergeSHA,
@@ -247,9 +245,6 @@ func TestRequestValidationRejects(t *testing.T) {
 		{"abbreviated merge sha", func(r *release.ReleaseRequest) {
 			r.Source.MergeCommitSHA = "4f0c1b9"
 		}, "malformed_merge_commit_sha", release.ErrInvalidRequest},
-		{"missing reviewer", func(r *release.ReleaseRequest) {
-			r.Review.Approver = ""
-		}, "missing_reviewer", release.ErrInvalidRequest},
 		{"missing required check", func(r *release.ReleaseRequest) {
 			r.CI.CheckName = ""
 		}, "missing_required_check", release.ErrInvalidRequest},
@@ -397,18 +392,6 @@ func TestNewReleaseEvidenceAcceptsCompleteEvidence(t *testing.T) {
 	if ev.ArtifactDigest() != digestA {
 		t.Errorf("ArtifactDigest = %q", ev.ArtifactDigest())
 	}
-	if !ev.IndependentApproval() {
-		t.Error("IndependentApproval = false for an approver who is not the author")
-	}
-}
-
-func TestNewReleaseEvidence_AllowsMissingApproval(t *testing.T) {
-	in := validEvidenceInput()
-	in.Approval = release.VerifiedApproval{}
-	ev := mustEvidence(t, in)
-	if ev.IndependentApproval() {
-		t.Error("no recorded approval is not an independent approval")
-	}
 }
 
 func TestNewReleaseEvidenceRejects(t *testing.T) {
@@ -417,12 +400,6 @@ func TestNewReleaseEvidenceRejects(t *testing.T) {
 		mutate   func(*release.EvidenceInput)
 		wantCode string
 	}{
-		{"self approval", func(in *release.EvidenceInput) {
-			in.Approval.Reviewer = in.PullRequest.Author
-		}, "self_approval"},
-		{"self approval differing case", func(in *release.EvidenceInput) {
-			in.Approval.Reviewer = strings.ToUpper(in.PullRequest.Author)
-		}, "self_approval"},
 		{"unmerged pull request", func(in *release.EvidenceInput) {
 			in.PullRequest.MergedAt = time.Time{}
 		}, "pull_request_not_merged"},
@@ -503,18 +480,6 @@ func TestEvidenceJSONRoundTripRevalidates(t *testing.T) {
 		t.Error("round trip lost evidence values")
 	}
 
-	forged := strings.Replace(string(raw), `"reviewer":"ahmed"`, `"reviewer":"AndrewMaged814"`, 1)
-	if forged == string(raw) {
-		t.Fatal("test setup: reviewer field not found in marshalled evidence")
-	}
-	var tampered release.ReleaseEvidence
-	err = json.Unmarshal([]byte(forged), &tampered)
-	if err == nil {
-		t.Fatal("a self-approved record decoded into verified evidence")
-	}
-	if !strings.Contains(err.Error(), "self_approval") {
-		t.Errorf("error = %v, want self_approval", err)
-	}
 }
 
 // TestZeroEvidenceMarshalsToNull proves an unset value cannot masquerade as a hollow

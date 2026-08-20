@@ -28,15 +28,13 @@ type Lane struct {
 }
 
 // Policy is the operator-owned Release Policy: which evidence is
-// mandatory, whether independent PR approval is required, and the
-// several lanes an eligible release may be assigned to.
+// mandatory and the several lanes an eligible release may be assigned to.
 //
 // No assessor may invent weights, and no caller may name a lane: Lanes
 // is the entire declared configuration surface, and RiskToLane is the
 // only mapping from a risk level to one of them.
 type Policy struct {
-	Version                       string
-	IndependentPRApprovalRequired bool
+	Version string
 
 	// Lanes are every rollout envelope the operator has declared, keyed
 	// by name (e.g. "fast", "standard", "guarded").
@@ -90,14 +88,11 @@ func (p Policy) LaneFor(risk string) (name string, lane Lane, err error) {
 	return name, lane, nil
 }
 
-// Default is the compiled phase-one Release Policy, matching Appendix
-// C3's example: independent PR approval is not required, and risk maps
-// to fast/standard/guarded with guarded as the default (most cautious)
-// lane.
+// Default is the compiled phase-one Release Policy, with risk mapped to
+// fast/standard/guarded and guarded as the default (most cautious) lane.
 func Default() Policy {
 	return Policy{
-		Version:                       "2",
-		IndependentPRApprovalRequired: false,
+		Version: "2",
 		Lanes: map[string]Lane{
 			"fast":     {Weights: []int{5, 100}},
 			"standard": {Weights: []int{5, 25, 50, 100}},
@@ -137,7 +132,6 @@ func DefaultYAML() []byte {
 	var b strings.Builder
 	fmt.Fprintf(&b, "version: %s\n\n", p.Version)
 	b.WriteString("mandatory_evidence:\n  - merged_commit_on_default_branch\n  - passing_publish_workflow\n  - immutable_ghcr_digest\n\n")
-	b.WriteString("independent_pr_approval:\n  required: false\n\n")
 	b.WriteString("lanes:\n  fast:\n    weights: [5, 100]\n  standard:\n    weights: [5, 25, 50, 100]\n  guarded:\n    weights: [1, 5, 25, 50, 100]\n\n")
 	b.WriteString("risk_to_lane:\n  low: fast\n  medium: standard\n  high: guarded\n\n")
 	b.WriteString("default_lane: guarded\n\n")

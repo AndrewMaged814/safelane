@@ -22,7 +22,7 @@ flowchart LR
     safelane rollout advance rel_...
     safelane proof --details rel_...
 
-Inspect verifies the merged commit, required publish check, immutable GHCR digest, and optional independent approval. Start applies the Rendered Manifest Bundle through the controller identity and stops at gate one. Advance reads Argo status and the lane envelope. Proof joins artifact, decision, execution, and boundary data.
+Inspect verifies the merged commit, required publish check, and immutable GHCR digest. Start applies the Rendered Manifest Bundle through the controller identity and stops at gate one. Advance reads Argo status and the lane envelope. Proof joins artifact, decision, execution, and boundary data.
 
 ## Why you never pass --to
 

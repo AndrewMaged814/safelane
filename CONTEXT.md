@@ -9,14 +9,14 @@ The agent identity that initiates and adapts a release. It is treated as fallibl
 _Avoid_: Cluster administrator, trusted release authority
 
 **Release Request**:
-A caller's submission of one change identity and one environment selector: repository, pull request, and optionally environment. It does not carry evidence, cluster or namespace, reviewers, CI results, digests, or bookkeeping. SafeLane collects and verifies those itself.
+A caller's submission of one change identity and one environment selector: repository, pull request, and optionally environment. It does not carry evidence, cluster or namespace, CI results, digests, or bookkeeping. SafeLane collects and verifies those itself.
 _Avoid_: Evidence dossier, release-evidence.json, deployment request
 
 **Merged Change**:
-A change merged into the demo fork after a passing required CI check. Approval is evidence the Release Policy may require, not a mandatory input: `independent_pr_approval` decides whether it must be present.
+A change merged into the demo fork after passing required CI checks.
 
 **Release Evidence**:
-The linked evidence for one Release Request: the merge commit SHA on `master`, the required publish-workflow result for that exact commit, the immutable OCI image digest, and an independent pull-request approval when the Release Policy requires one. Trusted build provenance is a planned future addition to this set, not a current requirement.
+The linked evidence for one Release Request: the merge commit SHA on `master`, the required publish-workflow result for that exact commit, and the immutable OCI image digest. Trusted build provenance is a planned future addition to this set, not a current requirement.
 
 **Rendered Manifest Bundle**:
 The exact final Kubernetes object bytes SafeLane renders and intends to apply for one release: the Argo Rollout with its immutable-digest pod template, stable/canary Services, any active traffic-routing object, the AnalysisTemplate, and materially relevant non-secret referenced resources. SafeLane renders it from the operator-owned Release Template pinned to the verified digest; the caller never supplies it. Each rendered object is content-hashed and bound to the Release, and the same bundle is later applied. Runtime status and observed traffic are separate evidence.
@@ -44,7 +44,7 @@ A clearly delimited block in an existing AGENTS.md or CLAUDE.md file that SafeLa
 The caller's namespace-scoped Kubernetes identity for observability only: it may read the protected Rollout and required status, but cannot create, patch, promote, replace, or delete protected workloads, Services, or traffic-routing resources. SafeLane's constrained execution identity is distinct.
 
 **Live Release Summary**:
-The 10–15 second human-readable Release Proof view: release ID, application/environment, caller, review/merge/digest evidence, Release Eligibility, static rollout envelope, stage health, direct-bypass result, and final promotion or abort.
+The 10–15 second human-readable Release Proof view: release ID, application/environment, caller, pull-request/merge/digest evidence, Release Eligibility, static rollout envelope, stage health, direct-bypass result, and final promotion or abort.
 
 **Complete Release Record**:
 The machine-readable proof retrieved with `safelane proof <release-id> --details` or `--json`, containing the four proof sections—artifact, decision, execution, and boundary—with provenance, all CI checks, manifest hashes, AnalysisRun details, traffic samples, denial metadata, caller identity, and timestamps.

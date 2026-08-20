@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/AndrewMaged814/safelane/internal/policy"
 	"github.com/AndrewMaged814/safelane/internal/project"
 	"github.com/AndrewMaged814/safelane/internal/release"
 	"github.com/AndrewMaged814/safelane/internal/render"
@@ -113,9 +112,6 @@ func verifiedFacts() github.Facts {
 		BaseRef:        "main",
 		MergeCommitSHA: fixtureMergeSHA,
 		AuthorLogin:    "AndrewMaged814",
-		Approvals: []github.Approval{
-			{Reviewer: "ahmed-placeholder", State: "APPROVED", ApprovedAt: time.Date(2026, 8, 15, 8, 0, 0, 0, time.UTC)},
-		},
 		CheckRuns: []github.CheckRun{
 			{
 				Name: "publish / build-and-push", Conclusion: "success", HeadSHA: fixtureMergeSHA,
@@ -205,9 +201,6 @@ func TestSubmitRelease_ValidFixture_ProducesVerifiedPersistedRelease(t *testing.
 	evidence, _ := r.Evidence().Verified()
 	if evidence.PullRequest().MergedAt.IsZero() {
 		t.Error("want a non-zero MergedAt on verified evidence")
-	}
-	if !evidence.IndependentApproval() {
-		t.Error("want an independent approval recorded")
 	}
 	if evidence.RequiredCheck().Conclusion != "success" {
 		t.Errorf("want a successful required check recorded, got %q", evidence.RequiredCheck().Conclusion)
@@ -307,64 +300,6 @@ func TestSubmitRelease_RequiredCheckFailed_PersistsFailedEvidence(t *testing.T) 
 	}
 	if len(store.saved) != 1 {
 		t.Fatalf("want the release still persisted, got %d", len(store.saved))
-	}
-}
-
-func TestSubmitRelease_ApproverIsAuthor_PersistsFailedEvidence(t *testing.T) {
-	deps, _ := baseDeps(t)
-	deps.Policy = policy.Default()
-	deps.Policy.IndependentPRApprovalRequired = true
-	facts := verifiedFacts()
-	facts.Approvals = []github.Approval{{Reviewer: facts.AuthorLogin, State: "APPROVED"}}
-	deps.GitHub = fakeFetcher{facts: facts}
-
-	r, err := SubmitRelease(context.Background(), fixtureIntent(), deps)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if r.Evidence().Outcome() != release.EvidenceFailed {
-		t.Fatalf("want EvidenceFailed for self-approval, got %s", r.Evidence().Outcome())
-	}
-}
-
-func TestSubmitRelease_NoApproval_PersistsMissingEvidence(t *testing.T) {
-	deps, _ := baseDeps(t)
-	deps.Policy = policy.Default()
-	deps.Policy.IndependentPRApprovalRequired = true
-	facts := verifiedFacts()
-	facts.Approvals = nil
-	deps.GitHub = fakeFetcher{facts: facts}
-
-	r, err := SubmitRelease(context.Background(), fixtureIntent(), deps)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if r.Evidence().Outcome() != release.EvidenceMissing {
-		t.Fatalf("want EvidenceMissing when no approval exists, got %s", r.Evidence().Outcome())
-	}
-}
-
-func TestSubmitRelease_ApprovalNotRequired_EligibleWithoutApproval(t *testing.T) {
-	deps, store := baseDeps(t)
-	facts := verifiedFacts()
-	facts.Approvals = nil
-	deps.GitHub = fakeFetcher{facts: facts}
-
-	r, err := SubmitRelease(context.Background(), fixtureIntent(), deps)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !r.Evidence().IsVerified() {
-		t.Fatalf("want verified evidence when approval is not required, got %s", r.Evidence())
-	}
-	if r.Eligibility().Status() != release.EligibilityEligible {
-		t.Fatalf("want eligible, got %s", r.Eligibility().Status())
-	}
-	if _, ok := r.Eligibility().Envelope(); !ok {
-		t.Fatal("eligible must attach the static envelope")
-	}
-	if len(store.saved) != 1 {
-		t.Fatalf("want the release persisted, got %d", len(store.saved))
 	}
 }
 

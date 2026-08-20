@@ -57,7 +57,6 @@ type PullRequestProof struct {
 	Number     int    `json:"number"`
 	URL        string `json:"url"`
 	Author     string `json:"author"`
-	Reviewer   string `json:"reviewer,omitempty"`
 	BaseBranch string `json:"base_branch"`
 	Source     string `json:"source"`
 }
@@ -132,17 +131,10 @@ func artifactFrom(r *release.Release) Artifact {
 		a.Repository, a.Revision = evidence.Repository().String(), evidence.MergeCommitSHA()
 		pr := evidence.PullRequest()
 		a.PullRequest = &PullRequestProof{Number: pr.Number, URL: pr.URL, Author: pr.Author, BaseBranch: pr.BaseBranch, Source: sourceGitHub}
-		if evidence.IndependentApproval() {
-			a.PullRequest.Reviewer = evidence.Approval().Reviewer
-		}
 		check := evidence.RequiredCheck()
 		a.CI = &CIProof{Name: check.Name, Conclusion: check.Conclusion, URL: check.URL, Source: sourceGitHub}
 		a.Digest, a.Image, a.DigestSource = evidence.ArtifactDigest(), evidence.Artifact().Reference.String(), sourceGHCR
-		a.Evidence = EvidenceSummary{Verified: 3, Unavailable: 1}
-		if evidence.IndependentApproval() {
-			a.Evidence.Verified++
-			a.Evidence.Unavailable = 0
-		}
+		a.Evidence = EvidenceSummary{Verified: 3}
 	} else {
 		a.Reasons = r.Evidence().Reasons()
 	}
