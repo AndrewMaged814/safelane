@@ -14,6 +14,7 @@ import (
 	"github.com/AndrewMaged814/safelane/internal/project"
 	"github.com/AndrewMaged814/safelane/internal/release"
 	"github.com/AndrewMaged814/safelane/internal/render"
+	"github.com/AndrewMaged814/safelane/internal/skill"
 )
 
 // InitCommand builds `safelane init --app <name> --repo <owner/name>`.
@@ -85,15 +86,50 @@ func runInit(args []string, stdout, stderr io.Writer, root string) int {
 		fmt.Fprintf(stderr, "safelane init: %v\n", err)
 		return ExitFail
 	}
+	userHome, err := os.UserHomeDir()
+	if err != nil {
+		fmt.Fprintf(stderr, "safelane init: resolve user home for agent skills: %v\n", err)
+		return ExitFail
+	}
+	claudeSkill := filepath.Join(userHome, ".claude", "skills", "safelane", "SKILL.md")
+	agentsSkill := filepath.Join(userHome, ".agents", "skills", "safelane", "SKILL.md")
+	claudeAction, err := writeSkillFile(claudeSkill)
+	if err != nil {
+		fmt.Fprintf(stderr, "safelane init: install Claude skill: %v\n", err)
+		return ExitFail
+	}
+	agentsAction, err := writeSkillFile(agentsSkill)
+	if err != nil {
+		fmt.Fprintf(stderr, "safelane init: install agent skill: %v\n", err)
+		return ExitFail
+	}
 
 	fmt.Fprintf(stdout, "%s  %s\n", projectAction, displayInitPath(home, loc.ProjectFile, false))
 	fmt.Fprintf(stdout, "%s  %s\n", policyAction, displayInitPath(home, loc.PolicyFile, false))
 	fmt.Fprintf(stdout, "%s  %s  (%d files)\n", templateAction, displayInitPath(home, loc.TemplateDir, true), count)
 	fmt.Fprintf(stdout, "%s  %s\n", releasesAction, displayInitPath(home, loc.ReleasesDir, true))
+	fmt.Fprintf(stdout, "%s  ~/.claude/skills/safelane/SKILL.md\n", claudeAction)
+	fmt.Fprintf(stdout, "%s  ~/.agents/skills/safelane/SKILL.md\n", agentsAction)
 	fmt.Fprintln(stdout)
 	fmt.Fprintln(stdout, "The operator configuration is outside your application repository.")
 	fmt.Fprintf(stdout, "An agent working in %s has no write path to it.\n", *repo)
 	return ExitOK
+}
+
+func writeSkillFile(path string) (string, error) {
+	action := "created"
+	if _, err := os.Stat(path); err == nil {
+		action = "updated"
+	} else if !os.IsNotExist(err) {
+		return "", err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(path, skill.SafeLane, 0o644); err != nil {
+		return "", err
+	}
+	return action, nil
 }
 
 func writeInitFile(path string, body []byte) (string, error) {

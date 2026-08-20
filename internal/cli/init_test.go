@@ -12,12 +12,15 @@ import (
 
 	"github.com/AndrewMaged814/safelane/internal/policy"
 	"github.com/AndrewMaged814/safelane/internal/project"
+	"github.com/AndrewMaged814/safelane/internal/skill"
 )
 
 func TestInit_CreatesOperatorFilesOutsideRepository_MatchesA01(t *testing.T) {
 	repoRoot := t.TempDir()
 	home := t.TempDir()
+	userHome := t.TempDir()
 	t.Setenv(project.HomeEnv, home)
+	setUserHome(t, userHome)
 	var stdout, stderr bytes.Buffer
 
 	code := InitCommand(repoRoot).Run(context.Background(), []string{
@@ -47,15 +50,71 @@ func TestInit_CreatesOperatorFilesOutsideRepository_MatchesA01(t *testing.T) {
 		t.Fatalf("generated project does not load: %v", err)
 	}
 
+	for _, path := range []string{
+		filepath.Join(userHome, ".claude", "skills", "safelane", "SKILL.md"),
+		filepath.Join(userHome, ".agents", "skills", "safelane", "SKILL.md"),
+	} {
+		got, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read installed skill %s: %v", path, err)
+		}
+		if !bytes.Equal(got, skill.SafeLane) {
+			t.Errorf("installed skill %s differs from embedded source", path)
+		}
+	}
+
 	got := strings.ReplaceAll(filepath.ToSlash(stdout.String()), filepath.ToSlash(home), "~/.safelane")
-	assertGoldenFragment(t, "a0-1-init.txt", got)
+	assertGolden(t, "a0-1-init.txt", got)
 	assertNoSafeLaneContent(t, repoRoot)
+}
+
+func TestInit_OverwritesInstalledSkillsFromOneEmbeddedSource(t *testing.T) {
+	repoRoot := t.TempDir()
+	home := t.TempDir()
+	userHome := t.TempDir()
+	t.Setenv(project.HomeEnv, home)
+	setUserHome(t, userHome)
+
+	run := func() {
+		t.Helper()
+		var stdout, stderr bytes.Buffer
+		code := InitCommand(repoRoot).Run(context.Background(), []string{
+			"--app", "podinfo", "--repo", "AndrewMaged814/podinfo",
+		}, &stdout, &stderr)
+		if code != ExitOK {
+			t.Fatalf("want ExitOK, got %d (stderr: %s)", code, stderr.String())
+		}
+	}
+
+	run()
+	paths := []string{
+		filepath.Join(userHome, ".claude", "skills", "safelane", "SKILL.md"),
+		filepath.Join(userHome, ".agents", "skills", "safelane", "SKILL.md"),
+	}
+	for _, path := range paths {
+		if err := os.WriteFile(path, []byte("hand edited\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	run()
+
+	for _, path := range paths {
+		got, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(got, skill.SafeLane) {
+			t.Errorf("reinstalled skill %s differs from embedded source", path)
+		}
+	}
 }
 
 func TestInit_ThenInspect_FromBareCloneLeavesNoSafeLaneContent(t *testing.T) {
 	clone := t.TempDir()
 	home := t.TempDir()
+	userHome := t.TempDir()
 	t.Setenv(project.HomeEnv, home)
+	setUserHome(t, userHome)
 	runGit(t, clone, "init")
 	runGit(t, clone, "remote", "add", "origin", "https://github.com/AndrewMaged814/podinfo.git")
 
@@ -82,6 +141,12 @@ func TestInit_ThenInspect_FromBareCloneLeavesNoSafeLaneContent(t *testing.T) {
 		t.Fatalf("inspect did not get past config resolution: %s", stderr.String())
 	}
 	assertNoSafeLaneContent(t, clone)
+}
+
+func setUserHome(t *testing.T, home string) {
+	t.Helper()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 }
 
 func TestInit_RequiresAppAndRepoAndRejectsAdapter(t *testing.T) {
