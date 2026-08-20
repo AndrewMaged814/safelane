@@ -158,9 +158,12 @@ func runRelease(ctx context.Context, args []string, stdout, stderr io.Writer, ro
 				in.checks = persistedEvidenceChecks(existing, cfg)
 			}
 			in.history = history
-			if existing.State().Active() {
-				reconcileInspection(ctx, &in, cfg, paths, releaseLedger)
-			}
+			// Reconcile every existing attempt, including terminal states. A
+			// recorded "promoted" state is not live proof: the process may have
+			// exited after Argo applied the final promotion but before SafeLane
+			// persisted its last execution entry, or the cluster may have drifted
+			// since the record was written.
+			reconcileInspection(ctx, &in, cfg, paths, releaseLedger)
 			return printInspection(stdout, stderr, in, f.jsonOut, report)
 		}
 	}
@@ -228,11 +231,43 @@ func reconcileInspection(ctx context.Context, in *inspection, cfg project.Config
 	in.effectiveState, in.stateSource = in.liveState, "live"
 	if in.liveState == release.StatePromoted || in.liveState == release.StateAborted || in.liveState == release.StateFailed {
 		binding.Generation, binding.ArgoRevision, binding.AnalysisRunName = live.Generation, live.Revision, live.AnalysisRunName
-		if updated, updateErr := r.WithState(in.liveState, binding); updateErr == nil && l.Update(updated) == nil {
+		updated := r
+		if live.State == execute.StateComplete {
+			if envelope, ok := r.Eligibility().Envelope(); ok {
+				stages := envelope.Stages()
+				if len(stages) > 0 && !hasGrantedExecution(r, stages[len(stages)-1]) {
+					// The live Rollout is the authoritative post-mutation fact.
+					// Persist a catch-up grant so proof reflects what actually
+					// happened even when the original advance command died while
+					// reading optional AnalysisRun metadata.
+					if caughtUp, execErr := updated.WithExecution(release.ExecutionEntry{
+						At:              time.Now().UTC(),
+						Verb:            release.VerbAdvance,
+						RequestedWeight: stages[len(stages)-1],
+						Outcome:         release.OutcomeGranted,
+						Detail:          "reconciled from live Rollout completion",
+					}); execErr == nil {
+						updated = caughtUp
+					}
+				}
+			}
+		}
+		if updated, updateErr := updated.WithState(in.liveState, binding); updateErr == nil && l.Update(updated) == nil {
 			in.release = updated
-			in.history[len(in.history)-1] = updated
+			if len(in.history) > 0 {
+				in.history[len(in.history)-1] = updated
+			}
 		}
 	}
+}
+
+func hasGrantedExecution(r *release.Release, weight int) bool {
+	for _, entry := range r.Execution() {
+		if entry.Outcome == release.OutcomeGranted && entry.RequestedWeight == weight {
+			return true
+		}
+	}
+	return false
 }
 
 func mapLiveState(s execute.State) release.State {

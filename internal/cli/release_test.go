@@ -126,6 +126,33 @@ func TestOutcomeExitCode_EligibleOnly(t *testing.T) {
 	}
 }
 
+func TestHasGrantedExecution_RecognizesFinalCatchUpGrant(t *testing.T) {
+	rel := mustCLIRelease(t, true)
+	if hasGrantedExecution(rel, 100) {
+		t.Fatal("empty execution history reported a final grant")
+	}
+	started, err := rel.WithExecution(release.ExecutionEntry{
+		At: time.Date(2026, 8, 15, 9, 31, 0, 0, time.UTC), Verb: release.VerbStart,
+		RequestedWeight: 5, Outcome: release.OutcomeGranted,
+	})
+	if err != nil {
+		t.Fatalf("WithExecution(start): %v", err)
+	}
+	if hasGrantedExecution(started, 100) {
+		t.Fatal("a 5% grant was mistaken for the final grant")
+	}
+	completed, err := started.WithExecution(release.ExecutionEntry{
+		At: time.Date(2026, 8, 15, 9, 32, 0, 0, time.UTC), Verb: release.VerbAdvance,
+		RequestedWeight: 100, Outcome: release.OutcomeGranted,
+	})
+	if err != nil {
+		t.Fatalf("WithExecution(final): %v", err)
+	}
+	if !hasGrantedExecution(completed, 100) {
+		t.Fatal("final granted execution was not recognized")
+	}
+}
+
 const (
 	cliMergeSHA = "4f0c1b9e7ac2d5386b1d9f4a5c8e2b7d3a6f0e91"
 	cliDigest   = "sha256:3fbc1d9a7e42c8056d1f9b3e7a5c204d8e6b1f39a7c50d28e4b6f19a3c7d50e8"
