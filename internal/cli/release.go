@@ -25,8 +25,8 @@ import (
 )
 
 // ReleaseCommand builds `safelane release inspect --pr <n>` (and `--file`
-// for CI). root is the application directory used to find
-// .safelane/project.yml.
+// for CI). root is the application clone whose GitHub remote selects the
+// operator-owned app under SAFELANE_HOME.
 func ReleaseCommand(root, defaultStoreDir string) Command {
 	return Command{
 		Name:    "release",
@@ -70,8 +70,8 @@ func parseReleaseFlags(args []string, stderr io.Writer, defaultStoreDir string) 
 	fs.StringVar(&f.image, "image", "", "optional immutable digest pin to verify")
 	fs.BoolVar(&f.jsonOut, "json", false, "print the report as JSON for an agent to branch on")
 	fs.StringVar(&f.templateDir, "template-dir", "", "override project.yml template_path")
-	fs.StringVar(&f.projectFile, "project", "", "path to project.yml (default: .safelane/project.yml)")
-	fs.StringVar(&f.policyFile, "policy", "", "path to policy.yml (default: the compiled phase-one policy)")
+	fs.StringVar(&f.projectFile, "project", "", "path to project.yml (default: matched app under SAFELANE_HOME)")
+	fs.StringVar(&f.policyFile, "policy", "", "path to policy.yml (default: matched app under SAFELANE_HOME)")
 	fs.StringVar(&f.storeDir, "store-dir", defaultStoreDir, "directory Release records are persisted under")
 	fs.StringVar(&f.githubToken, "github-token", os.Getenv("GITHUB_TOKEN"), "GitHub API token (optional; unauthenticated calls work against public repos, rate-limited)")
 	if err := fs.Parse(args); err != nil {
@@ -116,19 +116,21 @@ func runRelease(ctx context.Context, args []string, stdout, stderr io.Writer, ro
 		}
 	}
 
-	projPath := f.projectFile
-	if projPath == "" {
-		projPath = filepath.Join(root, filepath.FromSlash(project.RelPath))
+	paths, err := resolveRuntime(root, f.projectFile, f.policyFile, f.storeDir)
+	if err != nil {
+		printRejection(stderr, err)
+		return ExitFail
 	}
-	cfg, err := project.Load(projPath)
+	f.storeDir = paths.storeDir
+	cfg, err := project.Load(paths.projectFile)
 	if err != nil {
 		printRejection(stderr, err)
 		return ExitFail
 	}
 
 	pol := policy.Default()
-	if f.policyFile != "" {
-		pol, err = policy.Load(f.policyFile)
+	if paths.policyFile != "" {
+		pol, err = policy.Load(paths.policyFile)
 		if err != nil {
 			printRejection(stderr, err)
 			return ExitFail
@@ -139,7 +141,11 @@ func runRelease(ctx context.Context, args []string, stdout, stderr io.Writer, ro
 	if tmplPath == "" {
 		tmplPath = cfg.Release.TemplatePath
 		if !filepath.IsAbs(tmplPath) {
-			tmplPath = filepath.Join(root, tmplPath)
+			base := paths.configDir
+			if cfg.Version == 1 {
+				base = root // compatibility for the former repo-relative schema.
+			}
+			tmplPath = filepath.Join(base, tmplPath)
 		}
 	}
 	tmpl, err := render.LoadDir(tmplPath)

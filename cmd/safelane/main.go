@@ -8,8 +8,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 
 	"github.com/AndrewMaged814/safelane/internal/cli"
+	"github.com/AndrewMaged814/safelane/internal/project"
 )
 
 // version is overridden at build time via:
@@ -21,19 +23,23 @@ func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
 }
 
-// defaultStoreDir is where Release records land by default. The Release
-// Template path comes from .safelane/project.yml (overridable with
-// --template-dir).
-const defaultStoreDir = ".safelane/releases"
-
 func run(args []string, stdout, stderr io.Writer) int {
+	// Resolve the repository before command construction so every command
+	// receives this application's operator-owned record directory.
+	defaultStoreDir := ""
+	if loc, err := project.Resolve("."); err == nil {
+		defaultStoreDir = loc.ReleasesDir
+	} else if home, homeErr := project.Home(); homeErr == nil {
+		// Even without a matching app, proof must never fall back to the
+		// application repository as its implicit record directory.
+		defaultStoreDir = filepath.Join(home, "apps", ".unmatched", "releases")
+	}
 	commands := []cli.Command{
 		versionCommand(),
 		cli.ReleaseCommand(".", defaultStoreDir),
 		cli.RolloutCommand(".", defaultStoreDir),
 		cli.ProofCommand(defaultStoreDir),
 		cli.InitCommand("."),
-		cli.IntegrationsCommand("."),
 	}
 	return cli.Dispatch(context.Background(), args, stdout, stderr, commands)
 }

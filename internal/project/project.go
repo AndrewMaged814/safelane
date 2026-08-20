@@ -1,5 +1,5 @@
-// Package project loads operator-owned runtime configuration from
-// .safelane/project.yml. This file is a real source of truth: SafeLane
+// Package project loads operator-owned runtime configuration from the
+// application's directory under SAFELANE_HOME. This file is a real source of truth: SafeLane
 // reads application, target, required check, image repository, and
 // Release Template path from it. Callers do not supply those fields.
 package project
@@ -14,9 +14,6 @@ import (
 	"github.com/AndrewMaged814/safelane/internal/release"
 	"gopkg.in/yaml.v3"
 )
-
-// RelPath is the default project file relative to an application root.
-const RelPath = ".safelane/project.yml"
 
 // Config is the operator-owned project configuration.
 type Config struct {
@@ -77,10 +74,10 @@ func Load(path string) (Config, error) {
 // Validate reports every missing or unsafe operator field at once.
 func (c Config) Validate() error {
 	var errs release.Errors
-	if c.Version != 1 {
+	if c.Version != 1 && c.Version != 2 {
 		errs = append(errs, release.Malformed("unsupported_project_version", "version",
 			fmt.Sprintf("project version %d is not supported", c.Version),
-			"Set version to 1."))
+			"Set version to 2."))
 	}
 	for _, f := range []struct {
 		name, value string
@@ -93,7 +90,7 @@ func (c Config) Validate() error {
 		if f.value == "" {
 			errs = append(errs, release.Invalid("missing_project_field", f.name,
 				"project configuration is incomplete",
-				"Set application, release.environment, target.cluster and target.namespace in .safelane/project.yml."))
+				"Set application, release.environment, target.cluster and target.namespace in project.yml."))
 			continue
 		}
 		if !release.IsDNSLabel(f.value) {
@@ -105,7 +102,7 @@ func (c Config) Validate() error {
 	if c.Repository.Name == "" {
 		errs = append(errs, release.Invalid("missing_project_field", "repository.name",
 			"no repository was configured",
-			"Set repository.name to owner/name in .safelane/project.yml."))
+			"Set repository.name to owner/name in project.yml."))
 	} else if _, err := release.ParseRepositoryRef(c.Repository.Name); err != nil {
 		errs = append(errs, release.Invalid("malformed_repository", "repository.name",
 			fmt.Sprintf("%q is not a repository reference", c.Repository.Name),
@@ -248,7 +245,7 @@ func DefaultYAML(application, repo, defaultBranch, imageRepository string) []byt
 	if repo == "" {
 		repo = "owner/name"
 	}
-	body := fmt.Sprintf(`version: 1
+	body := fmt.Sprintf(`version: 2
 
 application: %s
 
@@ -261,12 +258,15 @@ release:
   image_repository: %s
   image_tag: "sha-{{merge_sha}}"
   required_check: build-and-push
-  template_path: .safelane/release-template
+  template_path: release-template
 
 target:
   cluster: safelane-demo
   namespace: %s
   rollout: %s
+
+controller_kubeconfig: controller.kubeconfig
+controller_context: safelane-controller
 `, application, repo, defaultBranch, imageRepository, application, application)
 	return []byte(body)
 }

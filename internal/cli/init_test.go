@@ -3,365 +3,131 @@ package cli
 import (
 	"bytes"
 	"context"
+	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/AndrewMaged814/safelane/internal/policy"
+	"github.com/AndrewMaged814/safelane/internal/project"
 )
 
-func TestInit_CodexAdapter_EmptyDir_CreatesAgentGuidance(t *testing.T) {
-	root := t.TempDir()
-	cmd := InitCommand(root)
+func TestInit_CreatesOperatorFilesOutsideRepository_MatchesA01(t *testing.T) {
+	repoRoot := t.TempDir()
+	home := t.TempDir()
+	t.Setenv(project.HomeEnv, home)
 	var stdout, stderr bytes.Buffer
 
-	code := cmd.Run(context.Background(), []string{"--adapter", "codex"}, &stdout, &stderr)
-
+	code := InitCommand(repoRoot).Run(context.Background(), []string{
+		"--app", "podinfo", "--repo", "AndrewMaged814/podinfo",
+	}, &stdout, &stderr)
 	if code != ExitOK {
 		t.Fatalf("want ExitOK, got %d (stderr: %s)", code, stderr.String())
 	}
 
-	guidance := filepath.Join(root, ".safelane", "agent-guidance.md")
-	if _, err := os.Stat(guidance); err != nil {
-		t.Fatalf("want created %s, got %v", guidance, err)
+	loc := project.ForApp(home, "podinfo")
+	for _, path := range []string{loc.ProjectFile, loc.PolicyFile, loc.TemplateDir, loc.ReleasesDir} {
+		if _, err := os.Stat(path); err != nil {
+			t.Errorf("want %s: %v", path, err)
+		}
 	}
-	if !strings.Contains(stdout.String(), "created .safelane/agent-guidance.md") {
-		t.Fatalf("want created report for agent-guidance.md, got %q", stdout.String())
+	entries, err := os.ReadDir(loc.TemplateDir)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(root, ".safelane", "project.yml")); err != nil {
-		t.Fatalf("want created project.yml, got %v", err)
+	if got := countTemplateFiles(entries); got != 5 {
+		t.Fatalf("template contains %d files, want 5", got)
 	}
-	if _, err := os.Stat(filepath.Join(root, ".safelane", "release-template")); err != nil {
-		t.Fatalf("want created release-template, got %v", err)
+	if _, err := policy.Load(loc.PolicyFile); err != nil {
+		t.Fatalf("generated policy does not load: %v", err)
 	}
+	if _, err := project.Load(loc.ProjectFile); err != nil {
+		t.Fatalf("generated project does not load: %v", err)
+	}
+
+	got := strings.ReplaceAll(filepath.ToSlash(stdout.String()), filepath.ToSlash(home), "~/.safelane")
+	assertGoldenFragment(t, "a0-1-init.txt", got)
+	assertNoSafeLaneContent(t, repoRoot)
 }
 
-func TestInit_MissingAgentsMd_CreatesManagedSection(t *testing.T) {
-	root := t.TempDir()
-	cmd := InitCommand(root)
+func TestInit_ThenInspect_FromBareCloneLeavesNoSafeLaneContent(t *testing.T) {
+	clone := t.TempDir()
+	home := t.TempDir()
+	t.Setenv(project.HomeEnv, home)
+	runGit(t, clone, "init")
+	runGit(t, clone, "remote", "add", "origin", "https://github.com/AndrewMaged814/podinfo.git")
+
 	var stdout, stderr bytes.Buffer
-
-	code := cmd.Run(context.Background(), []string{"--adapter", "codex"}, &stdout, &stderr)
-
-	if code != ExitOK {
-		t.Fatalf("want ExitOK, got %d (stderr: %s)", code, stderr.String())
-	}
-
-	body, err := os.ReadFile(filepath.Join(root, "AGENTS.md"))
-	if err != nil {
-		t.Fatalf("want created AGENTS.md, got %v", err)
-	}
-	text := string(body)
-	if !strings.Contains(text, "<!-- BEGIN SAFELANE MANAGED: guidance -->") ||
-		!strings.Contains(text, "<!-- END SAFELANE MANAGED: guidance -->") {
-		t.Fatalf("want a well-formed managed section, got %q", text)
-	}
-	if !strings.Contains(text, ".safelane/agent-guidance.md") {
-		t.Fatalf("want the managed section to point at agent-guidance.md, got %q", text)
-	}
-	if !strings.Contains(stdout.String(), "created AGENTS.md managed section") {
-		t.Fatalf("want created report for AGENTS.md, got %q", stdout.String())
-	}
-	if _, err := os.Stat(filepath.Join(root, ".safelane", "integrations", "codex.md")); err == nil {
-		t.Fatal("missing AGENTS.md must not write the undiscoverable Codex fallback")
-	}
-}
-
-func TestInit_UnmarkedAgentsMd_AppendsManagedSection(t *testing.T) {
-	root := t.TempDir()
-	original := "# Project notes\r\n\r\nUse go test ./...\n"
-	if err := os.WriteFile(filepath.Join(root, "AGENTS.md"), []byte(original), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	cmd := InitCommand(root)
-	var stdout, stderr bytes.Buffer
-
-	code := cmd.Run(context.Background(), []string{"--adapter", "codex"}, &stdout, &stderr)
-
-	if code != ExitOK {
-		t.Fatalf("want ExitOK, got %d (stderr: %s)", code, stderr.String())
-	}
-
-	body, err := os.ReadFile(filepath.Join(root, "AGENTS.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	got := string(body)
-	if !strings.HasPrefix(got, original) {
-		t.Fatalf("want original bytes preserved, got %q", got)
-	}
-	if !strings.Contains(got, "<!-- BEGIN SAFELANE MANAGED: guidance -->") ||
-		!strings.Contains(got, "<!-- END SAFELANE MANAGED: guidance -->") {
-		t.Fatalf("want an appended managed section, got %q", got)
-	}
-	if !strings.Contains(stdout.String(), "updated AGENTS.md managed section") {
-		t.Fatalf("want updated report for AGENTS.md, got %q", stdout.String())
-	}
-}
-
-func TestInit_OneManagedBlock_ReplacesOnlyThatBlock(t *testing.T) {
-	root := t.TempDir()
-	prefix := "# Team rules\n\nRun go test.\n\n"
-	suffix := "\n## Local notes\nDo not rewrite this.\n"
-	original := prefix +
-		"<!-- BEGIN SAFELANE MANAGED: guidance -->\nOLD POINTER\n<!-- END SAFELANE MANAGED: guidance -->\n" +
-		suffix
-	if err := os.WriteFile(filepath.Join(root, "AGENTS.md"), []byte(original), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	cmd := InitCommand(root)
-	var stdout, stderr bytes.Buffer
-
-	code := cmd.Run(context.Background(), []string{"--adapter", "codex"}, &stdout, &stderr)
-
-	if code != ExitOK {
-		t.Fatalf("want ExitOK, got %d (stderr: %s)", code, stderr.String())
-	}
-
-	body, err := os.ReadFile(filepath.Join(root, "AGENTS.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	got := string(body)
-	if !strings.HasPrefix(got, prefix) {
-		t.Fatalf("want prefix preserved, got %q", got)
-	}
-	if !strings.HasSuffix(got, suffix) {
-		t.Fatalf("want suffix preserved, got %q", got)
-	}
-	if strings.Contains(got, "OLD POINTER") {
-		t.Fatalf("want the stale managed body replaced, got %q", got)
-	}
-	if !strings.Contains(got, ".safelane/agent-guidance.md") {
-		t.Fatalf("want the canonical pointer, got %q", got)
-	}
-	if !strings.Contains(stdout.String(), "updated AGENTS.md managed section") {
-		t.Fatalf("want updated report for AGENTS.md, got %q", stdout.String())
-	}
-}
-
-func TestInit_AmbiguousAgentsMd_LeavesFileAndWritesFallback(t *testing.T) {
-	cases := []struct {
-		name string
-		body string
-		why  string
-	}{
-		{
-			name: "incomplete begin only",
-			body: "# Notes\n<!-- BEGIN SAFELANE MANAGED: guidance -->\nno end\n",
-			why:  "incomplete",
-		},
-		{
-			name: "incomplete end only",
-			body: "# Notes\n<!-- END SAFELANE MANAGED: guidance -->\n",
-			why:  "incomplete",
-		},
-		{
-			name: "nested markers",
-			body: "<!-- BEGIN SAFELANE MANAGED: guidance -->\n<!-- BEGIN SAFELANE MANAGED: guidance -->\ninner\n<!-- END SAFELANE MANAGED: guidance -->\n<!-- END SAFELANE MANAGED: guidance -->\n",
-			why:  "nested",
-		},
-		{
-			name: "duplicated markers",
-			body: "<!-- BEGIN SAFELANE MANAGED: guidance -->\nfirst\n<!-- END SAFELANE MANAGED: guidance -->\n<!-- BEGIN SAFELANE MANAGED: guidance -->\nsecond\n<!-- END SAFELANE MANAGED: guidance -->\n",
-			why:  "duplicated",
-		},
-		{
-			name: "end before begin",
-			body: "<!-- END SAFELANE MANAGED: guidance -->\n<!-- BEGIN SAFELANE MANAGED: guidance -->\n",
-			why:  "malformed",
-		},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			root := t.TempDir()
-			agentsPath := filepath.Join(root, "AGENTS.md")
-			if err := os.WriteFile(agentsPath, []byte(tc.body), 0o644); err != nil {
-				t.Fatal(err)
-			}
-
-			cmd := InitCommand(root)
-			var stdout, stderr bytes.Buffer
-			code := cmd.Run(context.Background(), []string{"--adapter", "codex"}, &stdout, &stderr)
-			if code != ExitOK {
-				t.Fatalf("want ExitOK, got %d (stderr: %s)", code, stderr.String())
-			}
-
-			got, err := os.ReadFile(agentsPath)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if string(got) != tc.body {
-				t.Fatalf("want AGENTS.md left byte-for-byte unchanged, got %q", got)
-			}
-
-			report := stdout.String()
-			if !strings.Contains(report, "skipped AGENTS.md") || !strings.Contains(report, tc.why) {
-				t.Fatalf("want skipped AGENTS.md mentioning %q, got %q", tc.why, report)
-			}
-			if !strings.Contains(report, "created .safelane/integrations/codex.md") {
-				t.Fatalf("want created fallback report, got %q", report)
-			}
-
-			fallback, err := os.ReadFile(filepath.Join(root, ".safelane", "integrations", "codex.md"))
-			if err != nil {
-				t.Fatalf("want fallback file, got %v", err)
-			}
-			text := string(fallback)
-			if !strings.Contains(text, "does not auto-load") {
-				t.Fatalf("want the fallback to say Codex will not auto-load it, got %q", text)
-			}
-			if !strings.Contains(text, "<!-- BEGIN SAFELANE MANAGED: guidance -->") {
-				t.Fatalf("want a copyable managed section in the fallback, got %q", text)
-			}
-		})
-	}
-}
-
-func TestInit_RepeatedWithoutChange_ReportsUnchanged(t *testing.T) {
-	root := t.TempDir()
-	cmd := InitCommand(root)
-	var stdout, stderr bytes.Buffer
-
-	if code := cmd.Run(context.Background(), []string{"--adapter", "codex"}, &stdout, &stderr); code != ExitOK {
-		t.Fatalf("first init: want ExitOK, got %d (stderr: %s)", code, stderr.String())
-	}
-
-	guidanceBefore, err := os.ReadFile(filepath.Join(root, ".safelane", "agent-guidance.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	agentsBefore, err := os.ReadFile(filepath.Join(root, "AGENTS.md"))
-	if err != nil {
-		t.Fatal(err)
+	if code := InitCommand(clone).Run(context.Background(), []string{
+		"--app", "podinfo", "--repo", "AndrewMaged814/podinfo",
+	}, &stdout, &stderr); code != ExitOK {
+		t.Fatalf("init: code %d: %s", code, stderr.String())
 	}
 
 	stdout.Reset()
 	stderr.Reset()
-	if code := cmd.Run(context.Background(), []string{"--adapter", "codex"}, &stdout, &stderr); code != ExitOK {
-		t.Fatalf("second init: want ExitOK, got %d (stderr: %s)", code, stderr.String())
+	missingTemplate := filepath.Join(t.TempDir(), "missing-template")
+	code := ReleaseCommand(clone, "").Run(context.Background(), []string{
+		"inspect", "--pr", "3", "--template-dir", missingTemplate,
+	}, &stdout, &stderr)
+	if code != ExitFail {
+		t.Fatalf("inspect: want ExitFail from deliberate template stop, got %d: %s", code, stderr.String())
 	}
-
-	report := stdout.String()
-	if !strings.Contains(report, "unchanged .safelane/agent-guidance.md") {
-		t.Fatalf("want unchanged guidance report, got %q", report)
+	if strings.Contains(stderr.String(), "missing_project_config") {
+		t.Fatalf("inspect did not resolve the operator config: %s", stderr.String())
 	}
-	if !strings.Contains(report, "unchanged AGENTS.md managed section") {
-		t.Fatalf("want unchanged AGENTS.md report, got %q", report)
+	if !strings.Contains(stderr.String(), "could not load the Release Template") {
+		t.Fatalf("inspect did not get past config resolution: %s", stderr.String())
 	}
-
-	guidanceAfter, err := os.ReadFile(filepath.Join(root, ".safelane", "agent-guidance.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	agentsAfter, err := os.ReadFile(filepath.Join(root, "AGENTS.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(guidanceBefore, guidanceAfter) {
-		t.Fatal("second init changed agent-guidance.md")
-	}
-	if !bytes.Equal(agentsBefore, agentsAfter) {
-		t.Fatal("second init changed AGENTS.md")
-	}
+	assertNoSafeLaneContent(t, clone)
 }
 
-func TestInit_GuidanceTeachesReleaseExecuteProof(t *testing.T) {
-	root := t.TempDir()
-	var stdout, stderr bytes.Buffer
-	if code := InitCommand(root).Run(context.Background(), []string{"--adapter", "codex"}, &stdout, &stderr); code != ExitOK {
-		t.Fatalf("want ExitOK, got %d (stderr: %s)", code, stderr.String())
-	}
-
-	body, err := os.ReadFile(filepath.Join(root, ".safelane", "agent-guidance.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	text := string(body)
-	want := []string{
-		"does not authorize a release",
-		"Eligibility does not mean the artifact is safe or deployed",
-		"safelane release --pr <number>",
-		"safelane execute <release-id>",
-		"Proof may remain pending",
-		"Pending proof is not a completed deployment",
-		"Never call Kubernetes or Argo directly",
-	}
-	for _, phrase := range want {
-		if !strings.Contains(text, phrase) {
-			t.Errorf("guidance missing %q", phrase)
+func TestInit_RequiresAppAndRepoAndRejectsAdapter(t *testing.T) {
+	t.Setenv(project.HomeEnv, t.TempDir())
+	for _, args := range [][]string{nil, {"--adapter", "codex"}} {
+		var stdout, stderr bytes.Buffer
+		if code := InitCommand(t.TempDir()).Run(context.Background(), args, &stdout, &stderr); code != ExitUsage {
+			t.Fatalf("args %v: want ExitUsage, got %d", args, code)
 		}
 	}
 }
 
-func TestInit_MissingAdapter_ExitsUsage(t *testing.T) {
-	var stdout, stderr bytes.Buffer
-	code := InitCommand(t.TempDir()).Run(context.Background(), nil, &stdout, &stderr)
-	if code != ExitUsage {
-		t.Fatalf("want ExitUsage, got %d", code)
-	}
-	if !strings.Contains(stderr.String(), "--adapter is required") {
-		t.Fatalf("want required-adapter message, got %q", stderr.String())
+func assertNoSafeLaneContent(t *testing.T, root string) {
+	t.Helper()
+	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		if strings.Contains(strings.ToLower(filepath.ToSlash(rel)), "safelane") {
+			t.Errorf("application repository contains SafeLane path %s", rel)
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		body, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if bytes.Contains(bytes.ToLower(body), []byte("safelane")) {
+			t.Errorf("application repository contains SafeLane text in %s", rel)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 
-func TestInit_UnknownAdapter_ExitsUsage(t *testing.T) {
-	var stdout, stderr bytes.Buffer
-	code := InitCommand(t.TempDir()).Run(context.Background(), []string{"--adapter", "claude"}, &stdout, &stderr)
-	if code != ExitUsage {
-		t.Fatalf("want ExitUsage, got %d", code)
-	}
-	if !strings.Contains(stderr.String(), `unknown adapter "claude"`) {
-		t.Fatalf("want unknown-adapter message, got %q", stderr.String())
-	}
-}
-
-func TestInit_AmbiguousAgentsMd_SecondRunUnchanged(t *testing.T) {
-	root := t.TempDir()
-	original := "<!-- BEGIN SAFELANE MANAGED: guidance -->\nno end\n"
-	if err := os.WriteFile(filepath.Join(root, "AGENTS.md"), []byte(original), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	cmd := InitCommand(root)
-	var stdout, stderr bytes.Buffer
-	if code := cmd.Run(context.Background(), []string{"--adapter", "codex"}, &stdout, &stderr); code != ExitOK {
-		t.Fatalf("first init: want ExitOK, got %d (stderr: %s)", code, stderr.String())
-	}
-
-	fallbackBefore, err := os.ReadFile(filepath.Join(root, ".safelane", "integrations", "codex.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	stdout.Reset()
-	stderr.Reset()
-	if code := cmd.Run(context.Background(), []string{"--adapter", "codex"}, &stdout, &stderr); code != ExitOK {
-		t.Fatalf("second init: want ExitOK, got %d (stderr: %s)", code, stderr.String())
-	}
-
-	report := stdout.String()
-	if !strings.Contains(report, "unchanged .safelane/integrations/codex.md") {
-		t.Fatalf("want unchanged fallback report, got %q", report)
-	}
-	if !strings.Contains(report, "skipped AGENTS.md") {
-		t.Fatalf("want AGENTS.md still skipped, got %q", report)
-	}
-
-	fallbackAfter, err := os.ReadFile(filepath.Join(root, ".safelane", "integrations", "codex.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(fallbackBefore, fallbackAfter) {
-		t.Fatal("second init changed the Codex fallback")
-	}
-	got, err := os.ReadFile(filepath.Join(root, "AGENTS.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(got) != original {
-		t.Fatal("second init changed the ambiguous AGENTS.md")
+func runGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
 	}
 }

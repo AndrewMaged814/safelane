@@ -6,7 +6,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -24,7 +23,7 @@ import (
 const defaultGateTimeout = 5 * time.Minute
 
 // RolloutCommand builds `safelane rollout start <release-id>`. root is the
-// application directory used to find .safelane/project.yml.
+// application clone whose GitHub remote selects the operator-owned app.
 func RolloutCommand(root, defaultStoreDir string) Command {
 	return Command{
 		Name:    "rollout",
@@ -64,7 +63,7 @@ func parseRolloutStartFlags(args []string, stderr io.Writer, defaultStoreDir str
 	fs := flag.NewFlagSet("rollout start", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.StringVar(&f.storeDir, "store-dir", defaultStoreDir, "directory Release records are persisted under")
-	fs.StringVar(&f.projectFile, "project", "", "path to project.yml (default: .safelane/project.yml)")
+	fs.StringVar(&f.projectFile, "project", "", "path to project.yml (default: matched app under SAFELANE_HOME)")
 	fs.StringVar(&f.controllerKubeconfig, "controller-kubeconfig", "",
 		"kubeconfig for the privileged controller identity (optional; every privileged call runs unprivileged when unset)")
 	fs.StringVar(&f.controllerContext, "controller-context", "", "kubeconfig context for the privileged controller identity (optional)")
@@ -93,6 +92,15 @@ func runRolloutStart(ctx context.Context, args []string, stdout, stderr io.Write
 		return ExitUsage
 	}
 
+	var paths runtimePaths
+	if f.storeDir == "" {
+		paths, err = resolveRuntime(root, f.projectFile, "", f.storeDir)
+		if err != nil {
+			printRolloutRejection(stderr, err)
+			return ExitFail
+		}
+		f.storeDir = paths.storeDir
+	}
 	st := &store.FileStore{Dir: f.storeDir}
 	r, err := st.Load(id)
 	if err != nil {
@@ -105,17 +113,18 @@ func runRolloutStart(ctx context.Context, args []string, stdout, stderr io.Write
 		fmt.Fprintf(stderr, "safelane rollout start: %v\n", err)
 		return ExitFail
 	}
-
 	if err := refuseIfNotEligible(r); err != nil {
 		printRolloutRejection(stderr, err)
 		return ExitFail
 	}
-
-	projPath := f.projectFile
-	if projPath == "" {
-		projPath = filepath.Join(root, filepath.FromSlash(project.RelPath))
+	if paths.projectFile == "" {
+		paths, err = resolveRuntime(root, f.projectFile, "", f.storeDir)
+		if err != nil {
+			printRolloutRejection(stderr, err)
+			return ExitFail
+		}
 	}
-	cfg, err := project.Load(projPath)
+	cfg, err := project.Load(paths.projectFile)
 	if err != nil {
 		printRolloutRejection(stderr, err)
 		return ExitFail

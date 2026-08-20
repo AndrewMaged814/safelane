@@ -6,7 +6,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -34,7 +33,7 @@ func parseRolloutPauseFlags(args []string, stderr io.Writer, defaultStoreDir str
 	fs := flag.NewFlagSet("rollout pause", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.StringVar(&f.storeDir, "store-dir", defaultStoreDir, "directory Release records are persisted under")
-	fs.StringVar(&f.projectFile, "project", "", "path to project.yml (default: .safelane/project.yml)")
+	fs.StringVar(&f.projectFile, "project", "", "path to project.yml (default: matched app under SAFELANE_HOME)")
 	fs.StringVar(&f.controllerKubeconfig, "controller-kubeconfig", "",
 		"kubeconfig for the privileged controller identity (optional; every privileged call runs unprivileged when unset)")
 	fs.StringVar(&f.controllerContext, "controller-context", "", "kubeconfig context for the privileged controller identity (optional)")
@@ -62,6 +61,12 @@ func runRolloutPause(ctx context.Context, args []string, stdout, stderr io.Write
 		return ExitUsage
 	}
 
+	paths, err := resolveRuntime(root, f.projectFile, "", f.storeDir)
+	if err != nil {
+		printRolloutRejection(stderr, err)
+		return ExitFail
+	}
+	f.storeDir = paths.storeDir
 	st := &store.FileStore{Dir: f.storeDir}
 	r, err := st.Load(id)
 	if err != nil {
@@ -75,11 +80,7 @@ func runRolloutPause(ctx context.Context, args []string, stdout, stderr io.Write
 		return ExitFail
 	}
 
-	projPath := f.projectFile
-	if projPath == "" {
-		projPath = filepath.Join(root, filepath.FromSlash(project.RelPath))
-	}
-	cfg, err := project.Load(projPath)
+	cfg, err := project.Load(paths.projectFile)
 	if err != nil {
 		printRolloutRejection(stderr, err)
 		return ExitFail

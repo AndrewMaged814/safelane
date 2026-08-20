@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/AndrewMaged814/safelane/internal/cli"
+	"github.com/AndrewMaged814/safelane/internal/policy"
 )
 
 // TestReleaseInspect_RealServices_AgainstIntent runs the wired
@@ -35,6 +36,9 @@ func TestReleaseInspect_RealServices_AgainstIntent(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, ".safelane", "project.yml"), project, 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(root, ".safelane", "policy.yml"), policy.DefaultYAML(), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	commands := []cli.Command{cli.ReleaseCommand(root, t.TempDir())}
 	var stdout, stderr bytes.Buffer
@@ -42,6 +46,7 @@ func TestReleaseInspect_RealServices_AgainstIntent(t *testing.T) {
 	code := cli.Dispatch(t.Context(), []string{
 		"release", "inspect",
 		"--file", "../../testdata/release-request.json",
+		"--project", filepath.Join(root, ".safelane", "project.yml"),
 		"--template-dir", "../../internal/render/testdata/release-template",
 	}, &stdout, &stderr, commands)
 
