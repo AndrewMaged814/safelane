@@ -44,7 +44,7 @@ func parseDoctorFlags(args []string, stderr io.Writer) (doctorFlags, error) {
 	fs.StringVar(&f.projectFile, "project", "", "path to project.yml")
 	fs.StringVar(&f.policyFile, "policy", "", "path to policy.yml")
 	fs.StringVar(&f.templateDir, "template-dir", "", "path to the Release Template")
-	fs.StringVar(&f.githubToken, "github-token", os.Getenv("GITHUB_TOKEN"), "GitHub API token")
+	fs.StringVar(&f.githubToken, "github-token", os.Getenv("GITHUB_TOKEN"), "GitHub API token (default: GITHUB_TOKEN, then gh auth token)")
 	if err := fs.Parse(args); err != nil {
 		return f, err
 	}
@@ -56,16 +56,29 @@ func parseDoctorFlags(args []string, stderr io.Writer) (doctorFlags, error) {
 }
 
 type doctorDeps struct {
-	run        execute.Runner
-	lookPath   func(string) (string, error)
-	githubPing func(context.Context, string) (string, error)
-	ghcrPing   func(context.Context) error
+	run         execute.Runner
+	lookPath    func(string) (string, error)
+	githubToken func(context.Context) (string, error)
+	githubPing  func(context.Context, string) (string, error)
+	ghcrPing    func(context.Context) error
 }
 
 func realDoctorDeps() doctorDeps {
 	return doctorDeps{
 		run:      execute.New(execute.Config{}).Run,
 		lookPath: exec.LookPath,
+		githubToken: func(ctx context.Context) (string, error) {
+			cmd := exec.CommandContext(ctx, "gh", "auth", "token")
+			out, err := cmd.Output()
+			if err != nil {
+				return "", fmt.Errorf("read GitHub CLI credential: %w", err)
+			}
+			token := strings.TrimSpace(string(out))
+			if token == "" {
+				return "", fmt.Errorf("GitHub CLI returned an empty credential")
+			}
+			return token, nil
+		},
 		githubPing: func(ctx context.Context, token string) (string, error) {
 			return (&githubverify.Client{Token: token}).Ping(ctx)
 		},
@@ -84,6 +97,8 @@ type doctorReport struct {
 	failed             int
 	unavailable        int
 	kubectlUnavailable bool
+	evidenceReady      bool
+	executionReady     bool
 }
 
 func (r doctorReport) Render() string {
@@ -110,7 +125,8 @@ func (r doctorReport) Render() string {
 		fmt.Fprintln(&b, "All checks passed.")
 	} else {
 		fmt.Fprintf(&b, "%d failed, %d unavailable.\n", r.failed, r.unavailable)
-		fmt.Fprintln(&b, "SafeLane can read evidence and assess a change. SafeLane cannot execute a rollout.")
+		fmt.Fprintf(&b, "Evidence and assessment  %s\n", readiness(r.evidenceReady))
+		fmt.Fprintf(&b, "Rollout execution       %s\n", readiness(r.executionReady))
 	}
 	return b.String()
 }
@@ -131,13 +147,21 @@ func runDoctor(ctx context.Context, args []string, stdout, stderr io.Writer, roo
 		return ExitFail
 	}
 
-	report := doctorReport{}
+	report := doctorReport{evidenceReady: true, executionReady: true}
 	pass := func(label, value string, continuations ...string) {
 		report.rows = append(report.rows, doctorRow{mark: "✓", label: label, value: value, continuations: continuations})
 	}
 	fail := func(label, value, remedy string) {
 		report.rows = append(report.rows, doctorRow{mark: "✗", label: label, value: value, remedy: remedy})
 		report.failed++
+	}
+	failEvidence := func(label, value, remedy string) {
+		fail(label, value, remedy)
+		report.evidenceReady = false
+	}
+	failExecution := func(label, value, remedy string) {
+		fail(label, value, remedy)
+		report.executionReady = false
 	}
 	skip := func(label, value string) {
 		report.rows = append(report.rows, doctorRow{mark: "–", label: label, value: value})
@@ -147,7 +171,7 @@ func runDoctor(ctx context.Context, args []string, stdout, stderr io.Writer, roo
 	pass("operator config", displayDoctorPath(paths.projectFile))
 	p, err := policy.Load(paths.policyFile)
 	if err != nil {
-		fail("release policy", err.Error(), "fix policy.yml and retry")
+		failEvidence("release policy", err.Error(), "fix policy.yml and retry")
 	} else {
 		pass("release policy", fmt.Sprintf("%s  (version %s, %d lanes)", displayDoctorPath(paths.policyFile), p.Version, len(p.Lanes)))
 	}
@@ -161,22 +185,29 @@ func runDoctor(ctx context.Context, args []string, stdout, stderr io.Writer, roo
 	}
 	tmpl, err := render.LoadDir(templateDir)
 	if err != nil {
-		fail("release template", err.Error(), "fix the Release Template and retry")
+		failEvidence("release template", err.Error(), "fix the Release Template and retry")
 	} else {
 		identity := tmpl.Identity()
 		pass("release template", fmt.Sprintf("%d files, digest %s", identity.FileCount, shortDigest(identity.ContentDigest)))
 	}
 
-	login, err := deps.githubPing(ctx, f.githubToken)
-	if err != nil {
-		fail("github", err.Error(), "check GitHub connectivity and the API token")
+	githubToken := f.githubToken
+	var tokenErr error
+	if githubToken == "" && deps.githubToken != nil {
+		githubToken, tokenErr = deps.githubToken(ctx)
+	}
+	login := ""
+	if tokenErr != nil {
+		failEvidence("github", tokenErr.Error(), "set GITHUB_TOKEN or authenticate GitHub CLI with `gh auth login`")
+	} else if login, err = deps.githubPing(ctx, githubToken); err != nil {
+		failEvidence("github", err.Error(), "set a valid GITHUB_TOKEN or refresh GitHub CLI authentication with `gh auth login`")
 	} else if login == "" {
 		pass("github", "api.github.com reachable")
 	} else {
 		pass("github", fmt.Sprintf("api.github.com reachable, token valid (%s)", login))
 	}
 	if err := deps.ghcrPing(ctx); err != nil {
-		fail("ghcr", err.Error(), "check registry connectivity")
+		failEvidence("ghcr", err.Error(), "check registry connectivity")
 	} else {
 		pass("ghcr", "ghcr.io reachable")
 	}
@@ -197,21 +228,21 @@ func runDoctor(ctx context.Context, args []string, stdout, stderr io.Writer, roo
 		if errors.Is(err, exec.ErrNotFound) {
 			value = "not found on PATH"
 		}
-		fail("kubectl", value, "install kubectl and the argo-rollouts plugin")
+		failExecution("kubectl", value, "install kubectl and the argo-rollouts plugin")
 		skipKubectlDependents(&report, skip, "kubectl missing")
 		fmt.Fprint(stdout, report.Render())
 		return ExitFail
 	}
 	clientVersion, err := parseKubectlVersion(kubectlVersion)
 	if err != nil {
-		fail("kubectl", err.Error(), "install a supported kubectl and the argo-rollouts plugin")
+		failExecution("kubectl", err.Error(), "install a supported kubectl and the argo-rollouts plugin")
 		skipKubectlDependents(&report, skip, "kubectl unavailable")
 		fmt.Fprint(stdout, report.Render())
 		return ExitFail
 	}
 	pluginVersion, err := deps.run(ctx, []string{"argo", "rollouts", "version", "--short"}, nil)
 	if err != nil {
-		fail("kubectl", fmt.Sprintf("%s, argo-rollouts plugin unavailable", clientVersion), "install kubectl and the argo-rollouts plugin")
+		failExecution("kubectl", fmt.Sprintf("%s, argo-rollouts plugin unavailable", clientVersion), "install kubectl and the argo-rollouts plugin")
 		skipKubectlDependents(&report, skip, "kubectl unavailable")
 		fmt.Fprint(stdout, report.Render())
 		return ExitFail
@@ -225,7 +256,7 @@ func runDoctor(ctx context.Context, args []string, stdout, stderr io.Writer, roo
 	ex.Run = deps.run
 	rolloutArgs := []string{"get", "rollout", cfg.Target.Rollout, "-n", cfg.Target.Namespace, "-o", "json"}
 	if _, err := deps.run(ctx, rolloutArgs, nil); err != nil {
-		fail("cluster", fmt.Sprintf("%s: %v", cfg.Target.Cluster, err), "check the kubeconfig context and the cluster state")
+		failExecution("cluster", fmt.Sprintf("%s: %v", cfg.Target.Cluster, err), "check the kubeconfig context and the cluster state")
 		skip("rollout", "skipped (cluster unreachable)")
 		skip("identity", "skipped (cluster unreachable)")
 		fmt.Fprint(stdout, report.Render())
@@ -234,7 +265,7 @@ func runDoctor(ctx context.Context, args []string, stdout, stderr io.Writer, roo
 	pass("cluster", fmt.Sprintf("%s reachable, namespace %s exists", cfg.Target.Cluster, cfg.Target.Namespace))
 	status, err := ex.GetStatus(ctx)
 	if err != nil {
-		fail("rollout", err.Error(), "check that the configured Rollout exists")
+		failExecution("rollout", err.Error(), "check that the configured Rollout exists")
 		skip("identity", "skipped (rollout unavailable)")
 		fmt.Fprint(stdout, report.Render())
 		return ExitFail
@@ -245,7 +276,7 @@ func runDoctor(ctx context.Context, args []string, stdout, stderr io.Writer, roo
 	callerIdentity := "system:serviceaccount:" + cfg.Target.Namespace + ":safelane-caller"
 	capabilities, err := ex.AssertCapabilities(ctx, controllerIdentity, callerIdentity)
 	if err != nil {
-		fail("identity", err.Error(), "check the configured Kubernetes identities and RBAC")
+		failExecution("identity", err.Error(), "check the configured Kubernetes identities and RBAC")
 		skip("credential separation", "skipped (identity unavailable)")
 		fmt.Fprint(stdout, report.Render())
 		return ExitFail
@@ -259,6 +290,7 @@ func runDoctor(ctx context.Context, args []string, stdout, stderr io.Writer, roo
 		controllerRow.mark = "✗"
 		controllerRow.remedy = "grant the controller identity patch access to Rollouts"
 		report.failed++
+		report.executionReady = false
 	}
 	report.rows = append(report.rows, controllerRow)
 	callerRow := doctorRow{
@@ -273,14 +305,15 @@ func runDoctor(ctx context.Context, args []string, stdout, stderr io.Writer, roo
 		callerRow.mark = "✗"
 		callerRow.remedy = "restrict the caller to read-only Rollout access"
 		report.failed++
+		report.executionReady = false
 	}
 	report.rows = append(report.rows, callerRow)
 
 	contexts, err := deps.run(ctx, []string{"config", "get-contexts", "-o", "name"}, nil)
 	if err != nil {
-		fail("credential separation", err.Error(), "check the agent's default kubeconfig")
+		failExecution("credential separation", err.Error(), "check the agent's default kubeconfig")
 	} else if containsLine(string(contexts), paths.controllerContext) {
-		fail("credential separation", "privileged context found in the agent's default kubeconfig", "remove the controller context from ~/.kube/config")
+		failExecution("credential separation", "privileged context found in the agent's default kubeconfig", "remove the controller context from ~/.kube/config")
 	} else {
 		pass("credential separation", "no privileged context in the agent's default kubeconfig")
 	}
@@ -290,6 +323,13 @@ func runDoctor(ctx context.Context, args []string, stdout, stderr io.Writer, roo
 		return ExitFail
 	}
 	return ExitOK
+}
+
+func readiness(ready bool) string {
+	if ready {
+		return "ready"
+	}
+	return "not ready"
 }
 
 func skipKubectlDependents(report *doctorReport, skip func(string, string), reason string) {

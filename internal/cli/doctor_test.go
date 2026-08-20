@@ -125,6 +125,67 @@ func TestDoctorHealthyMatchesA1Golden(t *testing.T) {
 	assertGolden(t, "a1-doctor.txt", actual)
 }
 
+func TestDoctorGitHubFailureReportsEvidenceNotReadyAndExecutionReady(t *testing.T) {
+	projectFile, policyFile, templateDir := doctorRuntime(t)
+	run, _ := healthyDoctorRunner(t)
+	deps := doctorDeps{
+		run:      run,
+		lookPath: func(string) (string, error) { return "found", nil },
+		githubPing: func(context.Context, string) (string, error) {
+			return "", errors.New("github: GET /user: unexpected status 401")
+		},
+		ghcrPing: func(context.Context) error { return nil },
+	}
+	var stdout, stderr bytes.Buffer
+	code := runDoctor(context.Background(), []string{
+		"--project", projectFile, "--policy", policyFile, "--template-dir", templateDir,
+	}, &stdout, &stderr, ".", deps)
+	if code != ExitFail {
+		t.Fatalf("doctor exit = %d, want %d", code, ExitFail)
+	}
+	out := stdout.String()
+	for _, want := range []string{"Evidence and assessment  not ready", "Rollout execution       ready"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("doctor summary missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "can read evidence") {
+		t.Fatalf("doctor contradicted the GitHub failure:\n%s", out)
+	}
+}
+
+func TestDoctorUsesGitHubCLIKeyringTokenWhenEnvironmentIsEmpty(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "")
+	projectFile, policyFile, templateDir := doctorRuntime(t)
+	run, _ := healthyDoctorRunner(t)
+	resolved := false
+	deps := doctorDeps{
+		run:      run,
+		lookPath: func(string) (string, error) { return "found", nil },
+		githubToken: func(context.Context) (string, error) {
+			resolved = true
+			return "keyring-token", nil
+		},
+		githubPing: func(_ context.Context, token string) (string, error) {
+			if token != "keyring-token" {
+				t.Fatalf("github token = %q, want keyring token", token)
+			}
+			return "AndrewMaged814", nil
+		},
+		ghcrPing: func(context.Context) error { return nil },
+	}
+	var stdout, stderr bytes.Buffer
+	code := runDoctor(context.Background(), []string{
+		"--project", projectFile, "--policy", policyFile, "--template-dir", templateDir,
+	}, &stdout, &stderr, ".", deps)
+	if code != ExitOK {
+		t.Fatalf("doctor exit = %d, stderr: %s\n%s", code, stderr.String(), stdout.String())
+	}
+	if !resolved {
+		t.Fatal("doctor did not consult the GitHub CLI keyring")
+	}
+}
+
 func TestDoctorMissingKubectlMatchesN2AndSkipsDependents(t *testing.T) {
 	projectFile, policyFile, templateDir := doctorRuntime(t)
 	var calls int

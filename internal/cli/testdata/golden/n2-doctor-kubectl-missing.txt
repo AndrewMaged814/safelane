@@ -11,4 +11,5 @@
   – identity           skipped (kubectl missing)
 
 1 failed, 3 unavailable.
-SafeLane can read evidence and assess a change. SafeLane cannot execute a rollout.
+Evidence and assessment  ready
+Rollout execution       not ready
