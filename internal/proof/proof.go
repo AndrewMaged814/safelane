@@ -82,19 +82,20 @@ type Decision struct {
 func From(r *release.Release) Proof {
 	elig := r.Eligibility()
 	execution := r.Execution()
+	var envelope *release.RolloutEnvelope
+	if env, ok := elig.Envelope(); ok {
+		envelope = &env
+	}
 	p := Proof{
 		releaseID: r.ID, createdAt: r.CreatedAt, artifact: artifactFrom(r), execution: execution,
-		outcome: outcome(execution),
+		outcome: outcome(execution, envelope),
 		decision: Decision{
 			Eligibility: elig.Status().String(), PolicyVersion: elig.PolicyVersion(),
-			ReasonCode: elig.ReasonCode(), Message: elig.Message(), Retryable: elig.Retryable(), Source: "safelane",
+			ReasonCode: elig.ReasonCode(), Message: elig.Message(), Retryable: elig.Retryable(), Envelope: envelope, Source: "safelane",
 		},
 	}
 	if a, ok := r.RecordedAssessment(); ok {
 		p.assessment = &a
-	}
-	if env, ok := elig.Envelope(); ok {
-		p.decision.Envelope = &env
 	}
 	if boundary, ok := r.Boundary(); ok {
 		p.boundary = &boundary
@@ -102,7 +103,7 @@ func From(r *release.Release) Proof {
 	return p
 }
 
-func outcome(entries []release.ExecutionEntry) string {
+func outcome(entries []release.ExecutionEntry, envelope *release.RolloutEnvelope) string {
 	if len(entries) == 0 {
 		return "pending"
 	}
@@ -112,6 +113,12 @@ func outcome(entries []release.ExecutionEntry) string {
 	}
 	if last.Verb == release.VerbPause {
 		return "paused"
+	}
+	if envelope != nil && last.Outcome == release.OutcomeGranted {
+		stages := envelope.Stages()
+		if len(stages) > 0 && last.RequestedWeight == stages[len(stages)-1] {
+			return "complete"
+		}
 	}
 	return "in_progress"
 }

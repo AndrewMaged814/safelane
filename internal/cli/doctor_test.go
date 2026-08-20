@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -46,28 +47,61 @@ func healthyDoctorRunner(t *testing.T) (func(context.Context, []string, []byte) 
 	digest := strings.Repeat("1", 60) + "7742"
 	run := func(_ context.Context, args []string, _ []byte) ([]byte, error) {
 		calls = append(calls, append([]string{}, args...))
-		switch strings.Join(args, " ") {
+		joined := strings.Join(args, " ")
+		switch {
+		case strings.HasSuffix(joined, "--context safelane-controller auth whoami -o json"):
+			return []byte(`{"status":{"userInfo":{"username":"system:serviceaccount:podinfo:safelane-controller"}}}`), nil
+		case joined == "auth whoami -o json":
+			return []byte(`{"status":{"userInfo":{"username":"system:serviceaccount:podinfo:safelane-caller"}}}`), nil
+		case strings.HasSuffix(joined, "--context safelane-controller auth can-i patch rollouts.argoproj.io --namespace podinfo"):
+			return []byte("yes\n"), nil
+		case joined == "auth can-i get rollouts.argoproj.io --namespace podinfo":
+			return []byte("yes\n"), nil
+		case joined == "auth can-i patch rollouts.argoproj.io --namespace podinfo":
+			return []byte("no\n"), nil
+		}
+		switch joined {
 		case "version --client -o json":
 			return []byte(`{"clientVersion":{"gitVersion":"v1.31.2"}}`), nil
 		case "argo rollouts version --short":
 			return []byte("v1.7.2\n"), nil
-		case "get namespace podinfo -o name":
-			return []byte("namespace/podinfo\n"), nil
 		case "get rollout podinfo -n podinfo -o json":
 			return []byte(`{"status":{"phase":"Healthy","stableRS":"abc","currentPodHash":"abc"},` +
 				`"spec":{"template":{"spec":{"containers":[{"image":"ghcr.io/andrewmaged814/podinfo@sha256:` + digest + `"}]}}}}`), nil
 		case "config get-contexts -o name":
 			return []byte("safelane-caller\n"), nil
 		}
-		if len(args) > 0 && containsLine(strings.Join(args, "\n"), "auth") {
-			if args[6] == "patch" && strings.HasSuffix(args[len(args)-1], "safelane-caller") {
-				return []byte("no\n"), nil
-			}
-			return []byte("yes\n"), nil
-		}
 		return nil, errors.New("unexpected kubectl call: " + strings.Join(args, " "))
 	}
 	return run, &calls
+}
+
+func TestDoctorClusterReachabilityUsesCallerRolloutRead(t *testing.T) {
+	projectFile, policyFile, templateDir := doctorRuntime(t)
+	run, calls := healthyDoctorRunner(t)
+	deps := doctorDeps{
+		run:        run,
+		lookPath:   func(string) (string, error) { return "found", nil },
+		githubPing: func(context.Context, string) (string, error) { return "AndrewMaged814", nil },
+		ghcrPing:   func(context.Context) error { return nil },
+	}
+	var stdout, stderr bytes.Buffer
+	runDoctor(context.Background(), []string{
+		"--project", projectFile, "--policy", policyFile, "--template-dir", templateDir,
+	}, &stdout, &stderr, ".", deps)
+
+	want := []string{"get", "rollout", "podinfo", "-n", "podinfo", "-o", "json"}
+	for _, call := range *calls {
+		if slices.Equal(call, want) {
+			continue
+		}
+		if strings.Contains(strings.Join(call, " "), "get namespace") {
+			t.Fatalf("doctor probed Namespace outside the restricted identity contract: %v", call)
+		}
+	}
+	if !slices.ContainsFunc(*calls, func(call []string) bool { return slices.Equal(call, want) }) {
+		t.Fatal("caller Rollout read was not used for cluster reachability")
+	}
 }
 
 func TestDoctorHealthyMatchesA1Golden(t *testing.T) {
@@ -122,7 +156,7 @@ func TestDoctorUnreachableClusterMatchesN3Fragment(t *testing.T) {
 	projectFile, policyFile, templateDir := doctorRuntime(t)
 	healthy, _ := healthyDoctorRunner(t)
 	run := func(ctx context.Context, args []string, stdin []byte) ([]byte, error) {
-		if strings.Join(args, " ") == "get namespace podinfo -o name" {
+		if strings.Join(args, " ") == "get rollout podinfo -n podinfo -o json" {
 			return nil, errors.New("dial tcp 10.0.0.12:6443: i/o timeout")
 		}
 		return healthy(ctx, args, stdin)

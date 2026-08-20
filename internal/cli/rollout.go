@@ -308,7 +308,7 @@ func (s startResult) Render() string {
 	fmt.Fprintln(&b)
 
 	lane := ""
-	if a, ok := s.release.Assessment(); ok {
+	if a, ok := s.release.RecordedAssessment(); ok {
 		lane = a.Lane
 	}
 	fmt.Fprintf(&b, "lane          %s\n", lane)

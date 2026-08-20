@@ -28,8 +28,8 @@ func (p Proof) Details() string {
 	if p.artifact.Image != "" {
 		fmt.Fprintf(&b, "  image             %s\n", p.artifact.Image)
 	}
-	if p.artifact.BundleDigest != "" {
-		fmt.Fprintf(&b, "  bundle            %d resources, template digest %s\n", len(p.artifact.BundleHashes), p.artifact.BundleDigest)
+	if p.artifact.Template != nil {
+		fmt.Fprintf(&b, "  bundle            %d resources, template digest %s\n", len(p.artifact.BundleHashes), p.artifact.Template.ContentDigest)
 	}
 	for _, reason := range p.artifact.Reasons {
 		fmt.Fprintf(&b, "  evidence          [%s] %s: %s\n", reason.Category, reason.Code, reason.Message)

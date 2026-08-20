@@ -2,21 +2,35 @@ package execute
 
 import (
 	"context"
+	"errors"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
 
-func TestAssertBoundaryUsesCallerIdentityAndRecordsCapability(t *testing.T) {
+func TestAssertBoundaryUsesEachConfiguredIdentityAndRecordsCapability(t *testing.T) {
 	var calls [][]string
 	e := New(Config{Namespace: "podinfo", ControllerKubeconfig: "controller.kubeconfig", ControllerContext: "controller"})
 	e.Now = func() time.Time { return time.Date(2026, 8, 20, 14, 26, 0, 0, time.UTC) }
 	e.Run = func(_ context.Context, args []string, _ []byte) ([]byte, error) {
 		calls = append(calls, append([]string{}, args...))
-		if args[6] == "get" || (args[6] == "patch" && args[11] == "system:serviceaccount:podinfo:safelane-controller") {
+		joined := strings.Join(args, " ")
+		switch joined {
+		case "--kubeconfig controller.kubeconfig --context controller auth whoami -o json":
+			return []byte(`{"status":{"userInfo":{"username":"system:serviceaccount:podinfo:safelane-controller"}}}`), nil
+		case "auth whoami -o json":
+			return []byte(`{"status":{"userInfo":{"username":"system:serviceaccount:podinfo:safelane-caller"}}}`), nil
+		case "--kubeconfig controller.kubeconfig --context controller auth can-i patch rollouts.argoproj.io --namespace podinfo":
 			return []byte("yes\n"), nil
+		case "auth can-i get rollouts.argoproj.io --namespace podinfo":
+			return []byte("yes\n"), nil
+		case "auth can-i patch rollouts.argoproj.io --namespace podinfo":
+			return []byte("no\n"), errors.New("exit status 1")
+		default:
+			t.Fatalf("unexpected kubectl call: %v", args)
+			return nil, nil
 		}
-		return []byte("no\n"), nil
 	}
 	b, err := e.AssertBoundary(context.Background(), "system:serviceaccount:podinfo:safelane-controller", "system:serviceaccount:podinfo:safelane-caller")
 	if err != nil {
@@ -25,11 +39,24 @@ func TestAssertBoundaryUsesCallerIdentityAndRecordsCapability(t *testing.T) {
 	if !b.CallerCapability.GetRollouts || b.CallerCapability.PatchRollouts {
 		t.Fatalf("capability = %+v", b.CallerCapability)
 	}
-	wantGet := []string{"--kubeconfig", "controller.kubeconfig", "--context", "controller", "auth", "can-i", "get", "rollouts.argoproj.io", "--namespace", "podinfo", "--as", "system:serviceaccount:podinfo:safelane-caller"}
-	if !reflect.DeepEqual(calls[1], wantGet) {
-		t.Fatalf("get args = %v", calls[1])
+	wantCallerGet := []string{"auth", "can-i", "get", "rollouts.argoproj.io", "--namespace", "podinfo"}
+	if !reflect.DeepEqual(calls[3], wantCallerGet) {
+		t.Fatalf("caller get args = %v, want %v", calls[3], wantCallerGet)
 	}
-	if len(calls) != 3 || calls[0][6] != "patch" || calls[2][6] != "patch" {
-		t.Fatalf("calls = %v", calls)
+	if len(calls) != 5 {
+		t.Fatalf("calls = %v, want two identity checks and three capability checks", calls)
+	}
+}
+
+func TestAssertCapabilitiesRejectsUnexpectedConfiguredIdentity(t *testing.T) {
+	e := New(Config{Namespace: "podinfo", ControllerKubeconfig: "controller.kubeconfig", ControllerContext: "controller"})
+	e.Run = func(_ context.Context, _ []string, _ []byte) ([]byte, error) {
+		return []byte(`{"status":{"userInfo":{"username":"system:serviceaccount:podinfo:someone-else"}}}`), nil
+	}
+	_, err := e.AssertCapabilities(context.Background(),
+		"system:serviceaccount:podinfo:safelane-controller",
+		"system:serviceaccount:podinfo:safelane-caller")
+	if err == nil || !strings.Contains(err.Error(), "unexpected Kubernetes identity") {
+		t.Fatalf("error = %v, want unexpected identity", err)
 	}
 }

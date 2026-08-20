@@ -219,3 +219,36 @@ func TestProofJSONCarriesRecordedAssessmentExecutionBoundaryAndOutcome(t *testin
 		}
 	}
 }
+
+func TestOutcomeIsCompleteWhenFinalEnvelopeWeightWasGranted(t *testing.T) {
+	envelope, err := release.NewRolloutEnvelope([]int{5, 100}, "start")
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries := []release.ExecutionEntry{
+		{At: time.Now(), Verb: release.VerbStart, RequestedWeight: 5, Outcome: release.OutcomeGranted},
+		{At: time.Now(), Verb: release.VerbAdvance, RequestedWeight: 100, Outcome: release.OutcomeGranted},
+	}
+	if got := outcome(entries, &envelope); got != "complete" {
+		t.Fatalf("outcome = %q, want complete", got)
+	}
+}
+
+func TestDetailsLabelsTemplateAndBundleDigestsAccurately(t *testing.T) {
+	r := completeRelease(t)
+	tmpl, ok := r.TemplateIdentity()
+	if !ok {
+		t.Fatal("fixture has no template identity")
+	}
+	bundle, ok := r.Bundle()
+	if !ok {
+		t.Fatal("fixture has no bundle")
+	}
+	out := From(r).Details()
+	if !strings.Contains(out, "template digest "+tmpl.ContentDigest) {
+		t.Fatalf("proof does not print the template content digest under its label\n%s", out)
+	}
+	if !strings.Contains(out, "hashed bundle, digest "+bundle.Digest()) {
+		t.Fatalf("proof does not print the bundle digest under its label\n%s", out)
+	}
+}

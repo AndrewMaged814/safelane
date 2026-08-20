@@ -218,7 +218,13 @@ func runDoctor(ctx context.Context, args []string, stdout, stderr io.Writer, roo
 	}
 	pass("kubectl", fmt.Sprintf("%s, argo-rollouts plugin %s", clientVersion, strings.TrimSpace(string(pluginVersion))))
 
-	if _, err := deps.run(ctx, []string{"get", "namespace", cfg.Target.Namespace, "-o", "name"}, nil); err != nil {
+	ex := newExecutor(execute.Config{
+		Namespace: cfg.Target.Namespace, Rollout: cfg.Target.Rollout,
+		ControllerKubeconfig: paths.controllerKubeconfig, ControllerContext: paths.controllerContext,
+	})
+	ex.Run = deps.run
+	rolloutArgs := []string{"get", "rollout", cfg.Target.Rollout, "-n", cfg.Target.Namespace, "-o", "json"}
+	if _, err := deps.run(ctx, rolloutArgs, nil); err != nil {
 		fail("cluster", fmt.Sprintf("%s: %v", cfg.Target.Cluster, err), "check the kubeconfig context and the cluster state")
 		skip("rollout", "skipped (cluster unreachable)")
 		skip("identity", "skipped (cluster unreachable)")
@@ -226,12 +232,6 @@ func runDoctor(ctx context.Context, args []string, stdout, stderr io.Writer, roo
 		return ExitFail
 	}
 	pass("cluster", fmt.Sprintf("%s reachable, namespace %s exists", cfg.Target.Cluster, cfg.Target.Namespace))
-
-	ex := newExecutor(execute.Config{
-		Namespace: cfg.Target.Namespace, Rollout: cfg.Target.Rollout,
-		ControllerKubeconfig: paths.controllerKubeconfig, ControllerContext: paths.controllerContext,
-	})
-	ex.Run = deps.run
 	status, err := ex.GetStatus(ctx)
 	if err != nil {
 		fail("rollout", err.Error(), "check that the configured Rollout exists")

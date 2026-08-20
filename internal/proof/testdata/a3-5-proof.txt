@@ -6,7 +6,7 @@ ARTIFACT
   merge commit      4f0c1b9e7ac2d5386b1d9f4a5c8e2b7d3a6f0e91
   required check    build-and-push (success)
   image             ghcr.io/andrewmaged814/podinfo@sha256:3fbc1d9a7e42c8056d1f9b3e7a5c204d8e6b1f39a7c50d28e4b6f19a3c7d50e8
-  bundle            5 resources, template digest sha256:b97a88c46c66aea385f5497be3446891892eb320aff5bd42c1a2b0254f1f432b
+  bundle            5 resources, template digest sha256:709cc3bcfe016ff109cde05ca3d7ac99fc057da7618b4c3d9b332d4b095b720a
 
 ASSESSMENT
   change            3 files, +64 −12

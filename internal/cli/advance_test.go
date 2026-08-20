@@ -54,7 +54,7 @@ func fastLaneStartedForEnvironment(t *testing.T, environment string) *release.Re
 	if err != nil {
 		t.Fatalf("test setup: %v", err)
 	}
-	return started
+	return persistAndReload(t, started)
 }
 
 // guardedLaneStarted builds the A3.1/A3.2 release (guarded lane, weights
@@ -85,7 +85,7 @@ func guardedLaneStarted(t *testing.T) *release.Release {
 	if err != nil {
 		t.Fatalf("test setup: %v", err)
 	}
-	return started
+	return persistAndReload(t, started)
 }
 
 // stepsJSON is the Rollout's own `spec.strategy.canary.steps` shape for a
@@ -118,6 +118,12 @@ func stepIndexOf(weights []int, weight int) int {
 // the given lane.
 func atGateStatus(weights []int, weight int) string {
 	return fmt.Sprintf(`{"status":{"phase":"Paused","pauseConditions":[{"reason":"CanaryPauseStep"}],"currentStepIndex":%d},`+
+		`"spec":{"strategy":{"canary":{"steps":[%s]}}}}`, stepIndexOf(weights, weight), stepsJSON(weights))
+}
+
+func atGateWithBackgroundAnalysisRunning(weights []int, weight int) string {
+	return fmt.Sprintf(`{"status":{"phase":"Paused","pauseConditions":[{"reason":"CanaryPauseStep"}],"currentStepIndex":%d,`+
+		`"canary":{"currentBackgroundAnalysisRunStatus":{"name":"podinfo-5f9b48bf7c-4","status":"Running"}}},`+
 		`"spec":{"strategy":{"canary":{"steps":[%s]}}}}`, stepIndexOf(weights, weight), stepsJSON(weights))
 }
 
@@ -256,6 +262,37 @@ func TestRolloutAdvance_ToCompletion_MatchesA23(t *testing.T) {
 	}
 }
 
+func TestRolloutAdvance_FinalWeightWaitsForRunningBackgroundAnalysis(t *testing.T) {
+	rel := fastLaneStarted(t)
+
+	q := &queueRunner{}
+	q.enqueue(atGateWithBackgroundAnalysisRunning(fastWeights, 5), nil) // initial GetStatus
+	q.enqueue(atGateWithBackgroundAnalysisRunning(fastWeights, 5), nil) // analysis wait: still running
+	q.enqueue(fmt.Sprintf(`{"status":{"phase":"Paused","pauseConditions":[{"reason":"CanaryPauseStep"}],"currentStepIndex":%d,`+
+		`"canary":{"currentBackgroundAnalysisRunStatus":{"name":"podinfo-5f9b48bf7c-2","status":"Successful"}}},`+
+		`"spec":{"strategy":{"canary":{"steps":[%s]}}}}`, stepIndexOf(fastWeights, 5), stepsJSON(fastWeights)), nil)
+	q.enqueue("", nil) // promote only after analysis settled
+	q.enqueue(`{"status":{"phase":"Healthy","stableRS":"abc123","currentPodHash":"abc123",`+
+		`"canary":{"currentBackgroundAnalysisRunStatus":{"name":"podinfo-5f9b48bf7c-2","status":"Successful"}}},`+
+		`"spec":{"strategy":{"canary":{"steps":[{"setWeight":5},{"pause":{}}]}}}}`, nil)
+	q.enqueue(analysisRunJSON, nil)
+
+	ex := execute.New(execute.Config{Namespace: "podinfo", Rollout: "podinfo"})
+	ex.Run = q.run
+	ex.Sleep = func(time.Duration) {}
+
+	result, err := advanceRollout(context.Background(), rel, ex, "podinfo", nil, time.Minute, time.Now)
+	if err != nil {
+		t.Fatalf("advanceRollout: %v", err)
+	}
+	if !strings.Contains(result.Render(), "(3/3 measurements)") {
+		t.Fatalf("completion did not report the settled analysis:\n%s", result.Render())
+	}
+	if got := strings.Join(q.calls[3], " "); !strings.HasPrefix(got, "argo rollouts promote ") {
+		t.Fatalf("call after analysis settled = %q, want promote", got)
+	}
+}
+
 // TestRolloutAdvance_ToCompletion_SurvivesArgoClearingTheTransientField is a
 // regression test for a race this build hit in its own live rehearsal: Argo
 // clears `.status.canary.currentBackgroundAnalysisRunStatus` from the
@@ -336,6 +373,24 @@ func TestRolloutAdvance_OverWideRequest_MatchesA33(t *testing.T) {
 	if last.Verb != release.VerbAdvance || last.RequestedWeight != 100 ||
 		last.Outcome != release.OutcomeRefused || last.ReasonCode != "transition_exceeds_envelope" {
 		t.Errorf("last entry = %+v, want a refused advance to weight 100 (transition_exceeds_envelope)", last)
+	}
+}
+
+func TestParseRolloutAdvanceFlagsAcceptsAppendixIDFirstTo(t *testing.T) {
+	var stderr bytes.Buffer
+	f, id, err := parseRolloutAdvanceFlags(
+		[]string{"rel_01M0F3QD9NBV6JKC2WS8XA7TR4", "--to", "100"},
+		&stderr,
+		".safelane/releases",
+	)
+	if err != nil {
+		t.Fatalf("parse documented A3.3 command: %v\n%s", err, stderr.String())
+	}
+	if id != "rel_01M0F3QD9NBV6JKC2WS8XA7TR4" {
+		t.Fatalf("id = %q", id)
+	}
+	if f.to == nil || *f.to != 100 {
+		t.Fatalf("to = %v, want 100", f.to)
 	}
 }
 
@@ -514,6 +569,7 @@ func TestRolloutAdvance_ArgoAborts_MatchesA34(t *testing.T) {
 	q := &queueRunner{}
 	q.enqueue(atGateStatus(guardedWeights, 1), nil) // GetStatus before deciding
 	q.enqueue("", nil)                              // promote
+	q.enqueue(atGateWithBackgroundAnalysisRunning(guardedWeights, 5), nil)
 	q.enqueue(degradedAbortStatus(guardedWeights, "4"), nil)
 	q.enqueue(failingAnalysisRunJSON, nil) // GetAnalysisRun
 

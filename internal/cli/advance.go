@@ -121,6 +121,9 @@ type rolloutAdvanceFlags struct {
 func parseRolloutAdvanceFlags(args []string, stderr io.Writer, defaultStoreDir string) (rolloutAdvanceFlags, string, error) {
 	var f rolloutAdvanceFlags
 	var toStr string
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		args = append(append([]string{}, args[1:]...), args[0])
+	}
 	fs := flag.NewFlagSet("rollout advance", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.StringVar(&f.storeDir, "store-dir", defaultStoreDir, "directory Release records are persisted under")
@@ -206,7 +209,7 @@ func advanceRollout(ctx context.Context, r *release.Release, ex *execute.Executo
 		return advanceResult{}, release.Internal("release_without_bundle",
 			"an eligible release must carry a rendered bundle to advance")
 	}
-	assessment, _ := r.Assessment()
+	assessment, _ := r.RecordedAssessment()
 
 	// "no execution entries recorded" (Appendix C5's state table) is read
 	// straight off the release's own record: a release that never started
@@ -274,17 +277,52 @@ func advanceRollout(ctx context.Context, r *release.Release, ex *execute.Executo
 		return result, nil
 	}
 
-	if err := ex.Promote(ctx); err != nil {
-		return result, err
+	final := observed
+	shouldPromote := true
+	var waitErr error
+	if plan.requestedWeight == weights[len(weights)-1] && observed.AnalysisRunPhase == "Running" {
+		final, err = ex.WaitForBackgroundAnalysis(ctx, timeout)
+		result.final = final
+		if errors.Is(err, execute.ErrGateTimeout) {
+			return result, err
+		}
+		if err != nil {
+			return result, err
+		}
+		switch final.State {
+		case execute.StateAborted, execute.StateDegraded:
+			shouldPromote = false
+		case execute.StateAtGate:
+		default:
+			return result, release.Invalid("rollout_did_not_reach_a_gate", "",
+				fmt.Sprintf("the rollout reached state %q while waiting for final analysis", final.State),
+				"Read `safelane status` for detail.")
+		}
 	}
 
-	final, waitErr := ex.WaitForGate(ctx, timeout, nil)
-	result.final = final
-	if errors.Is(waitErr, execute.ErrGateTimeout) {
-		return result, waitErr
+	if shouldPromote {
+		if err := ex.Promote(ctx); err != nil {
+			return result, err
+		}
+
+		final, waitErr = ex.WaitForGate(ctx, timeout, nil)
+		result.final = final
+		if errors.Is(waitErr, execute.ErrGateTimeout) {
+			return result, waitErr
+		}
+		if waitErr != nil {
+			return result, waitErr
+		}
 	}
-	if waitErr != nil {
-		return result, waitErr
+	if final.State == execute.StateAtGate && final.AnalysisRunPhase == "Running" {
+		final, waitErr = ex.WaitForBackgroundAnalysis(ctx, timeout)
+		result.final = final
+		if errors.Is(waitErr, execute.ErrGateTimeout) {
+			return result, waitErr
+		}
+		if waitErr != nil {
+			return result, waitErr
+		}
 	}
 
 	// A3.4's payoff: a deliberately failing analysis tripped its own
@@ -612,7 +650,7 @@ func (r advanceResult) renderComplete() string {
 	fmt.Fprintln(&b)
 
 	lane := ""
-	if a, ok := r.release.Assessment(); ok {
+	if a, ok := r.release.RecordedAssessment(); ok {
 		lane = a.Lane
 	}
 	gates := gateCount(r.weights)
@@ -647,7 +685,7 @@ func (r advanceResult) renderAtGate() string {
 	fmt.Fprintln(&b)
 
 	lane := ""
-	if a, ok := r.release.Assessment(); ok {
+	if a, ok := r.release.RecordedAssessment(); ok {
 		lane = a.Lane
 	}
 	fmt.Fprintf(&b, "lane          %s\n", lane)
@@ -694,7 +732,7 @@ func (r advanceResult) renderArgoAbort() string {
 	fmt.Fprintln(&b)
 
 	lane := ""
-	if a, ok := r.release.Assessment(); ok {
+	if a, ok := r.release.RecordedAssessment(); ok {
 		lane = a.Lane
 	}
 	last := 0

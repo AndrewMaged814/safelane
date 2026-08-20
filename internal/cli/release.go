@@ -297,7 +297,7 @@ func printSummary(w io.Writer, r *release.Release) {
 		}
 	}
 
-	if a, ok := r.Assessment(); ok {
+	if a, ok := r.RecordedAssessment(); ok {
 		fmt.Fprintf(w, "risk: %s (%s)\n", a.Risk, a.CombinedBy)
 		fmt.Fprintf(w, "lane: %s\n", a.Lane)
 	}

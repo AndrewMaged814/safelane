@@ -53,6 +53,19 @@ func (c inspectCase) buildRelease(t *testing.T) *release.Release {
 	return result.Release
 }
 
+func persistAndReload(t *testing.T, rel *release.Release) *release.Release {
+	t.Helper()
+	s := &store.FileStore{Dir: t.TempDir()}
+	if err := s.Save(rel); err != nil {
+		t.Fatalf("persist release: %v", err)
+	}
+	reloaded, err := s.Load(rel.ID)
+	if err != nil {
+		t.Fatalf("reload release: %v", err)
+	}
+	return reloaded
+}
+
 // queueRunner is Appendix D's fake command factory: every kubectl call
 // `rollout start` makes goes through it, so these tests touch no cluster.
 type queueRunner struct {
@@ -161,6 +174,7 @@ func TestRolloutStart_RiskyChange_MatchesA32(t *testing.T) {
 	if a, ok := rel.Assessment(); !ok || a.Lane != "guarded" {
 		t.Fatalf("test setup: want lane guarded, got %+v", a)
 	}
+	rel = persistAndReload(t, rel)
 
 	q := &queueRunner{}
 	q.enqueue(applyUnchangedFour+"rollout.argoproj.io/podinfo configured\n", nil)
