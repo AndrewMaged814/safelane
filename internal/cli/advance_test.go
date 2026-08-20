@@ -5,13 +5,18 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/AndrewMaged814/safelane/internal/assess"
 	"github.com/AndrewMaged814/safelane/internal/execute"
+	"github.com/AndrewMaged814/safelane/internal/project"
 	"github.com/AndrewMaged814/safelane/internal/release"
+	"github.com/AndrewMaged814/safelane/internal/store"
 )
 
 var fastWeights = []int{5, 100}
@@ -124,6 +129,73 @@ const analysisRunJSON = `{"status":{"phase":"Successful","metricResults":[{"name
 const failingAnalysisRunJSON = `{"status":{"phase":"Failed","metricResults":[{"name":"request-success-rate","count":3,` +
 	`"successful":1,"measurements":[{"value":"[1]"},{"value":"[0]"},{"value":"[0.71]"}]}]},` +
 	`"spec":{"metrics":[{"name":"request-success-rate","successCondition":"len(result) > 0 && result[0] >= 0.99","failureLimit":1}]}}`
+
+func TestRunRolloutAdvance_ZeroFlagsUsesControllerIdentityFromProject(t *testing.T) {
+	home := t.TempDir()
+	root := filepath.Join(t.TempDir(), "podinfo")
+	if err := os.Mkdir(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"init"}, {"remote", "add", "origin", "https://github.com/AndrewMaged814/podinfo.git"}} {
+		cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	t.Setenv("SAFELANE_HOME", home)
+
+	configDir := filepath.Join(home, "apps", "podinfo")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	projectFile := filepath.Join(configDir, "project.yml")
+	if err := os.WriteFile(projectFile, project.DefaultYAML(
+		"podinfo", "AndrewMaged814/podinfo", "master", "ghcr.io/andrewmaged814/podinfo",
+	), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	rel := fastLaneStarted(t)
+	storeDir := filepath.Join(configDir, "releases")
+	if err := (&store.FileStore{Dir: storeDir}).Save(rel); err != nil {
+		t.Fatal(err)
+	}
+
+	q := &queueRunner{}
+	q.enqueue(atGateStatus(fastWeights, 5), nil)
+	q.enqueue("", nil)
+	q.enqueue(`{"status":{"phase":"Healthy","stableRS":"abc123","currentPodHash":"abc123",`+
+		`"canary":{"currentBackgroundAnalysisRunStatus":{"name":"podinfo-5f9b48bf7c-2","status":"Successful"}}},`+
+		`"spec":{"strategy":{"canary":{"steps":[{"setWeight":5},{"pause":{}}]}}}}`, nil)
+	q.enqueue(analysisRunJSON, nil)
+
+	originalNewExecutor := newExecutor
+	t.Cleanup(func() { newExecutor = originalNewExecutor })
+	var executorConfig execute.Config
+	newExecutor = func(cfg execute.Config) *execute.Executor {
+		executorConfig = cfg
+		ex := execute.New(cfg)
+		ex.Run = q.run
+		ex.Sleep = func(time.Duration) {}
+		return ex
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := runRolloutAdvance(context.Background(), []string{string(rel.ID)}, &stdout, &stderr, root, "")
+	if code != ExitOK {
+		t.Fatalf("runRolloutAdvance exit = %d, want %d\nstderr: %s", code, ExitOK, stderr.String())
+	}
+
+	wantKubeconfig := filepath.Join(configDir, "controller.kubeconfig")
+	if executorConfig.ControllerKubeconfig != wantKubeconfig || executorConfig.ControllerContext != "safelane-controller" {
+		t.Fatalf("controller identity = %q / %q, want %q / safelane-controller",
+			executorConfig.ControllerKubeconfig, executorConfig.ControllerContext, wantKubeconfig)
+	}
+	wantPromote := "argo rollouts promote podinfo -n podinfo --kubeconfig " + wantKubeconfig + " --context safelane-controller"
+	if got := strings.Join(q.calls[1], " "); got != wantPromote {
+		t.Fatalf("promote call = %q, want %q", got, wantPromote)
+	}
+}
 
 // degradedAbortStatus is Argo's own status once a background analysis
 // trips its failureLimit: Abort is set (classifyState reports this as

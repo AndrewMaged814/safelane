@@ -61,10 +61,11 @@ type analysisRunDoc struct {
 // GetAnalysisRun reads one AnalysisRun by its real Argo-assigned name
 // (Status.AnalysisRunName, not the friendly display label a caller prints
 // -- Appendix A2.3's measurement line comes from here; the Rollout's own
-// status never carries more than the coarse phase). It is an unprivileged
-// call, the same as GetStatus.
+// status never carries more than the coarse phase). The caller is allowed
+// to read only the Rollout, so the controller credential reads this separate
+// Argo resource without widening the caller's RBAC boundary.
 func (e *Executor) GetAnalysisRun(ctx context.Context, name string) (AnalysisRun, error) {
-	args := []string{"get", "analysisrun", name, "-n", e.Namespace, "-o", "json"}
+	args := append([]string{"get", "analysisrun", name, "-n", e.Namespace, "-o", "json"}, e.privilegedFlags()...)
 	out, err := e.run(ctx, "kubectl get analysisrun", args, nil)
 	if err != nil {
 		return AnalysisRun{}, err

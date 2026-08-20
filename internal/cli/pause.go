@@ -35,8 +35,8 @@ func parseRolloutPauseFlags(args []string, stderr io.Writer, defaultStoreDir str
 	fs.StringVar(&f.storeDir, "store-dir", defaultStoreDir, "directory Release records are persisted under")
 	fs.StringVar(&f.projectFile, "project", "", "path to project.yml (default: matched app under SAFELANE_HOME)")
 	fs.StringVar(&f.controllerKubeconfig, "controller-kubeconfig", "",
-		"kubeconfig for the privileged controller identity (optional; every privileged call runs unprivileged when unset)")
-	fs.StringVar(&f.controllerContext, "controller-context", "", "kubeconfig context for the privileged controller identity (optional)")
+		"kubeconfig for the privileged controller identity (default: project.yml)")
+	fs.StringVar(&f.controllerContext, "controller-context", "", "kubeconfig context for the privileged controller identity (default: project.yml)")
 	if err := fs.Parse(args); err != nil {
 		return f, "", err
 	}
@@ -85,8 +85,9 @@ func runRolloutPause(ctx context.Context, args []string, stdout, stderr io.Write
 		printRolloutRejection(stderr, err)
 		return ExitFail
 	}
+	f.controllerKubeconfig, f.controllerContext = paths.controllerCredentials(f.controllerKubeconfig, f.controllerContext)
 
-	ex := execute.New(execute.Config{
+	ex := newExecutor(execute.Config{
 		Namespace:            cfg.Target.Namespace,
 		Rollout:              cfg.Target.Rollout,
 		ControllerKubeconfig: f.controllerKubeconfig,

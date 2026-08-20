@@ -17,11 +17,13 @@ import (
 
 // Config is the operator-owned project configuration.
 type Config struct {
-	Version     int        `yaml:"version"`
-	Application string     `yaml:"application"`
-	Repository  Repository `yaml:"repository"`
-	Release     Release    `yaml:"release"`
-	Target      Target     `yaml:"target"`
+	Version              int        `yaml:"version"`
+	Application          string     `yaml:"application"`
+	Repository           Repository `yaml:"repository"`
+	Release              Release    `yaml:"release"`
+	Target               Target     `yaml:"target"`
+	ControllerKubeconfig string     `yaml:"controller_kubeconfig"`
+	ControllerContext    string     `yaml:"controller_context"`
 }
 
 // Repository identifies the GitHub source SafeLane collects evidence from.

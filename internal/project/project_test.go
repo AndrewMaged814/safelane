@@ -79,6 +79,9 @@ func TestDefaultYAML_RoundTrip(t *testing.T) {
 	if cfg.Release.ImageTag != DefaultImageTag {
 		t.Fatalf("image_tag = %q, want %q", cfg.Release.ImageTag, DefaultImageTag)
 	}
+	if cfg.ControllerKubeconfig != "controller.kubeconfig" || cfg.ControllerContext != "safelane-controller" {
+		t.Fatalf("controller identity = %q / %q, want default kubeconfig and context", cfg.ControllerKubeconfig, cfg.ControllerContext)
+	}
 }
 
 func TestResolveIn_MatchesGitHubRemoteNotDirectoryName(t *testing.T) {

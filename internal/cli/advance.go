@@ -70,8 +70,9 @@ func runRolloutAdvance(ctx context.Context, args []string, stdout, stderr io.Wri
 		printRolloutRejection(stderr, err)
 		return ExitFail
 	}
+	f.controllerKubeconfig, f.controllerContext = paths.controllerCredentials(f.controllerKubeconfig, f.controllerContext)
 
-	ex := execute.New(execute.Config{
+	ex := newExecutor(execute.Config{
 		Namespace:            cfg.Target.Namespace,
 		Rollout:              cfg.Target.Rollout,
 		ControllerKubeconfig: f.controllerKubeconfig,
@@ -125,8 +126,8 @@ func parseRolloutAdvanceFlags(args []string, stderr io.Writer, defaultStoreDir s
 	fs.StringVar(&f.storeDir, "store-dir", defaultStoreDir, "directory Release records are persisted under")
 	fs.StringVar(&f.projectFile, "project", "", "path to project.yml (default: matched app under SAFELANE_HOME)")
 	fs.StringVar(&f.controllerKubeconfig, "controller-kubeconfig", "",
-		"kubeconfig for the privileged controller identity (optional; every privileged call runs unprivileged when unset)")
-	fs.StringVar(&f.controllerContext, "controller-context", "", "kubeconfig context for the privileged controller identity (optional)")
+		"kubeconfig for the privileged controller identity (default: project.yml)")
+	fs.StringVar(&f.controllerContext, "controller-context", "", "kubeconfig context for the privileged controller identity (default: project.yml)")
 	fs.DurationVar(&f.timeout, "timeout", defaultAdvanceTimeout, "how long to wait for the rollout to reach the next gate")
 	fs.StringVar(&toStr, "to", "",
 		"the weight to request (default: the next weight the lane permits). SafeLane's own SKILL.md forbids an agent from passing this; it exists for an operator to demonstrate the boundary by hand.")

@@ -59,6 +59,8 @@ func TestGetAnalysisRun_ReadsTheRealNameNotAFriendlyOne(t *testing.T) {
 	fr := &fakeRunner{}
 	fr.enqueue(analysisRunJSON, nil)
 	ex := newTestExecutor(fr)
+	ex.ControllerKubeconfig = "controller.kubeconfig"
+	ex.ControllerContext = "safelane-controller"
 
 	if _, err := ex.GetAnalysisRun(context.Background(), "podinfo-5f9b48bf7c-2"); err != nil {
 		t.Fatalf("GetAnalysisRun: %v", err)
@@ -67,8 +69,8 @@ func TestGetAnalysisRun_ReadsTheRealNameNotAFriendlyOne(t *testing.T) {
 	if !strings.Contains(args, "get analysisrun podinfo-5f9b48bf7c-2") {
 		t.Errorf("args = %q, want the real Argo-assigned name queried verbatim", args)
 	}
-	if strings.Contains(args, "--kubeconfig") || strings.Contains(args, "--context") {
-		t.Errorf("args = %q, want no controller flags -- caller identity is enough (Appendix C5)", args)
+	if !strings.Contains(args, "--kubeconfig controller.kubeconfig --context safelane-controller") {
+		t.Errorf("args = %q, want the controller identity because caller RBAC is Rollout-only", args)
 	}
 }
 
