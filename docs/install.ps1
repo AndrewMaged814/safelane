@@ -14,8 +14,23 @@ $downloadBase = if ($env:SAFELANE_DOWNLOAD_BASE_URL) {
 $version = $env:SAFELANE_VERSION
 
 if (-not $version) {
-    $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases/latest"
-    $version = $release.tag_name
+    # Resolve the latest tag through GitHub's releases redirect instead of the
+    # unauthenticated API. The API has a low shared-IP rate limit, which can
+    # make a fresh install fail before it even starts downloading.
+    $latestUri = "https://github.com/$repo/releases/latest"
+    try {
+        try {
+            $latest = Invoke-WebRequest -Uri $latestUri -Method Head -MaximumRedirection 0 -ErrorAction Stop
+            $location = $latest.Headers.Location
+        } catch {
+            $location = $_.Exception.Response.Headers.Location
+        }
+        if ($location) {
+            $version = ([Uri]$location).Segments[-1].TrimEnd('/')
+        }
+    } catch {
+        $version = $null
+    }
 }
 if ($version -notmatch '^v\d+\.\d+\.\d+(?:[.-][0-9A-Za-z.-]+)?$') {
     throw "Could not determine a valid SafeLane release version: $version"

@@ -26,9 +26,13 @@ case "$ARCH" in
 esac
 
 if [ -z "$VERSION" ]; then
-  VERSION="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" |
-    sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' |
-    head -n 1)"
+  # GitHub's releases redirect avoids the low shared-IP rate limit on the
+  # unauthenticated REST API.
+  LATEST_URL="$(curl -fsSL -o /dev/null -w '%{url_effective}' "https://github.com/${REPO}/releases/latest")"
+  case "$LATEST_URL" in
+    */releases/tag/*) VERSION="${LATEST_URL##*/}" ;;
+    *) VERSION="" ;;
+  esac
 fi
 
 if ! printf '%s\n' "$VERSION" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$'; then
