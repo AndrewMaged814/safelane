@@ -255,6 +255,13 @@ func parseGitHubRemote(url string) (string, error) {
 
 // DefaultYAML renders a project.yml for init when none exists.
 func DefaultYAML(application, repo, defaultBranch, imageRepository string) []byte {
+	return YAML(application, repo, defaultBranch, imageRepository, []string{"build-and-push"})
+}
+
+// YAML renders a project.yml with repository-derived required check names.
+// The legacy DefaultYAML wrapper intentionally preserves init's historical
+// defaults; setup uses this function after inspecting the repository's CI.
+func YAML(application, repo, defaultBranch, imageRepository string, requiredChecks []string) []byte {
 	if application == "" {
 		application = "app"
 	}
@@ -270,6 +277,13 @@ func DefaultYAML(application, repo, defaultBranch, imageRepository string) []byt
 	if repo == "" {
 		repo = "owner/name"
 	}
+	if len(requiredChecks) == 0 {
+		requiredChecks = []string{"build-and-push"}
+	}
+	var checks strings.Builder
+	for _, check := range requiredChecks {
+		fmt.Fprintf(&checks, "    - %s\n", check)
+	}
 	body := fmt.Sprintf(`version: 3
 
 application: %s
@@ -283,8 +297,7 @@ release:
   image_repository: %s
   image_tag: "sha-{{merge_sha}}"
   required_checks:
-    - build-and-push
-  template_path: release-template
+%s  template_path: release-template
 
 target:
   cluster: safelane-demo
@@ -293,7 +306,7 @@ target:
 
 controller_kubeconfig: controller.kubeconfig
 controller_context: safelane-controller
-`, application, repo, defaultBranch, imageRepository, application, application)
+`, application, repo, defaultBranch, imageRepository, checks.String(), application, application)
 	return []byte(body)
 }
 

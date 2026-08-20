@@ -41,6 +41,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		cli.StatusCommand(".", defaultStoreDir),
 		cli.DoctorCommand("."),
 		cli.ProofCommand(defaultStoreDir),
+		cli.SetupCommand("."),
 		cli.InitCommand("."),
 	}
 	return cli.Dispatch(context.Background(), args, stdout, stderr, commands)

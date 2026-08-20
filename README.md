@@ -44,6 +44,33 @@ enforced boundary in one Release Proof.
 
 SafeLane now includes a Claude Code skill, /safelane, for agent-driven releases.
 
+## Setup from inside a repository
+
+From a fresh clone with a GitHub `origin`, run:
+
+```bash
+safelane setup
+```
+
+SafeLane discovers the repository, CI check names, default branch, and image repository locally.
+It asks Claude for a project-shaped Release Policy and Release Template, shows the recommendation,
+and writes operator-owned configuration only after one approval. Claude receives a bounded, read-only
+snapshot and has no tools, so it cannot edit the application repository. If Claude is unavailable,
+SafeLane offers a conservative repository-derived proposal instead. Use `safelane setup --no-agent`
+to choose that fallback directly.
+
+Setup writes under `~/.safelane/apps/<application>/`; it never creates `.safelane` files in the
+application repository and never provisions credentials or a cluster. Existing `project.yml` files
+are not overwritten. After approval, run:
+
+```bash
+safelane doctor
+```
+
+`doctor` remains a deterministic readiness check. It validates the approved policy, Release Template,
+GitHub/GHCR access, and target identities; it is not another conversational setup step. See the
+[setup guide](docs/setup.md) for the exact flow and fallback behavior.
+
 ## Install
 
 macOS and Linux:
