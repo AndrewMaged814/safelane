@@ -1,0 +1,4 @@
+2 open releases
+
+  rel_<ID>  podinfo/production  guarded   at_gate  weight 5   stalled 41m
+  rel_<ID>  podinfo/staging     fast      at_gate  weight 5   stalled 3h12m

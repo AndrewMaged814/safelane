@@ -203,6 +203,7 @@ func statusPhrase(state execute.State) string {
 
 type openStatus struct {
 	releaseID release.ReleaseID
+	target    string
 	lane      string
 	state     execute.State
 	weight    int
@@ -213,7 +214,13 @@ func storedOpenStatus(r *release.Release) (openStatus, bool) {
 	if r.Eligibility().Status() != release.EligibilityEligible {
 		return openStatus{}, false
 	}
-	view := openStatus{releaseID: r.ID, state: execute.StateNotStarted, stalledAt: r.CreatedAt}
+	target := r.Target()
+	view := openStatus{
+		releaseID: r.ID,
+		target:    target.Application + "/" + target.Environment,
+		state:     execute.StateNotStarted,
+		stalledAt: r.CreatedAt,
+	}
 	if a, ok := r.RecordedAssessment(); ok {
 		view.lane = a.Lane
 	}
@@ -251,9 +258,14 @@ func renderOpenStatuses(releases []*release.Release, now time.Time) string {
 		}
 	}
 	var b strings.Builder
-	fmt.Fprintln(&b, "RELEASE                     LANE     STATE         WEIGHT  STALLED")
+	noun := "releases"
+	if len(rows) == 1 {
+		noun = "release"
+	}
+	fmt.Fprintf(&b, "%d open %s\n\n", len(rows), noun)
 	for _, row := range rows {
-		fmt.Fprintf(&b, "%-27s %-8s %-13s %3d%%    %s\n", row.releaseID, row.lane, row.state, row.weight, formatStalled(now.Sub(row.stalledAt)))
+		fmt.Fprintf(&b, "  %s  %-18s  %-8s  %s  weight %-3d stalled %s\n",
+			row.releaseID, row.target, row.lane, row.state, row.weight, formatStalled(now.Sub(row.stalledAt)))
 	}
 	return b.String()
 }

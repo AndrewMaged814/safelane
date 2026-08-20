@@ -13,7 +13,7 @@ func TestAssertBoundaryUsesCallerIdentityAndRecordsCapability(t *testing.T) {
 	e.Now = func() time.Time { return time.Date(2026, 8, 20, 14, 26, 0, 0, time.UTC) }
 	e.Run = func(_ context.Context, args []string, _ []byte) ([]byte, error) {
 		calls = append(calls, append([]string{}, args...))
-		if args[6] == "get" {
+		if args[6] == "get" || (args[6] == "patch" && args[11] == "system:serviceaccount:podinfo:safelane-controller") {
 			return []byte("yes\n"), nil
 		}
 		return []byte("no\n"), nil
@@ -26,10 +26,10 @@ func TestAssertBoundaryUsesCallerIdentityAndRecordsCapability(t *testing.T) {
 		t.Fatalf("capability = %+v", b.CallerCapability)
 	}
 	wantGet := []string{"--kubeconfig", "controller.kubeconfig", "--context", "controller", "auth", "can-i", "get", "rollouts.argoproj.io", "--namespace", "podinfo", "--as", "system:serviceaccount:podinfo:safelane-caller"}
-	if !reflect.DeepEqual(calls[0], wantGet) {
-		t.Fatalf("get args = %v", calls[0])
+	if !reflect.DeepEqual(calls[1], wantGet) {
+		t.Fatalf("get args = %v", calls[1])
 	}
-	if len(calls) != 2 || calls[1][6] != "patch" {
+	if len(calls) != 3 || calls[0][6] != "patch" || calls[2][6] != "patch" {
 		t.Fatalf("calls = %v", calls)
 	}
 }

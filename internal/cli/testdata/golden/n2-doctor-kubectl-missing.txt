@@ -1,0 +1,14 @@
+  ✓ operator config    ~/.safelane/apps/podinfo/project.yml
+  ✓ release policy     ~/.safelane/apps/podinfo/policy.yml  (version 2, 3 lanes)
+  ✓ release template   5 files, digest sha256:<DIGEST>
+  ✓ github             api.github.com reachable
+  ✓ ghcr               ghcr.io reachable
+  ✓ assessors          heuristic (always), claude (found), codex (found)
+  ✗ kubectl            not found on PATH
+      remedy: install kubectl and the argo-rollouts plugin
+  – cluster            skipped (kubectl missing)
+  – rollout            skipped (kubectl missing)
+  – identity           skipped (kubectl missing)
+
+1 failed, 3 unavailable.
+SafeLane can read evidence and assess a change. SafeLane cannot execute a rollout.

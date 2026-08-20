@@ -39,6 +39,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		cli.ReleaseCommand(".", defaultStoreDir),
 		cli.RolloutCommand(".", defaultStoreDir),
 		cli.StatusCommand(".", defaultStoreDir),
+		cli.DoctorCommand("."),
 		cli.ProofCommand(defaultStoreDir),
 		cli.InitCommand("."),
 	}

@@ -108,7 +108,7 @@ func TestStatusListUsesStoredRecordOnlyAndFormatsStalledDuration(t *testing.T) {
 		t.Fatalf("status exit = %d, stderr: %s", code, stderr.String())
 	}
 	out := stdout.String()
-	for _, want := range []string{string(r.ID), "fast", "at_gate", "5%", "41m"} {
+	for _, want := range []string{"1 open release", string(r.ID), "podinfo/production", "fast", "at_gate", "weight 5", "stalled 41m"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("listing missing %q:\n%s", want, out)
 		}
@@ -116,6 +116,21 @@ func TestStatusListUsesStoredRecordOnlyAndFormatsStalledDuration(t *testing.T) {
 	if strings.Contains(out, "41m0s") {
 		t.Fatalf("listing used time.Duration.String():\n%s", out)
 	}
+}
+
+func TestStatusListMatchesN14GoldenFragment(t *testing.T) {
+	guarded := guardedLaneStarted(t)
+	var err error
+	guarded, err = guarded.WithExecution(release.ExecutionEntry{
+		At: time.Date(2026, 8, 20, 16, 52, 44, 0, time.UTC), Verb: release.VerbAdvance,
+		RequestedWeight: 5, Outcome: release.OutcomeGranted,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fast := fastLaneStartedForEnvironment(t, "staging")
+	now := time.Date(2026, 8, 20, 17, 33, 44, 0, time.UTC)
+	assertGoldenFragment(t, "n14-open-statuses.txt", renderOpenStatuses([]*release.Release{guarded, fast}, now))
 }
 
 func TestStoredOpenStatusExcludesCompleteAndAbortedReleases(t *testing.T) {

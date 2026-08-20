@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/AndrewMaged814/safelane/internal/release"
@@ -28,6 +29,10 @@ const (
 // Status is one read of the Rollout's status.
 type Status struct {
 	State State
+	// Phase is Argo's raw phase for human diagnostics such as doctor.
+	Phase string
+	// ImageDigest is the immutable digest observed in the Rollout pod template.
+	ImageDigest string
 	// CurrentWeight is the canary weight Argo has actually granted,
 	// preferring `.status.canary.weights.canary.weight` and falling back
 	// to the last `setWeight` step at or before currentStepIndex when
@@ -94,6 +99,13 @@ type rolloutStatusDoc struct {
 		} `json:"canary"`
 	} `json:"status"`
 	Spec struct {
+		Template struct {
+			Spec struct {
+				Containers []struct {
+					Image string `json:"image"`
+				} `json:"containers"`
+			} `json:"spec"`
+		} `json:"template"`
 		Strategy struct {
 			Canary struct {
 				Steps []struct {
@@ -125,6 +137,8 @@ func parseStatus(raw []byte) (Status, error) {
 	weight, stepsCompleted := currentWeight(doc)
 	return Status{
 		State:            classifyState(doc),
+		Phase:            doc.Status.Phase,
+		ImageDigest:      rolloutImageDigest(doc),
 		CurrentWeight:    weight,
 		Gate:             stepsCompleted,
 		AnalysisRunName:  doc.Status.Canary.CurrentBackgroundAnalysisRunStatus.Name,
@@ -132,6 +146,15 @@ func parseStatus(raw []byte) (Status, error) {
 		CurrentPodHash:   doc.Status.CurrentPodHash,
 		Revision:         doc.Metadata.Annotations.Revision,
 	}, nil
+}
+
+func rolloutImageDigest(doc rolloutStatusDoc) string {
+	for _, container := range doc.Spec.Template.Spec.Containers {
+		if _, digest, ok := strings.Cut(container.Image, "@"); ok {
+			return digest
+		}
+	}
+	return ""
 }
 
 // classifyState maps the observed document onto Appendix C5's table.

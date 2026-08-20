@@ -45,7 +45,7 @@ func (c inspectCase) buildRelease(t *testing.T) *release.Release {
 		SchemaVersion: release.RequestSchemaVersion,
 		Repository:    "AndrewMaged814/podinfo",
 		PullRequest:   c.pr,
-		Environment:   "production",
+		Environment:   cfg.Release.Environment,
 	}, deps)
 	if err != nil {
 		t.Fatalf("Submit: %v", err)

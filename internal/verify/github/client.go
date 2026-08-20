@@ -26,6 +26,21 @@ type Client struct {
 	HTTPClient *http.Client
 }
 
+// Ping verifies that GitHub is reachable and returns the authenticated login.
+// Unlike FetchPullRequestFacts, it verifies no release claim.
+func (c *Client) Ping(ctx context.Context) (string, error) {
+	var user struct {
+		Login string `json:"login"`
+	}
+	if err := c.do(ctx, http.MethodGet, "/user", &user); err != nil {
+		return "", err
+	}
+	if user.Login == "" {
+		return "", fmt.Errorf("github: authenticated user response had no login")
+	}
+	return user.Login, nil
+}
+
 func (c *Client) baseURL() string {
 	if c.BaseURL != "" {
 		return c.BaseURL

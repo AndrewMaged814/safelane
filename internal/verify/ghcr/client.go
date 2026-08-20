@@ -52,6 +52,25 @@ func (c *Client) httpClient() *http.Client {
 	return &http.Client{Timeout: 15 * time.Second}
 }
 
+// Ping verifies registry reachability without resolving a release claim.
+// GHCR answers an anonymous /v2/ probe with either success or an authentication
+// challenge; both prove the registry endpoint is reachable.
+func (c *Client) Ping(ctx context.Context) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL()+"/v2/", nil)
+	if err != nil {
+		return err
+	}
+	resp, err := c.httpClient().Do(req)
+	if err != nil {
+		return fmt.Errorf("ghcr: reachability request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	if (resp.StatusCode >= 200 && resp.StatusCode < 300) || resp.StatusCode == http.StatusUnauthorized {
+		return nil
+	}
+	return fmt.Errorf("ghcr: reachability request returned status %d", resp.StatusCode)
+}
+
 type tokenResponse struct {
 	Token string `json:"token"`
 }

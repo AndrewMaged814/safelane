@@ -27,12 +27,19 @@ var guardedWeights = []int{1, 5, 25, 50, 100}
 // tests here can begin partway through -- already at gate 1, weight 5 --
 // without re-driving startRollout.
 func fastLaneStarted(t *testing.T) *release.Release {
+	return fastLaneStartedForEnvironment(t, "production")
+}
+
+func fastLaneStartedForEnvironment(t *testing.T, environment string) *release.Release {
 	t.Helper()
+	cfg := demoProject()
+	cfg.Release.Environment = environment
 	rel := inspectCase{
-		id:     "rel_01M0F2K7RXQW3HDN8YT4B1MPZE",
-		pr:     3,
-		github: fakeGitHub{facts: mergedFacts(3, safeMergeSHA)},
-		ghcr:   fakeGHCR{digest: safeDigest},
+		id:      "rel_01M0F2K7RXQW3HDN8YT4B1MPZE",
+		pr:      3,
+		project: cfg,
+		github:  fakeGitHub{facts: mergedFacts(3, safeMergeSHA)},
+		ghcr:    fakeGHCR{digest: safeDigest},
 		facts: fakeChangeFacts{facts: assess.Facts{
 			Files:          []assess.FileChange{{Path: "pkg/version/version.go", Additions: 1, Deletions: 1}},
 			TotalAdditions: 1, TotalDeletions: 1, MergeCommitSHA: safeMergeSHA,

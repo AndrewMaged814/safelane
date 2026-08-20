@@ -1,0 +1,19 @@
+SafeLane doctor
+
+  ✓ operator config        ~/.safelane/apps/podinfo/project.yml
+  ✓ release policy         ~/.safelane/apps/podinfo/policy.yml  (version 2, 3 lanes)
+  ✓ release template       5 files, digest sha256:<DIGEST>
+  ✓ github                 api.github.com reachable, token valid (AndrewMaged814)
+  ✓ ghcr                   ghcr.io reachable
+  ✓ assessors              heuristic (always), claude (found), codex (found)
+  ✓ kubectl                v1.31.2, argo-rollouts plugin v1.7.2
+  ✓ cluster                safelane-demo reachable, namespace podinfo exists
+  ✓ rollout                podinfo found, phase Healthy, image sha256:<DIGEST>
+  ✓ controller identity    controller.kubeconfig → sa/safelane-controller
+                           can patch rollouts.argoproj.io: yes
+  ✓ caller identity        ~/.kube/config (default) → sa/safelane-caller
+                           can get rollouts:   yes
+                           can patch rollouts: no
+  ✓ credential separation  no privileged context in the agent's default kubeconfig
+
+All checks passed.
