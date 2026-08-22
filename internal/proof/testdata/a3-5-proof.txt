@@ -6,7 +6,7 @@ ARTIFACT
   merge commit      4f0c1b9e7ac2d5386b1d9f4a5c8e2b7d3a6f0e91
   required check    build-and-push (success)
   image             ghcr.io/andrewmaged814/safelane-demo-api@sha256:3fbc1d9a7e42c8056d1f9b3e7a5c204d8e6b1f39a7c50d28e4b6f19a3c7d50e8
-  bundle            5 resources, template digest sha256:5da7480983357a6617945e671f49921d812039d7fe7f474c9603d20eaf376b34
+  bundle            5 resources, template digest sha256:93a75d4859d51fa2c53432f9b3703775201efe4149716aaab76850c59756f17d
 
 ASSESSMENT
   change            3 files, +64 −12
@@ -24,7 +24,7 @@ DECISION
   evidence          verified
                     3 verified, 0 failed, 0 unavailable
   envelope          25 → 50 → 75 → 100, 3 gates
-                    read from the hashed bundle, digest sha256:4b889b307f90d12254fa3533632d0e6de1de7088e82fec2833650cac1bf58446
+                    read from the hashed bundle, digest sha256:22bbe094207e8567eabb3d12dcd875991f8b61152442f740aa43406f39048ce5
 
 EXECUTION
   14:26:03Z  start      weight 25    granted

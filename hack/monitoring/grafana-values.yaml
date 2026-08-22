@@ -1,0 +1,89 @@
+# grafana/grafana — SafeLane values
+#
+# Grafana exists here for one reason: on a video call, nobody can read a
+# terminal. A canary error-rate line crossing its threshold, next to a pod-count
+# step chart, is legible on a shared screen in a way `kubectl get` is not.
+#
+# It is NOT the SafeLane risk panel and it does not replace Argo's own rollout
+# dashboard. It shows what the canary did and what the controller decided.
+
+adminUser: admin
+# Demo-only credential on a laptop-local cluster with no ingress. Do not reuse
+# this pattern anywhere real.
+adminPassword: safelane
+
+persistence:
+  enabled: false
+
+replicas: 1
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    memory: 384Mi
+
+service:
+  type: ClusterIP
+  port: 3000
+
+testFramework:
+  enabled: false
+
+# No sidecar. The dashboard-watching sidecar is a second container in every
+# Grafana pod, and this laptop is counting megabytes. A mounted ConfigMap does
+# the same job for free.
+sidecar:
+  dashboards:
+    enabled: false
+  datasources:
+    enabled: false
+
+datasources:
+  datasources.yaml:
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        # Pinned so the dashboard JSON can reference it deterministically.
+        # A generated uid would make the provisioned dashboard point at
+        # nothing, and the panels would render empty with no error.
+        uid: safelane-prom
+        type: prometheus
+        # The same FQDN the AnalysisTemplate uses, so Grafana is looking at
+        # exactly the data the rollback decision was made from.
+        url: http://prometheus.monitoring.svc.cluster.local:9090
+        access: proxy
+        isDefault: true
+        jsonData:
+          timeInterval: 5s
+
+dashboardProviders:
+  dashboardproviders.yaml:
+    apiVersion: 1
+    providers:
+      - name: safelane
+        orgId: 1
+        folder: SafeLane
+        type: file
+        disableDeletion: false
+        editable: true
+        options:
+          path: /var/lib/grafana/dashboards/safelane
+
+# Mounts the ConfigMap created by k8s/grafana/dashboard-configmap.yaml.
+dashboardsConfigMaps:
+  safelane: safelane-dashboard
+
+grafana.ini:
+  auth.anonymous:
+    # Anonymous read access: one less thing to type while judges watch.
+    enabled: true
+    org_role: Viewer
+  users:
+    default_theme: light
+  analytics:
+    reporting_enabled: false
+    check_for_updates: false
+  news:
+    news_feed_enabled: false
