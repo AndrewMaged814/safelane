@@ -18,7 +18,7 @@ import (
 )
 
 // buildRelease runs the same Submit pass inspectCase.run uses, but returns
-// the persisted Release rather than the `release inspect` report -- the
+// the persisted Release rather than the `release plan` report -- the
 // object `rollout start` actually operates on.
 func (c inspectCase) buildRelease(t *testing.T) *release.Release {
 	t.Helper()
@@ -44,7 +44,7 @@ func (c inspectCase) buildRelease(t *testing.T) *release.Release {
 	}
 	result, err := orchestrate.Submit(context.Background(), release.Intent{
 		SchemaVersion: release.RequestSchemaVersion,
-		Repository:    "AndrewMaged814/podinfo",
+		Repository:    "AndrewMaged814/safelane-demo-api",
 		PullRequest:   c.pr,
 		Environment:   cfg.Release.Environment,
 	}, deps)
@@ -95,10 +95,10 @@ func (q *queueRunner) enqueue(out string, err error) {
 // reports for the bundle's five resources, in bundle order: only the
 // Rollout's spec is release-specific, so it is the only one that ever
 // reports anything but unchanged.
-const applyUnchangedFour = "service/podinfo-stable unchanged\n" +
-	"service/podinfo-canary unchanged\n" +
-	"analysistemplate.argoproj.io/podinfo-success-rate unchanged\n" +
-	"ingress.networking.k8s.io/podinfo unchanged\n"
+const applyUnchangedFour = "service/safelane-demo-api-stable unchanged\n" +
+	"service/safelane-demo-api-canary unchanged\n" +
+	"analysistemplate.argoproj.io/safelane-demo-api-success-rate unchanged\n" +
+	"ingress.networking.k8s.io/safelane-demo-api unchanged\n"
 
 func progressingThenAtGate(steps string) (progressing, atGate string) {
 	progressing = `{"status":{"phase":"Progressing"},"spec":{"strategy":{"canary":{"steps":[` + steps + `]}}}}`
@@ -125,12 +125,12 @@ func TestRolloutStart_SafeChange_MatchesA22(t *testing.T) {
 	}
 
 	q := &queueRunner{}
-	q.enqueue(applyUnchangedFour+"rollout.argoproj.io/podinfo configured\n", nil)
+	q.enqueue(applyUnchangedFour+"rollout.argoproj.io/safelane-demo-api configured\n", nil)
 	progressing, atGate := progressingThenAtGate(`{"setWeight":5},{"pause":{}}`)
 	q.enqueue(progressing, nil)
 	q.enqueue(atGate, nil)
 
-	ex := execute.New(execute.Config{Namespace: "podinfo", Rollout: "podinfo"})
+	ex := execute.New(execute.Config{Namespace: "safelane-demo-api", Rollout: "safelane-demo-api"})
 	ex.Run = q.run
 	ex.Sleep = func(time.Duration) {}
 	grantedAt := time.Date(2026, 8, 20, 14, 21, 44, 0, time.UTC)
@@ -142,8 +142,8 @@ func TestRolloutStart_SafeChange_MatchesA22(t *testing.T) {
 	assertGolden(t, "a2-2-start-safe.txt", result.Render())
 
 	entries := result.release.Execution()
-	if len(entries) != 1 || entries[0].Verb != release.VerbStart || entries[0].RequestedWeight != 5 || entries[0].Outcome != release.OutcomeGranted {
-		t.Errorf("execution history = %+v, want one granted start at weight 5", entries)
+	if len(entries) != 1 || entries[0].Verb != release.VerbStart || entries[0].RequestedWeight != 50 || entries[0].Outcome != release.OutcomeGranted {
+		t.Errorf("execution history = %+v, want one granted start at weight 50", entries)
 	}
 	for _, call := range q.calls {
 		for _, a := range call {
@@ -178,12 +178,12 @@ func TestRolloutStart_RiskyChange_MatchesA32(t *testing.T) {
 	rel = persistAndReload(t, rel)
 
 	q := &queueRunner{}
-	q.enqueue(applyUnchangedFour+"rollout.argoproj.io/podinfo configured\n", nil)
+	q.enqueue(applyUnchangedFour+"rollout.argoproj.io/safelane-demo-api configured\n", nil)
 	progressing, atGate := progressingThenAtGate(`{"setWeight":1},{"pause":{}},{"setWeight":5},{"pause":{}},{"setWeight":25},{"pause":{}},{"setWeight":50},{"pause":{}}`)
 	q.enqueue(progressing, nil)
 	q.enqueue(atGate, nil)
 
-	ex := execute.New(execute.Config{Namespace: "podinfo", Rollout: "podinfo"})
+	ex := execute.New(execute.Config{Namespace: "safelane-demo-api", Rollout: "safelane-demo-api"})
 	ex.Run = q.run
 	ex.Sleep = func(time.Duration) {}
 	grantedAt := time.Date(2026, 8, 20, 14, 26, 3, 0, time.UTC)
@@ -195,8 +195,8 @@ func TestRolloutStart_RiskyChange_MatchesA32(t *testing.T) {
 	assertGolden(t, "a3-2-start-risky.txt", result.Render())
 
 	entries := result.release.Execution()
-	if len(entries) != 1 || entries[0].RequestedWeight != 1 {
-		t.Errorf("execution history = %+v, want one granted start at weight 1", entries)
+	if len(entries) != 1 || entries[0].RequestedWeight != 25 {
+		t.Errorf("execution history = %+v, want one granted start at weight 25", entries)
 	}
 }
 
@@ -215,7 +215,7 @@ func TestRolloutStart_IgnoresAnAbortFromThePreviousObservedGeneration(t *testing
 
 	steps := `{"setWeight":1},{"pause":{}},{"setWeight":5},{"pause":{}}`
 	q := &queueRunner{}
-	q.enqueue(applyUnchangedFour+"rollout.argoproj.io/podinfo configured\n", nil)
+	q.enqueue(applyUnchangedFour+"rollout.argoproj.io/safelane-demo-api configured\n", nil)
 	// The apply advanced metadata.generation to 8, but Argo's first read still
 	// carries generation 7's abort. This is the live sequence that caused a new
 	// release to inherit the preceding release's terminal state.
@@ -227,7 +227,7 @@ func TestRolloutStart_IgnoresAnAbortFromThePreviousObservedGeneration(t *testing
 		`"pauseConditions":[{"reason":"CanaryPauseStep"}],"currentStepIndex":0},`+
 		`"spec":{"strategy":{"canary":{"steps":[`+steps+`]}}}}`, nil)
 
-	ex := execute.New(execute.Config{Namespace: "podinfo", Rollout: "podinfo"})
+	ex := execute.New(execute.Config{Namespace: "safelane-demo-api", Rollout: "safelane-demo-api"})
 	ex.Run = q.run
 	ex.Sleep = func(time.Duration) {}
 	grantedAt := time.Date(2026, 8, 20, 14, 26, 3, 0, time.UTC)
@@ -258,14 +258,14 @@ func TestRolloutStart_FreshAbortIsPersistedAndReportedAsPostApplyFailure(t *test
 
 	q := &queueRunner{}
 	q.enqueue(`{"metadata":{"generation":7},"status":{"observedGeneration":7,"phase":"Healthy"}}`, nil)
-	q.enqueue(`{"status":{"userInfo":{"username":"system:serviceaccount:podinfo:safelane-controller"}}}`, nil)
+	q.enqueue(`{"status":{"userInfo":{"username":"system:serviceaccount:safelane-demo-api:safelane-controller"}}}`, nil)
 	q.enqueue("yes\n", nil)
-	q.enqueue(`{"status":{"userInfo":{"username":"system:serviceaccount:podinfo:safelane-caller"}}}`, nil)
+	q.enqueue(`{"status":{"userInfo":{"username":"system:serviceaccount:safelane-demo-api:safelane-caller"}}}`, nil)
 	q.enqueue("yes\n", nil)
 	q.enqueue("no\n", nil)
-	q.enqueue("rollout.argoproj.io/podinfo annotated\n", nil)
-	q.enqueue(applyUnchangedFour+"rollout.argoproj.io/podinfo configured\n", nil)
-	q.enqueue(`{"metadata":{"generation":8,"annotations":{"safelane.dev/release-id":"`+string(rel.ID)+`"}},"spec":{"template":{"spec":{"containers":[{"image":"podinfo@`+riskyDigest+`"}]}}},"status":{"observedGeneration":8,"phase":"Degraded",`+
+	q.enqueue("rollout.argoproj.io/safelane-demo-api annotated\n", nil)
+	q.enqueue(applyUnchangedFour+"rollout.argoproj.io/safelane-demo-api configured\n", nil)
+	q.enqueue(`{"metadata":{"generation":8,"annotations":{"safelane.dev/release-id":"`+string(rel.ID)+`"}},"spec":{"template":{"spec":{"containers":[{"image":"safelane-demo-api@`+riskyDigest+`"}]}}},"status":{"observedGeneration":8,"phase":"Degraded",`+
 		`"abort":true,"message":"Rollout aborted update to revision 4"}}`, nil)
 	originalNewExecutor := newExecutor
 	t.Cleanup(func() { newExecutor = originalNewExecutor })
@@ -327,9 +327,8 @@ func TestRolloutStart_Ineligible_MatchesN10(t *testing.T) {
 		t.Fatalf("test setup: %v", err)
 	}
 
-	cmd := RolloutCommand(dir, storeDir)
 	var stdout, stderr bytes.Buffer
-	code := cmd.Run(context.Background(), []string{"start", string(rel.ID)}, &stdout, &stderr)
+	code := runRolloutStart(context.Background(), []string{"--store-dir", storeDir, string(rel.ID)}, &stdout, &stderr, dir, storeDir)
 
 	if code != ExitFail {
 		t.Fatalf("want ExitFail, got %d (stdout: %s, stderr: %s)", code, stdout.String(), stderr.String())
@@ -354,7 +353,7 @@ func TestRolloutStart_MissingBinary_IsHumanReadableNotAStackTrace(t *testing.T) 
 
 	q := &queueRunner{}
 	q.enqueue("", &exec.Error{Name: "kubectl", Err: exec.ErrNotFound})
-	ex := execute.New(execute.Config{Namespace: "podinfo", Rollout: "podinfo"})
+	ex := execute.New(execute.Config{Namespace: "safelane-demo-api", Rollout: "safelane-demo-api"})
 	ex.Run = q.run
 
 	_, err := startRollout(context.Background(), rel, ex, time.Minute, time.Now)
@@ -383,13 +382,13 @@ func TestRolloutStart_GateTimeout_NeverRetries(t *testing.T) {
 	}.buildRelease(t)
 
 	q := &queueRunner{}
-	q.enqueue(applyUnchangedFour+"rollout.argoproj.io/podinfo configured\n", nil)
+	q.enqueue(applyUnchangedFour+"rollout.argoproj.io/safelane-demo-api configured\n", nil)
 	progressing, _ := progressingThenAtGate(`{"setWeight":5},{"pause":{}}`)
 	for i := 0; i < 5; i++ {
 		q.enqueue(progressing, nil)
 	}
 
-	ex := execute.New(execute.Config{Namespace: "podinfo", Rollout: "podinfo"})
+	ex := execute.New(execute.Config{Namespace: "safelane-demo-api", Rollout: "safelane-demo-api"})
 	ex.Run = q.run
 	current := time.Date(2026, 8, 20, 14, 0, 0, 0, time.UTC)
 	ex.Now = func() time.Time { return current }

@@ -9,7 +9,7 @@ Start with the release identity. SafeLane does the checking before it touches Ar
 
 ```mermaid
 flowchart LR
-  A["doctor"] --> B["release inspect --pr N"]
+  A["doctor"] --> B["release plan --pr N"]
   B --> C["rollout start ID"]
   C --> D["rollout advance ID"]
   D -->|repeat until complete| D
@@ -17,10 +17,10 @@ flowchart LR
 ```
 
     safelane doctor
-    safelane release inspect --pr 42
-    safelane rollout start rel_...
-    safelane rollout advance rel_...
-    safelane proof --details rel_...
+    safelane release plan --pr 42
+    safelane release run rel_...
+    safelane release run rel_...
+    safelane release proof --details rel_...
 
 Inspect verifies the merged commit, required publish check, and immutable GHCR digest. Start applies the Rendered Manifest Bundle through the controller identity and stops at gate one. Advance reads Argo status and the lane envelope. Proof joins artifact, decision, execution, and boundary data.
 

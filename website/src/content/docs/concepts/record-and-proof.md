@@ -13,7 +13,7 @@ flowchart LR
   B["Eligibility + assessment"] --> E
   C["Rendered bundle hash"] --> E
   D["Execution + boundary"] --> E
-  E --> F["safelane proof <id>"]
+  E --> F["safelane release proof <id>"]
 ```
 
 The record includes the release ID, request, target, caller, evidence result, rendered bundle, eligibility, assessment, execution entries, boundary, envelope, and outcome. It is stored under the operator-owned releases directory.

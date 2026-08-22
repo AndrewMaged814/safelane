@@ -1,4 +1,4 @@
-// Package skill contains the agent skill installed by `safelane init`.
+// Package skill contains the agent skill installed by `safelane setup`.
 package skill
 
 import _ "embed"

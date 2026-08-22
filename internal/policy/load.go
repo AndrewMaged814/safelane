@@ -53,7 +53,7 @@ func Load(path string) (Policy, error) {
 		if os.IsNotExist(err) {
 			return Policy{}, release.Invalid("missing_policy_config", "policy",
 				fmt.Sprintf("no release policy at %s", path),
-				"Run safelane init, or pass --policy.")
+				"Run safelane setup from the application repository.")
 		}
 		return Policy{}, release.Invalid("unreadable_policy_config", "policy",
 			fmt.Sprintf("could not read %s: %v", path, err),

@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-// The `release inspect` report is a fixed-column layout, and Appendix A
+// The `release plan` report is a fixed-column layout, and Appendix A
 // is its specification down to the space. This file is the layout engine;
 // inspect.go decides what goes in it.
 //

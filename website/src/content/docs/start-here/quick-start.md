@@ -1,38 +1,39 @@
 ---
 title: Quick Start
-description: Run the real SafeLane release sequence.
+description: Approve one exact Safety Contract and let SafeLane coordinate the release.
 ---
 
-## A release fails before rollout when its setup is wrong
+## Install and set up
 
-If project.yml, policy.yml, the template, GitHub access, or the target Rollout is wrong, starting the canary is too late. Run the checks first.
+From the application repository:
 
-    safelane init --app podinfo --repo AndrewMaged814/podinfo
-    safelane doctor
-    safelane release inspect --pr 42
-    safelane rollout start rel_...
-    safelane rollout advance rel_...
-    safelane proof rel_...
+```bash
+safelane setup
+safelane doctor
+```
 
-The inspect report includes evidence rows, Assessment, Eligibility, Release ID, and the next command:
+For the isolated local demonstration, start Docker and run `safelane demo up --yes` before doctor. SafeLane downloads its pinned, checksum-verified Kind, kubectl, and Argo Rollouts CLI tools privately, owns that Kind cluster, and never changes your ambient PATH or Kubernetes context.
 
-    Release: rel_...
-    Eligibility: eligible (...)
-    Assessment: risk medium, lane standard
-    Nothing was changed.
-    Next: safelane rollout start rel_...
+## Release one exact merged PR
 
-Repeat rollout advance until the output says complete. Do not pass --to; the envelope decides the weight.
+```bash
+safelane release plan --pr 42
+safelane release run rel_...
+safelane release proof rel_...
+```
 
-Use proof --details for the complete human-readable record or proof --json for the machine-readable contract.
+Planning performs no production mutation. It verifies the merge commit, CI, and immutable image; combines deterministic and semantic assessment; connects cited hazards to concrete canary assertions; freezes the lane, authority, and rendered bundle; and returns the exact run command.
 
-## Why release inspect is read-only
+Running shows that frozen contract and asks once. It then stays attached while Argo runs canary-only Analysis Jobs and traffic progression. Argo aborts and restores stable traffic on analysis failure; SafeLane reconciles and records that outcome.
 
-Inspection answers “may this release start?” without changing the cluster. SafeLane persists the decision, but the rollout begins only after rollout start.
+Another decision is requested only when the frozen contract identifies a specific uncovered hazard and policy permits explicit acceptance.
 
-## Next
+## Agent/CI form
 
-- [Running a Release End to End](../guides/release-end-to-end/)
-- [Pre-flight Checks](../guides/pre-flight/)
-- [Exit Codes](../reference/exit-codes/)
+```bash
+safelane release plan --pr 42 --json
+safelane release run rel_... --yes --json
+safelane release proof rel_... --json
+```
 
+The agent never searches for the “latest PR,” never chooses arbitrary weights, and never loops over gate commands. Re-running `release run` safely reconnects and reconciles before acting.

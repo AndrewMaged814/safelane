@@ -11,8 +11,8 @@ import (
 	"github.com/AndrewMaged814/safelane/internal/policy"
 )
 
-// TestReleaseInspect_RealServices_AgainstIntent runs the wired
-// `safelane release inspect` path against testdata/release-request.json
+// TestReleasePlan_RealServices_AgainstIntent runs the wired
+// `safelane release plan` path against testdata/release-request.json
 // with real GitHub and GHCR.
 //
 // This is the wiring check the golden-file suite cannot make: every one of
@@ -20,7 +20,7 @@ import (
 // never being attached in the first place. Outcome depends on live
 // PR/package state, so the assertions are about which path was taken --
 // a report or a typed rejection -- not about what it concluded.
-func TestReleaseInspect_RealServices_AgainstIntent(t *testing.T) {
+func TestReleasePlan_RealServices_AgainstIntent(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires network access to api.github.com and ghcr.io")
 	}
@@ -40,11 +40,11 @@ func TestReleaseInspect_RealServices_AgainstIntent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	commands := []cli.Command{cli.ReleaseCommand(root, t.TempDir())}
+	commands := []cli.Command{cli.ReleasePlanCommand(root, t.TempDir())}
 	var stdout, stderr bytes.Buffer
 
 	code := cli.Dispatch(t.Context(), []string{
-		"release", "inspect",
+		"plan",
 		"--file", "../../testdata/release-request.json",
 		"--project", filepath.Join(root, ".safelane", "project.yml"),
 		"--template-dir", "../../internal/render/testdata/release-template",

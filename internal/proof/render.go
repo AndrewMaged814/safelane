@@ -6,7 +6,27 @@ import (
 	"strings"
 )
 
-func (p Proof) Concise() string { return p.Details() }
+func (p Proof) Concise() string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Release %s: %s\n", p.releaseID, p.outcome)
+	if p.artifact.PullRequest != nil {
+		fmt.Fprintf(&b, "  change       %s#%d (%s)\n", p.artifact.Repository, p.artifact.PullRequest.Number, p.artifact.Revision)
+	}
+	fmt.Fprintf(&b, "  eligibility  %s\n", p.decision.Eligibility)
+	if p.assessment != nil {
+		fmt.Fprintf(&b, "  risk / lane  %s / %s\n", p.assessment.Risk, p.assessment.Lane)
+		fmt.Fprintf(&b, "  authority    %d%%\n", p.assessment.AuthorizedUntil)
+	}
+	if p.decision.Envelope != nil {
+		fmt.Fprintf(&b, "  progression  %s\n", joinStages(p.decision.Envelope.Stages()))
+	}
+	if len(p.execution) > 0 {
+		last := p.execution[len(p.execution)-1]
+		fmt.Fprintf(&b, "  last event   %s at %s\n", last.Verb, last.At.UTC().Format("2006-01-02 15:04:05Z"))
+	}
+	fmt.Fprintln(&b, "  details      rerun with --details")
+	return b.String()
+}
 
 // Details renders Appendix A3.5's sections using recorded values only.
 func (p Proof) Details() string {
@@ -38,6 +58,9 @@ func (p Proof) Details() string {
 	fmt.Fprintln(&b, "\nASSESSMENT")
 	if a := p.assessment; a != nil {
 		fmt.Fprintf(&b, "  change            %d files, +%d −%d\n", a.Facts.FilesChanged, a.Facts.Additions, a.Facts.Deletions)
+		if a.AssessmentMode != "" {
+			fmt.Fprintf(&b, "  mode              %s\n", a.AssessmentMode)
+		}
 		if a.Facts.AgentAuthored {
 			fmt.Fprintf(&b, "  authored by       agent (%s)\n", a.Facts.AgentEvidence)
 		}
@@ -46,8 +69,23 @@ func (p Proof) Details() string {
 			fmt.Fprintf(&b, "   rules: %s", strings.Join(a.Heuristic.Rules, ", "))
 		}
 		fmt.Fprintln(&b)
-		fmt.Fprintf(&b, "  model (%s)    %s     %q\n", a.Model.Assessor, a.Model.Risk, a.Model.Rationale)
-		fmt.Fprintf(&b, "  combined by       %s\n  risk              %s\n  lane              %s\n", a.CombinedBy, a.Risk, a.Lane)
+		if a.Model.Available {
+			fmt.Fprintf(&b, "  model (%s)    %s     %q\n", a.Model.Assessor, a.Model.Risk, a.Model.Rationale)
+		} else {
+			fmt.Fprintf(&b, "  model             unavailable (%s); guarded fallback\n", a.Model.Reason)
+		}
+		fmt.Fprintf(&b, "  combined by       %s\n  risk              %s\n  lane              %s\n  authority ceiling %d%%\n", a.CombinedBy, a.Risk, a.Lane, a.AuthorizedUntil)
+		if len(a.Facts.RuntimeAssertions) > 0 {
+			fmt.Fprintf(&b, "  assertions        %s\n", strings.Join(a.Facts.RuntimeAssertions, ", "))
+		}
+		for _, hazard := range a.Model.Hazards {
+			coverage := "uncovered"
+			if hazard.Covered {
+				coverage = "covered"
+			}
+			fmt.Fprintf(&b, "  hazard %-10s %s (%s, %s)\n", hazard.ID, hazard.FailureMode, hazard.Severity, coverage)
+			fmt.Fprintf(&b, "                    surface %s; assertion %s\n", hazard.AffectedSurface, hazard.RequiredAssertion)
+		}
 	} else {
 		fmt.Fprintln(&b, "  unavailable")
 	}

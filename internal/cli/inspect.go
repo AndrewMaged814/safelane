@@ -38,7 +38,7 @@ const (
 	ownerPublish
 )
 
-// inspection is the whole `release inspect` report as values, before any
+// inspection is the whole `release plan` report as values, before any
 // of it is a string. Building it separately from rendering it is what
 // lets --json carry the same content without a second derivation of the
 // same facts from the same Release.
@@ -316,9 +316,9 @@ func (in inspection) Render() string {
 func nextCommand(r *release.Release) string {
 	switch r.State() {
 	case release.StateReady:
-		return "safelane rollout start " + string(r.ID)
+		return "safelane release run " + string(r.ID)
 	case release.StateStarting, release.StateProgressing, release.StateAnalysing, release.StateAtGate, release.StatePaused:
-		return "safelane status " + string(r.ID)
+		return "safelane release status " + string(r.ID)
 	case release.StateAborted, release.StateFailed, release.StateBlocked:
 		return "safelane release retry " + string(r.ID)
 	case release.StateIndeterminate:

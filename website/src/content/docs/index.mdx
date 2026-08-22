@@ -13,13 +13,13 @@ hero:
       icon: external
 ---
 
-## The release bottleneck is authority
+## Stop shipping every change the same way
 
-An agent can plan a release, watch a canary, and repair a bad step. It should not widen its own rollout. A caller should not supply its own risk score. One shared Kubernetes credential should not decide who can patch production.
+Coding agents can operate deployment tools, but they commonly rediscover the latest PR, spend tokens rebuilding context, check generic health endpoints, and ask for approval at every gate.
 
-SafeLane gives agents, CI, and people one guarded release path. You identify a merged pull request. SafeLane collects the evidence, applies the operator-owned Release Policy, and permits only the rollout step that policy allows.
+SafeLane gives them one release path. You identify an exact merged pull request and approve its frozen Safety Contract once. SafeLane stays attached and coordinates Argo to promotion, rollback, or one specific decision-required outcome.
 
-The agent can drive the release. SafeLane remains the release authority.
+Argo remains the rollout engine: it evaluates Analysis Jobs, changes traffic, and aborts on failure. SafeLane assesses the change, bounds progression authority, reconciles execution, and writes proof.
 
 ```mermaid
 flowchart LR
@@ -39,18 +39,18 @@ flowchart LR
 | Without SafeLane | With SafeLane |
 | --- | --- |
 | The caller supplies risk, lane, and Kubernetes objects. | The caller supplies release identity. SafeLane collects evidence and renders trusted objects. |
-| The agent holds a credential that can reach the cluster. | Caller and controller identities use separate kubeconfigs. |
+| The agent babysits every gate. | One approved contract drives the attached release loop. |
 | Release facts live in logs and chat. | Eligibility, execution, boundary, and outcome become one Release Proof. |
 
-SafeLane fails closed. Ineligible and indeterminate evidence never becomes permission to release.
+Deterministic evidence and mandatory runtime-analysis failures remain fail-closed. An operational semantic-model failure selects a recorded Guarded fallback instead of turning tool availability into a product outage.
 
 ## What SafeLane owns
 
-- <code>safelane release inspect</code>, which binds a merged pull request to verified GitHub and GHCR evidence.
+- <code>safelane release plan</code>, which binds a merged pull request to verified GitHub and GHCR evidence.
 - The operator-owned <code>policy.yml</code>, which maps risk to named rollout lanes.
 - The operator-owned Release Template, rendered once and hashed before execution.
-- A constrained Release Controller that can act only on the protected Rollout.
-- A persisted Release Record and the <code>safelane proof</code> view of it.
+- An attached coordinator that requests only progression already authorized by the Safety Contract.
+- A persisted Release Record and the <code>safelane release proof</code> view of it.
 
 ## Next
 

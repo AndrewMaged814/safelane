@@ -1,19 +1,19 @@
 version: 1
 
-application: podinfo
+application: safelane-demo-api
 
 repository:
-  name: AndrewMaged814/podinfo
-  default_branch: master
+  name: AndrewMaged814/safelane-demo-api
+  default_branch: main
 
 release:
   environment: production
-  image_repository: ghcr.io/andrewmaged814/podinfo
+  image_repository: ghcr.io/andrewmaged814/safelane-demo-api
   image_tag: "sha-{{merge_sha}}"
   required_check: build-and-push
   template_path: .safelane/release-template
 
 target:
   cluster: safelane-demo
-  namespace: podinfo
-  rollout: podinfo
+  namespace: safelane-demo-api
+  rollout: safelane-demo-api

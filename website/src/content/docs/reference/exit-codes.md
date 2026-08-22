@@ -17,7 +17,7 @@ SafeLane uses four exit codes. Branch on the code before parsing prose.
     0 → continue
     1 → report and stop
     2 → fix the invocation
-    3 → run safelane status <id>; do not retry advance
+    3 → run safelane release status <id>; do not retry advance
 
 ## Why timeout is not failure
 

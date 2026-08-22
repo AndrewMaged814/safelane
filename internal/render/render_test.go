@@ -29,10 +29,10 @@ var testWeights = []int{5, 25, 50, 100}
 
 func testTarget() release.Target {
 	return release.Target{
-		Application: "podinfo",
+		Application: "safelane-demo-api",
 		Environment: "production",
 		Cluster:     "safelane-demo",
-		Namespace:   "podinfo",
+		Namespace:   "safelane-demo-api",
 	}
 }
 
@@ -43,10 +43,10 @@ func testEvidence(t *testing.T, digest string) release.ReleaseEvidence {
 	t.Helper()
 	now := time.Date(2026, 8, 15, 9, 30, 0, 0, time.UTC)
 	ev, err := release.NewReleaseEvidence(release.EvidenceInput{
-		Repository: release.RepositoryRef{Owner: "AndrewMaged814", Name: "podinfo"},
+		Repository: release.RepositoryRef{Owner: "AndrewMaged814", Name: "safelane-demo-api"},
 		PullRequest: release.VerifiedPullRequest{
 			Number:     1,
-			URL:        "https://github.com/AndrewMaged814/podinfo/pull/1",
+			URL:        "https://github.com/AndrewMaged814/safelane-demo-api/pull/1",
 			Author:     "AndrewMaged814",
 			BaseBranch: "main",
 			MergedAt:   now,
@@ -60,7 +60,7 @@ func testEvidence(t *testing.T, digest string) release.ReleaseEvidence {
 			CompletedAt: now,
 		},
 		Artifact: release.VerifiedArtifact{
-			Reference:      release.ImageReference{Registry: "ghcr.io", Repository: "andrewmaged814/podinfo", Digest: digest},
+			Reference:      release.ImageReference{Registry: "ghcr.io", Repository: "andrewmaged814/safelane-demo-api", Digest: digest},
 			ObservedDigest: digest,
 			ResolvedAt:     now,
 		},
@@ -280,11 +280,11 @@ func TestRenderedBytesCarryNoNonDeterministicValues(t *testing.T) {
 func TestRenderRecordsResourceIdentityFromRenderedBytes(t *testing.T) {
 	bundle := renderFixture(t, digestA)
 	want := map[string]string{
-		"10-service-stable.yaml.tmpl":   "Service/podinfo/podinfo-stable",
-		"20-service-canary.yaml.tmpl":   "Service/podinfo/podinfo-canary",
-		"30-analysistemplate.yaml.tmpl": "AnalysisTemplate/podinfo/podinfo-success-rate",
-		"35-ingress.yaml.tmpl":          "Ingress/podinfo/podinfo",
-		"40-rollout.yaml.tmpl":          "Rollout/podinfo/podinfo",
+		"10-service-stable.yaml.tmpl":   "Service/safelane-demo-api/safelane-demo-api-stable",
+		"20-service-canary.yaml.tmpl":   "Service/safelane-demo-api/safelane-demo-api-canary",
+		"30-analysistemplate.yaml.tmpl": "AnalysisTemplate/safelane-demo-api/safelane-demo-api-demo-behavior",
+		"35-ingress.yaml.tmpl":          "Ingress/safelane-demo-api/safelane-demo-api",
+		"40-rollout.yaml.tmpl":          "Rollout/safelane-demo-api/safelane-demo-api",
 	}
 	for _, res := range bundle.Resources() {
 		ref := res.Ref()
@@ -632,8 +632,8 @@ func intSlicesEqual(a, b []int) bool {
 // Release, since #48 requires the template version or content digest on the record.
 func TestFixtureTemplateIdentityIsRecorded(t *testing.T) {
 	id := renderFixture(t, digestA).Template()
-	if id.Name != "podinfo-canary" {
-		t.Errorf("template name = %q, want podinfo-canary", id.Name)
+	if id.Name != "safelane-demo-api-canary" {
+		t.Errorf("template name = %q, want safelane-demo-api-canary", id.Name)
 	}
 	if id.Version != "v0.1.0-fixture" {
 		t.Errorf("template version = %q, want v0.1.0-fixture", id.Version)

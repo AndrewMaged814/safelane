@@ -19,8 +19,8 @@ import (
 	"github.com/AndrewMaged814/safelane/internal/store"
 )
 
-var fastWeights = []int{5, 100}
-var guardedWeights = []int{1, 5, 25, 50, 100}
+var fastWeights = []int{50, 100}
+var guardedWeights = []int{25, 50, 75, 100}
 
 // fastLaneStarted builds the A2.1/A2.2 release (fast lane, weights 5, 100)
 // and attaches the granted `start` entry A2.2 would have recorded, so
@@ -49,7 +49,7 @@ func fastLaneStartedForEnvironment(t *testing.T, environment string) *release.Re
 
 	started, err := rel.WithExecution(release.ExecutionEntry{
 		At: time.Date(2026, 8, 20, 14, 21, 44, 0, time.UTC), Verb: release.VerbStart,
-		RequestedWeight: 5, Outcome: release.OutcomeGranted,
+		RequestedWeight: 50, Outcome: release.OutcomeGranted,
 	})
 	if err != nil {
 		t.Fatalf("test setup: %v", err)
@@ -80,7 +80,7 @@ func guardedLaneStarted(t *testing.T) *release.Release {
 
 	started, err := rel.WithExecution(release.ExecutionEntry{
 		At: time.Date(2026, 8, 20, 14, 26, 3, 0, time.UTC), Verb: release.VerbStart,
-		RequestedWeight: 1, Outcome: release.OutcomeGranted,
+		RequestedWeight: 25, Outcome: release.OutcomeGranted,
 	})
 	if err != nil {
 		t.Fatalf("test setup: %v", err)
@@ -123,7 +123,7 @@ func atGateStatus(weights []int, weight int) string {
 
 func atGateWithBackgroundAnalysisRunning(weights []int, weight int) string {
 	return fmt.Sprintf(`{"status":{"phase":"Paused","pauseConditions":[{"reason":"CanaryPauseStep"}],"currentStepIndex":%d,`+
-		`"canary":{"currentBackgroundAnalysisRunStatus":{"name":"podinfo-5f9b48bf7c-4","status":"Running"}}},`+
+		`"canary":{"currentBackgroundAnalysisRunStatus":{"name":"safelane-demo-api-5f9b48bf7c-4","status":"Running"}}},`+
 		`"spec":{"strategy":{"canary":{"steps":[%s]}}}}`, stepIndexOf(weights, weight), stepsJSON(weights))
 }
 
@@ -145,11 +145,11 @@ const failingAnalysisRunJSON = `{"status":{"phase":"Failed","metricResults":[{"n
 
 func TestRunRolloutAdvance_ZeroFlagsUsesControllerIdentityFromProject(t *testing.T) {
 	home := t.TempDir()
-	root := filepath.Join(t.TempDir(), "podinfo")
+	root := filepath.Join(t.TempDir(), "safelane-demo-api")
 	if err := os.Mkdir(root, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	for _, args := range [][]string{{"init"}, {"remote", "add", "origin", "https://github.com/AndrewMaged814/podinfo.git"}} {
+	for _, args := range [][]string{{"init"}, {"remote", "add", "origin", "https://github.com/AndrewMaged814/safelane-demo-api.git"}} {
 		cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
@@ -157,13 +157,13 @@ func TestRunRolloutAdvance_ZeroFlagsUsesControllerIdentityFromProject(t *testing
 	}
 	t.Setenv("SAFELANE_HOME", home)
 
-	configDir := filepath.Join(home, "apps", "podinfo")
+	configDir := filepath.Join(home, "apps", "safelane-demo-api")
 	if err := os.MkdirAll(configDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	projectFile := filepath.Join(configDir, "project.yml")
 	if err := os.WriteFile(projectFile, project.DefaultYAML(
-		"podinfo", "AndrewMaged814/podinfo", "master", "ghcr.io/andrewmaged814/podinfo",
+		"safelane-demo-api", "AndrewMaged814/safelane-demo-api", "master", "ghcr.io/andrewmaged814/safelane-demo-api",
 	), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -175,10 +175,10 @@ func TestRunRolloutAdvance_ZeroFlagsUsesControllerIdentityFromProject(t *testing
 	}
 
 	q := &queueRunner{}
-	q.enqueue(atGateStatus(fastWeights, 5), nil)
+	q.enqueue(atGateStatus(fastWeights, 50), nil)
 	q.enqueue("", nil)
 	q.enqueue(`{"status":{"phase":"Healthy","stableRS":"abc123","currentPodHash":"abc123",`+
-		`"canary":{"currentBackgroundAnalysisRunStatus":{"name":"podinfo-5f9b48bf7c-2","status":"Successful"}}},`+
+		`"canary":{"currentBackgroundAnalysisRunStatus":{"name":"safelane-demo-api-5f9b48bf7c-2","status":"Successful"}}},`+
 		`"spec":{"strategy":{"canary":{"steps":[{"setWeight":5},{"pause":{}}]}}}}`, nil)
 	q.enqueue(analysisRunJSON, nil)
 
@@ -204,7 +204,7 @@ func TestRunRolloutAdvance_ZeroFlagsUsesControllerIdentityFromProject(t *testing
 		t.Fatalf("controller identity = %q / %q, want %q / safelane-controller",
 			executorConfig.ControllerKubeconfig, executorConfig.ControllerContext, wantKubeconfig)
 	}
-	wantPromote := "argo rollouts promote podinfo -n podinfo --kubeconfig " + wantKubeconfig + " --context safelane-controller"
+	wantPromote := "argo rollouts promote safelane-demo-api -n safelane-demo-api --kubeconfig " + wantKubeconfig + " --context safelane-controller"
 	if got := strings.Join(q.calls[1], " "); got != wantPromote {
 		t.Fatalf("promote call = %q, want %q", got, wantPromote)
 	}
@@ -216,7 +216,7 @@ func TestRunRolloutAdvance_ZeroFlagsUsesControllerIdentityFromProject(t *testing
 // background AnalysisRun's real name is still on the Rollout's status.
 func degradedAbortStatus(weights []int, revision string) string {
 	return fmt.Sprintf(`{"status":{"phase":"Degraded","abort":true,`+
-		`"canary":{"currentBackgroundAnalysisRunStatus":{"name":"podinfo-5f9b48bf7c-%s","status":"Failed"}}},`+
+		`"canary":{"currentBackgroundAnalysisRunStatus":{"name":"safelane-demo-api-5f9b48bf7c-%s","status":"Failed"}}},`+
 		`"spec":{"strategy":{"canary":{"steps":[%s]}}}}`, revision, stepsJSON(weights))
 }
 
@@ -224,18 +224,18 @@ func TestRolloutAdvance_ToCompletion_MatchesA23(t *testing.T) {
 	rel := fastLaneStarted(t)
 
 	q := &queueRunner{}
-	q.enqueue(atGateStatus(fastWeights, 5), nil) // GetStatus before deciding
-	q.enqueue("", nil)                           // promote
+	q.enqueue(atGateStatus(fastWeights, 50), nil) // GetStatus before deciding
+	q.enqueue("", nil)                            // promote
 	q.enqueue(`{"status":{"phase":"Healthy","stableRS":"abc123","currentPodHash":"abc123",`+
-		`"canary":{"currentBackgroundAnalysisRunStatus":{"name":"podinfo-5f9b48bf7c-2","status":"Successful"}}},`+
+		`"canary":{"currentBackgroundAnalysisRunStatus":{"name":"safelane-demo-api-5f9b48bf7c-2","status":"Successful"}}},`+
 		`"spec":{"strategy":{"canary":{"steps":[{"setWeight":5},{"pause":{}}]}}}}`, nil) // WaitForGate's first poll
 	q.enqueue(analysisRunJSON, nil) // GetAnalysisRun
 
-	ex := execute.New(execute.Config{Namespace: "podinfo", Rollout: "podinfo"})
+	ex := execute.New(execute.Config{Namespace: "safelane-demo-api", Rollout: "safelane-demo-api"})
 	ex.Run = q.run
 	ex.Sleep = func(time.Duration) {}
 
-	result, err := advanceRollout(context.Background(), rel, ex, "podinfo", nil, time.Minute, time.Now)
+	result, err := advanceRollout(context.Background(), rel, ex, "safelane-demo-api", nil, time.Minute, time.Now)
 	if err != nil {
 		t.Fatalf("advanceRollout: %v", err)
 	}
@@ -266,22 +266,22 @@ func TestRolloutAdvance_FinalWeightWaitsForRunningBackgroundAnalysis(t *testing.
 	rel := fastLaneStarted(t)
 
 	q := &queueRunner{}
-	q.enqueue(atGateWithBackgroundAnalysisRunning(fastWeights, 5), nil) // initial GetStatus
-	q.enqueue(atGateWithBackgroundAnalysisRunning(fastWeights, 5), nil) // analysis wait: still running
+	q.enqueue(atGateWithBackgroundAnalysisRunning(fastWeights, 50), nil) // initial GetStatus
+	q.enqueue(atGateWithBackgroundAnalysisRunning(fastWeights, 50), nil) // analysis wait: still running
 	q.enqueue(fmt.Sprintf(`{"status":{"phase":"Paused","pauseConditions":[{"reason":"CanaryPauseStep"}],"currentStepIndex":%d,`+
-		`"canary":{"currentBackgroundAnalysisRunStatus":{"name":"podinfo-5f9b48bf7c-2","status":"Successful"}}},`+
-		`"spec":{"strategy":{"canary":{"steps":[%s]}}}}`, stepIndexOf(fastWeights, 5), stepsJSON(fastWeights)), nil)
+		`"canary":{"currentBackgroundAnalysisRunStatus":{"name":"safelane-demo-api-5f9b48bf7c-2","status":"Successful"}}},`+
+		`"spec":{"strategy":{"canary":{"steps":[%s]}}}}`, stepIndexOf(fastWeights, 50), stepsJSON(fastWeights)), nil)
 	q.enqueue("", nil) // promote only after analysis settled
 	q.enqueue(`{"status":{"phase":"Healthy","stableRS":"abc123","currentPodHash":"abc123",`+
-		`"canary":{"currentBackgroundAnalysisRunStatus":{"name":"podinfo-5f9b48bf7c-2","status":"Successful"}}},`+
+		`"canary":{"currentBackgroundAnalysisRunStatus":{"name":"safelane-demo-api-5f9b48bf7c-2","status":"Successful"}}},`+
 		`"spec":{"strategy":{"canary":{"steps":[{"setWeight":5},{"pause":{}}]}}}}`, nil)
 	q.enqueue(analysisRunJSON, nil)
 
-	ex := execute.New(execute.Config{Namespace: "podinfo", Rollout: "podinfo"})
+	ex := execute.New(execute.Config{Namespace: "safelane-demo-api", Rollout: "safelane-demo-api"})
 	ex.Run = q.run
 	ex.Sleep = func(time.Duration) {}
 
-	result, err := advanceRollout(context.Background(), rel, ex, "podinfo", nil, time.Minute, time.Now)
+	result, err := advanceRollout(context.Background(), rel, ex, "safelane-demo-api", nil, time.Minute, time.Now)
 	if err != nil {
 		t.Fatalf("advanceRollout: %v", err)
 	}
@@ -301,17 +301,17 @@ func TestRolloutAdvance_ToCompletion_DoesNotInventAnAnalysisRun(t *testing.T) {
 	rel := fastLaneStarted(t)
 
 	q := &queueRunner{}
-	q.enqueue(atGateStatus(fastWeights, 5), nil) // GetStatus before deciding
-	q.enqueue("", nil)                           // promote
+	q.enqueue(atGateStatus(fastWeights, 50), nil) // GetStatus before deciding
+	q.enqueue("", nil)                            // promote
 	q.enqueue(`{"metadata":{"annotations":{"rollout.argoproj.io/revision":"2"}},`+
 		`"status":{"phase":"Healthy","stableRS":"5f9b48bf7c","currentPodHash":"5f9b48bf7c"},`+
 		`"spec":{"strategy":{"canary":{"steps":[{"setWeight":5},{"pause":{}}]}}}}`, nil) // no currentBackgroundAnalysisRunStatus at all
 
-	ex := execute.New(execute.Config{Namespace: "podinfo", Rollout: "podinfo"})
+	ex := execute.New(execute.Config{Namespace: "safelane-demo-api", Rollout: "safelane-demo-api"})
 	ex.Run = q.run
 	ex.Sleep = func(time.Duration) {}
 
-	result, err := advanceRollout(context.Background(), rel, ex, "podinfo", nil, time.Minute, time.Now)
+	result, err := advanceRollout(context.Background(), rel, ex, "safelane-demo-api", nil, time.Minute, time.Now)
 	if err != nil {
 		t.Fatalf("advanceRollout: %v", err)
 	}
@@ -327,19 +327,19 @@ func TestRolloutAdvance_ToCompletion_ToleratesMissingAnalysisRun(t *testing.T) {
 	rel := fastLaneStarted(t)
 
 	q := &queueRunner{}
-	q.enqueue(atGateStatus(fastWeights, 5), nil)
+	q.enqueue(atGateStatus(fastWeights, 50), nil)
 	q.enqueue("", nil)
 	q.enqueue(`{"metadata":{"annotations":{"rollout.argoproj.io/revision":"2"}},`+
 		`"status":{"phase":"Healthy","stableRS":"5f9b48bf7c","currentPodHash":"5f9b48bf7c",`+
-		`"canary":{"currentBackgroundAnalysisRunStatus":{"name":"podinfo-5f9b48bf7c-2","status":"Successful"}}},`+
+		`"canary":{"currentBackgroundAnalysisRunStatus":{"name":"safelane-demo-api-5f9b48bf7c-2","status":"Successful"}}},`+
 		`"spec":{"strategy":{"canary":{"steps":[{"setWeight":5},{"pause":{}}]}}}}`, nil)
-	q.enqueue("", errors.New(`analysisruns.argoproj.io "podinfo-5f9b48bf7c-2" not found`))
+	q.enqueue("", errors.New(`analysisruns.argoproj.io "safelane-demo-api-5f9b48bf7c-2" not found`))
 
-	ex := execute.New(execute.Config{Namespace: "podinfo", Rollout: "podinfo"})
+	ex := execute.New(execute.Config{Namespace: "safelane-demo-api", Rollout: "safelane-demo-api"})
 	ex.Run = q.run
 	ex.Sleep = func(time.Duration) {}
 
-	result, err := advanceRollout(context.Background(), rel, ex, "podinfo", nil, time.Minute, time.Now)
+	result, err := advanceRollout(context.Background(), rel, ex, "safelane-demo-api", nil, time.Minute, time.Now)
 	if err != nil {
 		t.Fatalf("advanceRollout: %v", err)
 	}
@@ -356,12 +356,12 @@ func TestRolloutAdvance_OverWideRequest_MatchesA33(t *testing.T) {
 	to := 100
 
 	q := &queueRunner{}
-	q.enqueue(atGateStatus(guardedWeights, 1), nil)
+	q.enqueue(atGateStatus(guardedWeights, 25), nil)
 
-	ex := execute.New(execute.Config{Namespace: "podinfo", Rollout: "podinfo"})
+	ex := execute.New(execute.Config{Namespace: "safelane-demo-api", Rollout: "safelane-demo-api"})
 	ex.Run = q.run
 
-	result, err := advanceRollout(context.Background(), rel, ex, "podinfo", &to, time.Minute, time.Now)
+	result, err := advanceRollout(context.Background(), rel, ex, "safelane-demo-api", &to, time.Minute, time.Now)
 	if err == nil {
 		t.Fatal("want a refusal, got nil error")
 	}
@@ -430,10 +430,10 @@ func TestRolloutAdvance_NotStarted_MatchesN11(t *testing.T) {
 	}.buildRelease(t) // never started: no execution entry attached
 
 	q := &queueRunner{}
-	ex := execute.New(execute.Config{Namespace: "podinfo", Rollout: "podinfo"})
+	ex := execute.New(execute.Config{Namespace: "safelane-demo-api", Rollout: "safelane-demo-api"})
 	ex.Run = q.run
 
-	_, err := advanceRollout(context.Background(), rel, ex, "podinfo", nil, time.Minute, time.Now)
+	_, err := advanceRollout(context.Background(), rel, ex, "safelane-demo-api", nil, time.Minute, time.Now)
 	var rerr *release.Error
 	if !errors.As(err, &rerr) || rerr.Code != "rollout_not_started" {
 		t.Fatalf("err = %v, want a rollout_not_started *release.Error", err)
@@ -453,10 +453,10 @@ func TestRolloutAdvance_NotAtGate_MatchesN11(t *testing.T) {
 	// Progressing, not paused: not a gate.
 	q.enqueue(progressingStatus(guardedWeights), nil)
 
-	ex := execute.New(execute.Config{Namespace: "podinfo", Rollout: "podinfo"})
+	ex := execute.New(execute.Config{Namespace: "safelane-demo-api", Rollout: "safelane-demo-api"})
 	ex.Run = q.run
 
-	_, err := advanceRollout(context.Background(), rel, ex, "podinfo", nil, time.Minute, time.Now)
+	_, err := advanceRollout(context.Background(), rel, ex, "safelane-demo-api", nil, time.Minute, time.Now)
 	var rerr *release.Error
 	if !errors.As(err, &rerr) || rerr.Code != "rollout_not_at_gate" {
 		t.Fatalf("err = %v, want a rollout_not_at_gate *release.Error", err)
@@ -468,25 +468,24 @@ func TestRolloutAdvance_NotAtGate_MatchesN11(t *testing.T) {
 
 func TestRolloutAdvance_Backwards_MatchesN11(t *testing.T) {
 	rel := guardedLaneStarted(t)
-	// This release was granted weight 1 at start. Advance it for real once
-	// (to weight 5) so "current weight 5" matches the golden, then ask to
-	// go back to weight 1.
+	// This release was granted weight 25 at start. Advance it once to 50,
+	// then ask to go back to 25.
 	rel, err := rel.WithExecution(release.ExecutionEntry{
 		At: time.Date(2026, 8, 20, 14, 26, 48, 0, time.UTC), Verb: release.VerbAdvance,
-		RequestedWeight: 5, Outcome: release.OutcomeGranted,
+		RequestedWeight: 50, Outcome: release.OutcomeGranted,
 	})
 	if err != nil {
 		t.Fatalf("test setup: %v", err)
 	}
-	back := 1
+	back := 25
 
 	q := &queueRunner{}
-	q.enqueue(atGateStatus(guardedWeights, 5), nil)
+	q.enqueue(atGateStatus(guardedWeights, 50), nil)
 
-	ex := execute.New(execute.Config{Namespace: "podinfo", Rollout: "podinfo"})
+	ex := execute.New(execute.Config{Namespace: "safelane-demo-api", Rollout: "safelane-demo-api"})
 	ex.Run = q.run
 
-	_, aerr := advanceRollout(context.Background(), rel, ex, "podinfo", &back, time.Minute, time.Now)
+	_, aerr := advanceRollout(context.Background(), rel, ex, "safelane-demo-api", &back, time.Minute, time.Now)
 	var rerr *release.Error
 	if !errors.As(aerr, &rerr) || rerr.Code != "transition_not_permitted" {
 		t.Fatalf("err = %v, want a transition_not_permitted *release.Error", aerr)
@@ -500,28 +499,28 @@ func TestRolloutAdvance_Timeout_MatchesN12(t *testing.T) {
 	rel := guardedLaneStarted(t)
 	rel, err := rel.WithExecution(release.ExecutionEntry{
 		At: time.Date(2026, 8, 20, 14, 26, 48, 0, time.UTC), Verb: release.VerbAdvance,
-		RequestedWeight: 5, Outcome: release.OutcomeGranted,
+		RequestedWeight: 50, Outcome: release.OutcomeGranted,
 	})
 	if err != nil {
 		t.Fatalf("test setup: %v", err)
 	}
 
 	q := &queueRunner{}
-	q.enqueue(atGateStatus(guardedWeights, 5), nil)
+	q.enqueue(atGateStatus(guardedWeights, 50), nil)
 	q.enqueue("", nil) // promote
 	progressingTo25 := progressingStatus(guardedWeights)
 	for i := 0; i < 5; i++ {
 		q.enqueue(progressingTo25, nil)
 	}
 
-	ex := execute.New(execute.Config{Namespace: "podinfo", Rollout: "podinfo"})
+	ex := execute.New(execute.Config{Namespace: "safelane-demo-api", Rollout: "safelane-demo-api"})
 	ex.Run = q.run
 	current := time.Date(2026, 8, 20, 14, 26, 50, 0, time.UTC)
 	ex.Now = func() time.Time { return current }
 	ex.Sleep = func(d time.Duration) { current = current.Add(d) }
 	ex.PollInterval = 2 * time.Second
 
-	result, aerr := advanceRollout(context.Background(), rel, ex, "podinfo", nil, 5*time.Second, func() time.Time { return current })
+	result, aerr := advanceRollout(context.Background(), rel, ex, "safelane-demo-api", nil, 5*time.Second, func() time.Time { return current })
 	if !errors.Is(aerr, execute.ErrGateTimeout) {
 		t.Fatalf("err = %v, want ErrGateTimeout", aerr)
 	}
@@ -549,13 +548,13 @@ func TestRolloutAdvance_Idempotent_MatchesN12(t *testing.T) {
 	rel := guardedLaneStarted(t)
 
 	q := &queueRunner{}
-	q.enqueue(atGateStatus(guardedWeights, 5), nil) // GetStatus before deciding: Argo is already at 5
+	q.enqueue(atGateStatus(guardedWeights, 50), nil) // GetStatus before deciding: Argo is already at 50
 
-	ex := execute.New(execute.Config{Namespace: "podinfo", Rollout: "podinfo"})
+	ex := execute.New(execute.Config{Namespace: "safelane-demo-api", Rollout: "safelane-demo-api"})
 	ex.Run = q.run
 	now := time.Date(2026, 8, 20, 14, 26, 48, 0, time.UTC)
 
-	result, err := advanceRollout(context.Background(), rel, ex, "podinfo", nil, time.Minute, func() time.Time { return now })
+	result, err := advanceRollout(context.Background(), rel, ex, "safelane-demo-api", nil, time.Minute, func() time.Time { return now })
 	if err != nil {
 		t.Fatalf("advanceRollout: %v", err)
 	}
@@ -569,8 +568,8 @@ func TestRolloutAdvance_Idempotent_MatchesN12(t *testing.T) {
 		t.Fatalf("execution history = %+v, want 2 entries (start, catch-up advance)", entries)
 	}
 	last := entries[1]
-	if last.Verb != release.VerbAdvance || last.RequestedWeight != 5 || last.Outcome != release.OutcomeGranted {
-		t.Errorf("last entry = %+v, want a granted catch-up advance to weight 5", last)
+	if last.Verb != release.VerbAdvance || last.RequestedWeight != 50 || last.Outcome != release.OutcomeGranted {
+		t.Errorf("last entry = %+v, want a granted catch-up advance to weight 50", last)
 	}
 
 	for _, call := range q.calls {
@@ -590,17 +589,17 @@ func TestRolloutAdvance_ArgoAborts_MatchesA34(t *testing.T) {
 	rel := guardedLaneStarted(t)
 
 	q := &queueRunner{}
-	q.enqueue(atGateStatus(guardedWeights, 1), nil) // GetStatus before deciding
-	q.enqueue("", nil)                              // promote
-	q.enqueue(atGateWithBackgroundAnalysisRunning(guardedWeights, 5), nil)
+	q.enqueue(atGateStatus(guardedWeights, 25), nil) // GetStatus before deciding
+	q.enqueue("", nil)                               // promote
+	q.enqueue(atGateWithBackgroundAnalysisRunning(guardedWeights, 50), nil)
 	q.enqueue(degradedAbortStatus(guardedWeights, "4"), nil)
 	q.enqueue(failingAnalysisRunJSON, nil) // GetAnalysisRun
 
-	ex := execute.New(execute.Config{Namespace: "podinfo", Rollout: "podinfo"})
+	ex := execute.New(execute.Config{Namespace: "safelane-demo-api", Rollout: "safelane-demo-api"})
 	ex.Run = q.run
 	ex.Sleep = func(time.Duration) {}
 
-	result, err := advanceRollout(context.Background(), rel, ex, "podinfo", nil, time.Minute, time.Now)
+	result, err := advanceRollout(context.Background(), rel, ex, "safelane-demo-api", nil, time.Minute, time.Now)
 	if err != nil {
 		t.Fatalf("advanceRollout: %v", err)
 	}
@@ -631,17 +630,17 @@ func TestRolloutAdvance_ArgoAborts_MatchesA34(t *testing.T) {
 }
 
 func TestBackgroundAnalysisRunName_UsesOnlyTheLiveField(t *testing.T) {
-	live := execute.Status{AnalysisRunName: "podinfo-5f9b48bf7c-2"}
-	if got := backgroundAnalysisRunName("podinfo", live); got != "podinfo-5f9b48bf7c-2" {
+	live := execute.Status{AnalysisRunName: "safelane-demo-api-5f9b48bf7c-2"}
+	if got := backgroundAnalysisRunName("safelane-demo-api", live); got != "safelane-demo-api-5f9b48bf7c-2" {
 		t.Errorf("got %q, want the live field verbatim", got)
 	}
 
 	cleared := execute.Status{CurrentPodHash: "5f9b48bf7c", Revision: "2"}
-	if got := backgroundAnalysisRunName("podinfo", cleared); got != "" {
+	if got := backgroundAnalysisRunName("safelane-demo-api", cleared); got != "" {
 		t.Errorf("got %q, want empty when Argo cleared the status reference", got)
 	}
 
-	if got := backgroundAnalysisRunName("podinfo", execute.Status{}); got != "" {
+	if got := backgroundAnalysisRunName("safelane-demo-api", execute.Status{}); got != "" {
 		t.Errorf("got %q, want empty when nothing is known", got)
 	}
 }

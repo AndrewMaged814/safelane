@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os/exec"
+	"strings"
 	"testing"
 	"time"
 )
@@ -231,11 +232,11 @@ func TestModel_Name(t *testing.T) {
 }
 
 func TestModel_DiffIsTruncatedToMaxDiffBytes(t *testing.T) {
-	var seenPromptLen int
+	var seenPrompt string
 	m := modelAssessor{
 		cfg: ModelConfig{Assessors: []string{"claude"}, Timeout: time.Second, MaxDiffBytes: 10},
 		run: func(ctx context.Context, name, prompt string) ([]byte, error) {
-			seenPromptLen = len(prompt)
+			seenPrompt = prompt
 			return []byte(canonicalModelJSON), nil
 		},
 	}
@@ -243,8 +244,10 @@ func TestModel_DiffIsTruncatedToMaxDiffBytes(t *testing.T) {
 	if _, err := m.Assess(context.Background(), Facts{UnifiedDiff: longDiff}); err != nil {
 		t.Fatalf("Assess: %v", err)
 	}
-	wantLen := len(modelPrompt) + 10
-	if seenPromptLen != wantLen {
-		t.Errorf("prompt length = %d, want %d (prompt preamble + 10 truncated diff bytes)", seenPromptLen, wantLen)
+	if !strings.Contains(seenPrompt, `"diff":"0123456789"`) || !strings.Contains(seenPrompt, `"diff_truncated":true`) {
+		t.Errorf("prompt did not contain a bounded dossier: %s", seenPrompt)
+	}
+	if strings.Contains(seenPrompt, "ABCDEFGHIJ") {
+		t.Error("prompt leaked the truncated diff tail")
 	}
 }

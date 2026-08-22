@@ -35,7 +35,7 @@ func (in Intent) Validate() error {
 		if _, err := ParseRepositoryRef(in.Repository); err != nil {
 			errs = append(errs, Invalid("malformed_repository", "repository",
 				fmt.Sprintf("%q is not a repository reference", in.Repository),
-				`Use "owner/name", for example "AndrewMaged814/podinfo".`))
+				`Use "owner/name", for example "AndrewMaged814/safelane-demo-api".`))
 		}
 	}
 

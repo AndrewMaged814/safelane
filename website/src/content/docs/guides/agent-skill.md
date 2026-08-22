@@ -11,11 +11,11 @@ The committed skill lives at internal/skill/SKILL.md. Install or link it using y
 
 The workflow is narrow:
 
-1. Run safelane release inspect --pr <n>.
+1. Run safelane release plan --pr <n>.
 2. Continue only on exit code 0.
-3. Run safelane rollout start <id>.
-4. Repeat safelane rollout advance <id> until complete.
-5. Run safelane proof <id> and report the outcome.
+3. Run safelane release run <id>.
+4. Repeat safelane release run <id> until complete.
+5. Run safelane release proof <id> and report the outcome.
 
 The skill tells the agent not to choose a lane, not to edit SafeLane configuration, not to retry a timeout, and to report refusal codes verbatim.
 

@@ -7,8 +7,8 @@ If an operator wants those exact SafeLane transitions to reach Claude's normal a
 prompt, they may add these narrow project-local allow patterns themselves:
 
 ```text
-Bash(safelane rollout start rel_*)
-Bash(safelane rollout advance rel_*)
+Bash(safelane release run rel_*)
+Bash(safelane release run rel_*)
 ```
 
 These rules permit only SafeLane's start and single-gate advance entry points. They do

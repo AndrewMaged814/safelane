@@ -19,9 +19,9 @@ func TestPauseRollout_RecordsCallerAndOutcome(t *testing.T) {
 	rel := guardedLaneStarted(t)
 
 	q := &queueRunner{}
-	q.enqueue("rollout.argoproj.io/podinfo paused\n", nil)
+	q.enqueue("rollout.argoproj.io/safelane-demo-api paused\n", nil)
 
-	ex := execute.New(execute.Config{Namespace: "podinfo", Rollout: "podinfo"})
+	ex := execute.New(execute.Config{Namespace: "safelane-demo-api", Rollout: "safelane-demo-api"})
 	ex.Run = q.run
 	now := time.Date(2026, 8, 20, 14, 30, 0, 0, time.UTC)
 
@@ -31,7 +31,7 @@ func TestPauseRollout_RecordsCallerAndOutcome(t *testing.T) {
 	}
 
 	got := strings.Join(q.calls[0], " ")
-	if want := "argo rollouts pause podinfo -n podinfo"; got != want {
+	if want := "argo rollouts pause safelane-demo-api -n safelane-demo-api"; got != want {
 		t.Errorf("pause args = %q, want %q", got, want)
 	}
 
@@ -51,9 +51,9 @@ func TestPauseRollout_NarrowsOnlyNeverPromotes(t *testing.T) {
 	rel := guardedLaneStarted(t)
 
 	q := &queueRunner{}
-	q.enqueue("rollout.argoproj.io/podinfo paused\n", nil)
+	q.enqueue("rollout.argoproj.io/safelane-demo-api paused\n", nil)
 
-	ex := execute.New(execute.Config{Namespace: "podinfo", Rollout: "podinfo"})
+	ex := execute.New(execute.Config{Namespace: "safelane-demo-api", Rollout: "safelane-demo-api"})
 	ex.Run = q.run
 
 	if _, err := pauseRollout(context.Background(), rel, ex, time.Now); err != nil {
@@ -77,7 +77,7 @@ func TestPauseRollout_ClassifiesAFailure(t *testing.T) {
 	q := &queueRunner{}
 	q.enqueue("", &exec.Error{Name: "kubectl", Err: exec.ErrNotFound})
 
-	ex := execute.New(execute.Config{Namespace: "podinfo", Rollout: "podinfo"})
+	ex := execute.New(execute.Config{Namespace: "safelane-demo-api", Rollout: "safelane-demo-api"})
 	ex.Run = q.run
 
 	_, err := pauseRollout(context.Background(), rel, ex, time.Now)

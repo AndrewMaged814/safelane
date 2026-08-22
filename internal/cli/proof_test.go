@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/AndrewMaged814/safelane/internal/assess"
 	"github.com/AndrewMaged814/safelane/internal/orchestrate"
 	"github.com/AndrewMaged814/safelane/internal/project"
 	"github.com/AndrewMaged814/safelane/internal/release"
@@ -39,6 +40,22 @@ type proofFakeResolver struct {
 	digest string
 }
 
+type proofFakeChangeFetcher struct{}
+
+func (proofFakeChangeFetcher) FetchChangeFacts(context.Context, string, string, int) (assess.Facts, error) {
+	return assess.Facts{Files: []assess.FileChange{{Path: "src/Program.cs", Additions: 1}}, TotalAdditions: 1, UnifiedDiff: "+return ok;"}, nil
+}
+
+type proofFixedAssessor struct {
+	name    string
+	verdict assess.Verdict
+}
+
+func (f proofFixedAssessor) Name() string { return f.name }
+func (f proofFixedAssessor) Assess(context.Context, assess.Facts) (assess.Verdict, error) {
+	return f.verdict, nil
+}
+
 func (f proofFakeResolver) ResolveDigest(ctx context.Context, ref release.ImageReference) (string, error) {
 	return f.digest, nil
 }
@@ -49,9 +66,9 @@ func (f proofFakeResolver) ResolveTag(ctx context.Context, repository, tag strin
 
 func proofVerifiedFacts() github.Facts {
 	return github.Facts{
-		Repository:     "AndrewMaged814/podinfo",
+		Repository:     "AndrewMaged814/safelane-demo-api",
 		Number:         1,
-		URL:            "https://github.com/AndrewMaged814/podinfo/pull/1",
+		URL:            "https://github.com/AndrewMaged814/safelane-demo-api/pull/1",
 		Merged:         true,
 		MergedAt:       time.Date(2026, 8, 15, 9, 0, 0, 0, time.UTC),
 		BaseRef:        "main",
@@ -59,7 +76,7 @@ func proofVerifiedFacts() github.Facts {
 		AuthorLogin:    "AndrewMaged814",
 		CheckRuns: []github.CheckRun{{
 			Name: "publish / build-and-push", Conclusion: "success", HeadSHA: proofFixtureMergeSHA,
-			RunID: 16453210987, URL: "https://github.com/AndrewMaged814/podinfo/actions/runs/16453210987",
+			RunID: 16453210987, URL: "https://github.com/AndrewMaged814/safelane-demo-api/actions/runs/16453210987",
 			CompletedAt: time.Date(2026, 8, 15, 8, 30, 0, 0, time.UTC),
 		}},
 	}
@@ -83,23 +100,26 @@ func persistProofRelease(t *testing.T) string {
 		Store:    &store.FileStore{Dir: dir},
 		Project: project.Config{
 			Version:     1,
-			Application: "podinfo",
-			Repository:  project.Repository{Name: "AndrewMaged814/podinfo", DefaultBranch: "main"},
+			Application: "safelane-demo-api",
+			Repository:  project.Repository{Name: "AndrewMaged814/safelane-demo-api", DefaultBranch: "main"},
 			Release: project.Release{
 				Environment:     "production",
-				ImageRepository: "ghcr.io/andrewmaged814/podinfo",
+				ImageRepository: "ghcr.io/andrewmaged814/safelane-demo-api",
 				ImageTag:        "sha-{{merge_sha_short8}}",
 				RequiredCheck:   "publish / build-and-push",
 				TemplatePath:    ".safelane/release-template",
 			},
-			Target: project.Target{Cluster: "safelane-demo", Namespace: "podinfo", Rollout: "podinfo"},
+			Target: project.Target{Cluster: "safelane-demo", Namespace: "safelane-demo-api", Rollout: "safelane-demo-api"},
 		},
-		Now:   func() time.Time { return time.Date(2026, 8, 15, 12, 0, 0, 0, time.UTC) },
-		NewID: func() (release.ReleaseID, error) { return id, nil },
+		ChangeFacts: proofFakeChangeFetcher{},
+		Heuristic:   proofFixedAssessor{name: "heuristic", verdict: assess.Verdict{Risk: assess.RiskLow, Available: true}},
+		Model:       proofFixedAssessor{name: "model", verdict: assess.Verdict{Available: false, Reason: "fixture model unavailable"}},
+		Now:         func() time.Time { return time.Date(2026, 8, 15, 12, 0, 0, 0, time.UTC) },
+		NewID:       func() (release.ReleaseID, error) { return id, nil },
 	}
 	intent := release.Intent{
 		SchemaVersion: release.RequestSchemaVersion,
-		Repository:    "AndrewMaged814/podinfo",
+		Repository:    "AndrewMaged814/safelane-demo-api",
 		PullRequest:   1,
 		Environment:   "production",
 	}
@@ -192,21 +212,18 @@ func TestProofCommand_ConciseAndDetails_FromPersistedEligibleRelease(t *testing.
 	if code := cmd.Run(context.Background(), []string{"--details", proofFixtureID}, &details, ioDiscard()); code != ExitOK {
 		t.Fatalf("details: want ExitOK, got %d", code)
 	}
-	shared := []string{
-		"eligibility       eligible",
-		"envelope          1 → 5 → 25 → 50 → 100, 4 gates",
-		proofFixtureDigest,
-	}
-	for _, want := range shared {
+	for _, want := range []string{"eligibility  eligible", "progression  25 → 50 → 75 → 100", "details      rerun with --details"} {
 		if !strings.Contains(concise.String(), want) {
 			t.Errorf("concise missing %q\n%s", want, concise.String())
 		}
+	}
+	for _, want := range []string{"eligibility       eligible", "envelope          25 → 50 → 75 → 100, 3 gates", proofFixtureDigest} {
 		if !strings.Contains(details.String(), want) {
 			t.Errorf("details missing %q\n%s", want, details.String())
 		}
 	}
-	if !strings.Contains(concise.String(), "EXECUTION\n  pending") || !strings.Contains(concise.String(), "BOUNDARY\n  pending") {
-		t.Errorf("concise missing pending sections\n%s", concise.String())
+	if strings.Contains(concise.String(), "EXECUTION\n") || strings.Contains(concise.String(), "BOUNDARY\n") {
+		t.Errorf("concise unexpectedly rendered detailed sections\n%s", concise.String())
 	}
 	if !strings.Contains(details.String(), "EXECUTION") || !strings.Contains(details.String(), "BOUNDARY") || !strings.Contains(details.String(), "pending") {
 		t.Errorf("details missing pending Execution/Boundary\n%s", details.String())

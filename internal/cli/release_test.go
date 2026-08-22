@@ -163,11 +163,11 @@ func mustCLIRelease(t *testing.T, eligible bool) *release.Release {
 	now := time.Date(2026, 8, 15, 9, 30, 0, 0, time.UTC)
 	req := release.ReleaseRequest{
 		SchemaVersion: release.RequestSchemaVersion,
-		Target:        release.Target{Application: "podinfo", Environment: "production", Cluster: "safelane-demo", Namespace: "podinfo"},
-		Source:        release.ClaimedSource{Repository: "AndrewMaged814/podinfo", BaseBranch: "main", MergeCommitSHA: cliMergeSHA},
-		PullRequest:   release.ClaimedPullRequest{PullRequestNumber: 1, PullRequestURL: "https://github.com/AndrewMaged814/podinfo/pull/1", Author: "AndrewMaged814"},
+		Target:        release.Target{Application: "safelane-demo-api", Environment: "production", Cluster: "safelane-demo", Namespace: "safelane-demo-api"},
+		Source:        release.ClaimedSource{Repository: "AndrewMaged814/safelane-demo-api", BaseBranch: "main", MergeCommitSHA: cliMergeSHA},
+		PullRequest:   release.ClaimedPullRequest{PullRequestNumber: 1, PullRequestURL: "https://github.com/AndrewMaged814/safelane-demo-api/pull/1", Author: "AndrewMaged814"},
 		CI:            release.ClaimedCI{Workflow: "publish", CheckName: "publish / build-and-push", RunID: 1},
-		Artifact:      release.ClaimedArtifact{ImageReference: "ghcr.io/andrewmaged814/podinfo@" + cliDigest},
+		Artifact:      release.ClaimedArtifact{ImageReference: "ghcr.io/andrewmaged814/safelane-demo-api@" + cliDigest},
 		Caller:        release.CallerIdentity{Identity: "codex-cli", Kind: release.CallerAgent},
 		Metadata:      release.RequestMetadata{RequestID: "req-cli", SubmittedAt: now},
 	}
@@ -181,11 +181,11 @@ func mustCLIRelease(t *testing.T, eligible bool) *release.Release {
 	var elig release.Eligibility
 	if eligible {
 		ev, err := release.NewReleaseEvidence(release.EvidenceInput{
-			Repository:     release.RepositoryRef{Owner: "AndrewMaged814", Name: "podinfo"},
+			Repository:     release.RepositoryRef{Owner: "AndrewMaged814", Name: "safelane-demo-api"},
 			PullRequest:    release.VerifiedPullRequest{Number: 1, URL: req.PullRequest.PullRequestURL, Author: "AndrewMaged814", BaseBranch: "main", MergedAt: now},
 			MergeCommitSHA: cliMergeSHA,
 			RequiredCheck:  release.VerifiedCheckRun{Name: "publish / build-and-push", HeadSHA: cliMergeSHA, Conclusion: release.CheckConclusionSuccess, CompletedAt: now},
-			Artifact:       release.VerifiedArtifact{Reference: release.ImageReference{Registry: "ghcr.io", Repository: "andrewmaged814/podinfo", Digest: cliDigest}, ObservedDigest: cliDigest, ResolvedAt: now},
+			Artifact:       release.VerifiedArtifact{Reference: release.ImageReference{Registry: "ghcr.io", Repository: "andrewmaged814/safelane-demo-api", Digest: cliDigest}, ObservedDigest: cliDigest, ResolvedAt: now},
 			VerifiedAt:     now,
 		})
 		if err != nil {
@@ -195,15 +195,15 @@ func mustCLIRelease(t *testing.T, eligible bool) *release.Release {
 		if err != nil {
 			t.Fatalf("VerifiedEvidence: %v", err)
 		}
-		body := []byte("apiVersion: argoproj.io/v1alpha1\nkind: Rollout\nmetadata:\n  name: podinfo\n  namespace: podinfo\nspec:\n  image: ghcr.io/andrewmaged814/podinfo@" + cliDigest + "\n")
+		body := []byte("apiVersion: argoproj.io/v1alpha1\nkind: Rollout\nmetadata:\n  name: safelane-demo-api\n  namespace: safelane-demo-api\nspec:\n  image: ghcr.io/andrewmaged814/safelane-demo-api@" + cliDigest + "\n")
 		res, err := release.NewRenderedResource(release.ResourceRef{
 			TemplatePath: "40-rollout.yaml.tmpl", APIVersion: "argoproj.io/v1alpha1",
-			Kind: "Rollout", Namespace: "podinfo", Name: "podinfo",
+			Kind: "Rollout", Namespace: "safelane-demo-api", Name: "safelane-demo-api",
 		}, body)
 		if err != nil {
 			t.Fatalf("NewRenderedResource: %v", err)
 		}
-		b, err := release.NewRenderedBundle(release.TemplateIdentity{Name: "podinfo-canary", Version: "v0.1.0-fixture", ContentDigest: "sha256:0011223344556677889900aabbccddeeff00112233445566778899aabbccddee", FileCount: 1}, req.Target, cliDigest, []release.RenderedResource{res})
+		b, err := release.NewRenderedBundle(release.TemplateIdentity{Name: "safelane-demo-api-canary", Version: "v0.1.0-fixture", ContentDigest: "sha256:0011223344556677889900aabbccddeeff00112233445566778899aabbccddee", FileCount: 1}, req.Target, cliDigest, []release.RenderedResource{res})
 		if err != nil {
 			t.Fatalf("NewRenderedBundle: %v", err)
 		}

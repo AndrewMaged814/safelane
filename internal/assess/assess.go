@@ -63,6 +63,29 @@ type Facts struct {
 	// nothing else. Bounding it to a byte budget is the model assessor's
 	// job at the point it builds a prompt, not this package's.
 	UnifiedDiff string `json:"-"`
+	// RuntimeAssertions are operator-approved assertion IDs available to
+	// cover a cited semantic hazard. The model may request one; SafeLane,
+	// not the model, determines whether that ID is configured.
+	RuntimeAssertions     []string `json:"runtime_assertions,omitempty"`
+	ArtifactIdentity      string   `json:"artifact_identity,omitempty"`
+	CIEvidence            []string `json:"ci_evidence,omitempty"`
+	CriticalSurfaces      []string `json:"critical_surfaces,omitempty"`
+	DeterministicRisk     Risk     `json:"deterministic_risk,omitempty"`
+	DeterministicFindings []string `json:"deterministic_findings,omitempty"`
+}
+
+// Hazard is a cited failure mode raised by semantic assessment.
+type Hazard struct {
+	ID                string `json:"id"`
+	Category          string `json:"category"`
+	Severity          Risk   `json:"severity"`
+	FailureMode       string `json:"failure_mode"`
+	File              string `json:"file,omitempty"`
+	Line              int    `json:"line,omitempty"`
+	AffectedSurface   string `json:"affected_surface"`
+	Reversibility     string `json:"reversibility"`
+	RequiredAssertion string `json:"required_assertion"`
+	Covered           bool   `json:"covered"`
 }
 
 // Verdict is one assessor's opinion of a change's risk.
@@ -83,7 +106,9 @@ type Verdict struct {
 	// -- "claude" or "codex" for a model verdict, empty for the
 	// heuristic, whose name is fixed. The output says which model
 	// answered, and the record has to be able to as well.
-	Assessor string `json:"assessor,omitempty"`
+	Assessor     string   `json:"assessor,omitempty"`
+	Hazards      []Hazard `json:"hazards,omitempty"`
+	Insufficient bool     `json:"insufficient,omitempty"`
 }
 
 // Assessor rates the risk of a change from its Facts. "heuristic" and
@@ -122,11 +147,16 @@ type Assessment struct {
 	// CombinedBy records how Risk was reached, so a reader of the
 	// record does not have to trust that it was the worse of the two.
 	CombinedBy string `json:"combined_by"`
+	// AuthorizedUntil is the maximum exposure allowed by uncovered hazards.
+	AuthorizedUntil int `json:"authorized_until"`
+	// Mode makes model-outage fallback explicit in proof instead of asking a
+	// reader to infer it from an unavailable verdict and the guarded lane.
+	Mode string `json:"assessment_mode"`
 }
 
 // IsZero reports whether no assessment was performed.
 func (a Assessment) IsZero() bool {
-	return a.Lane == "" && a.Risk == "" && !a.Heuristic.Available && !a.Model.Available
+	return a.Lane == "" && a.Risk == "" && a.Mode == "" && !a.Heuristic.Available && !a.Model.Available
 }
 
 // HeuristicOnly reports whether the combined risk came from the
@@ -140,12 +170,36 @@ func (a Assessment) HeuristicOnly() bool { return !a.Model.Available }
 // no caller can record a combined risk that is not the worse of the two.
 func Combine(facts Facts, heuristic, model Verdict, lane string) Assessment {
 	facts.UnifiedDiff = "" // model input, never a recorded decision
-	return Assessment{
-		Facts:      facts,
-		Heuristic:  heuristic,
-		Model:      model,
-		Risk:       Worse(heuristic.Risk, model.Risk),
-		Lane:       lane,
-		CombinedBy: "worse-of",
+	mode := "deterministic_and_semantic"
+	if !model.Available {
+		mode = "deterministic_guarded_fallback"
 	}
+	return Assessment{
+		Facts:           facts,
+		Heuristic:       heuristic,
+		Model:           model,
+		Risk:            Worse(heuristic.Risk, model.Risk),
+		Lane:            lane,
+		CombinedBy:      "worse-of",
+		AuthorizedUntil: authorityFor(model.Hazards),
+		Mode:            mode,
+	}
+}
+
+func authorityFor(hazards []Hazard) int {
+	authority := 100
+	for _, hazard := range hazards {
+		if hazard.Covered {
+			continue
+		}
+		switch hazard.Severity {
+		case RiskHigh:
+			return 0
+		case RiskMedium:
+			if authority > 25 {
+				authority = 25
+			}
+		}
+	}
+	return authority
 }

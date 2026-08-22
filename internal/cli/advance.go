@@ -56,7 +56,7 @@ func runRolloutAdvance(ctx context.Context, args []string, stdout, stderr io.Wri
 				"Use the release id `safelane release` returned. rollout advance cannot invent a record."))
 			return ExitFail
 		}
-		fmt.Fprintf(stderr, "safelane rollout advance: %v\n", err)
+		fmt.Fprintf(stderr, "safelane release run: %v\n", err)
 		return ExitFail
 	}
 
@@ -90,7 +90,7 @@ func runRolloutAdvance(ctx context.Context, args []string, stdout, stderr io.Wri
 		// already appended it to result.release when there was one.
 		if result.release != nil {
 			if serr := st.Update(result.release); serr != nil {
-				fmt.Fprintf(stderr, "safelane rollout advance: %v could not be recorded: %v\n", err, serr)
+				fmt.Fprintf(stderr, "safelane release run: %v could not be recorded: %v\n", err, serr)
 				return ExitFail
 			}
 		}
@@ -99,7 +99,7 @@ func runRolloutAdvance(ctx context.Context, args []string, stdout, stderr io.Wri
 	}
 
 	if err := st.Update(result.release); err != nil {
-		fmt.Fprintf(stderr, "safelane rollout advance: the outcome was decided but could not be persisted: %v\n", err)
+		fmt.Fprintf(stderr, "safelane release run: the outcome was decided but could not be persisted: %v\n", err)
 		return ExitFail
 	}
 	fmt.Fprint(stdout, result.Render())
@@ -140,14 +140,14 @@ func parseRolloutAdvanceFlags(args []string, stderr io.Writer, defaultStoreDir s
 	if toStr != "" {
 		w, err := strconv.Atoi(toStr)
 		if err != nil {
-			fmt.Fprintf(stderr, "safelane rollout advance: --to must be an integer weight, got %q\n", toStr)
+			fmt.Fprintf(stderr, "safelane release run: --to must be an integer weight, got %q\n", toStr)
 			return f, "", flag.ErrHelp
 		}
 		f.to = &w
 	}
 	rest := fs.Args()
 	if len(rest) != 1 {
-		fmt.Fprintln(stderr, "safelane rollout advance: exactly one release id is required")
+		fmt.Fprintln(stderr, "safelane release run: exactly one release id is required")
 		fs.Usage()
 		return f, "", flag.ErrHelp
 	}
@@ -218,7 +218,7 @@ func advanceRollout(ctx context.Context, r *release.Release, ex *execute.Executo
 	if _, _, hasGrant := highestGranted(history); !hasGrant {
 		return advanceResult{}, release.Invalid("rollout_not_started", "",
 			"this release has no execution record",
-			"safelane rollout start <id>")
+			"safelane release run <id>")
 	}
 
 	observed, err := ex.GetStatus(ctx)
@@ -296,7 +296,7 @@ func advanceRollout(ctx context.Context, r *release.Release, ex *execute.Executo
 		default:
 			return result, release.Invalid("rollout_did_not_reach_a_gate", "",
 				fmt.Sprintf("the rollout reached state %q while waiting for final analysis", final.State),
-				"Read `safelane status` for detail.")
+				"Read `safelane release status` for detail.")
 		}
 	}
 
@@ -353,7 +353,7 @@ func advanceRollout(ctx context.Context, r *release.Release, ex *execute.Executo
 	if final.State != execute.StateAtGate && final.State != execute.StateComplete {
 		return result, release.Invalid("rollout_did_not_reach_a_gate", "",
 			fmt.Sprintf("the rollout reached state %q instead of a gate or completion", final.State),
-			"Read `safelane status` for detail.")
+			"Read `safelane release status` for detail.")
 	}
 
 	grantedAt := now()
@@ -451,7 +451,7 @@ func decideAdvance(p advanceParams) (advancePlan, *release.Error) {
 	if !hasGrant {
 		return advancePlan{}, release.Invalid("rollout_not_started", "",
 			"this release has no execution record",
-			"safelane rollout start <id>")
+			"safelane release run <id>")
 	}
 
 	observed := p.Observed.CurrentWeight
@@ -637,7 +637,7 @@ func (r advanceResult) Render() string {
 
 func (r advanceResult) renderNoChange() string {
 	var b strings.Builder
-	fmt.Fprintln(&b, "safelane rollout: no change.")
+	fmt.Fprintln(&b, "safelane release run: no change.")
 	fmt.Fprintf(&b, "  weight %d was already granted at %s\n", r.observedWeight, r.grantedAt.UTC().Format("15:04:05")+"Z")
 	fmt.Fprintf(&b, "  current weight %d, next allowed %d\n", r.observedWeight, r.nextAllowed)
 	return b.String()
@@ -671,7 +671,7 @@ func (r advanceResult) renderComplete() string {
 		lane, gates, plural(gates, "gate", "gates"),
 		granted, plural(granted, "transition", "transitions"),
 		refused, plural(refused, "refusal", "refusals"))
-	fmt.Fprintf(&b, "Release Proof: safelane proof %s\n", r.release.ID)
+	fmt.Fprintf(&b, "Release Proof: safelane release proof %s\n", r.release.ID)
 	return b.String()
 }
 
@@ -768,8 +768,8 @@ func (r advanceResult) RenderTimeout() string {
 	fmt.Fprintf(&b, "timeout after %s waiting for gate %d\n", r.timeout, gateNumberForWeight(r.weights, r.requestedWeight))
 	fmt.Fprintln(&b)
 	fmt.Fprintln(&b, "The promotion was sent. The outcome is unknown.")
-	fmt.Fprintf(&b, "Run: safelane status %s\n", r.release.ID)
-	fmt.Fprintln(&b, "Do not retry advance.")
+	fmt.Fprintf(&b, "Run: safelane release status %s\n", r.release.ID)
+	fmt.Fprintln(&b, "Reconnect with safelane release run; it will reconcile before acting.")
 	return b.String()
 }
 

@@ -96,6 +96,28 @@ func TestCombine_DoesNotRecordTheDiff(t *testing.T) {
 	}
 }
 
+func TestCombine_UncoveredHazardsBoundAuthority(t *testing.T) {
+	tests := []struct {
+		severity assess.Risk
+		want     int
+	}{{assess.RiskLow, 100}, {assess.RiskMedium, 25}, {assess.RiskHigh, 0}}
+	for _, tc := range tests {
+		a := assess.Combine(assess.Facts{}, assess.Verdict{Risk: assess.RiskLow, Available: true}, assess.Verdict{
+			Risk: assess.RiskLow, Available: true, Hazards: []assess.Hazard{{ID: "hazard-1", Severity: tc.severity}},
+		}, "guarded")
+		if a.AuthorizedUntil != tc.want {
+			t.Errorf("uncovered %s hazard authority = %d, want %d", tc.severity, a.AuthorizedUntil, tc.want)
+		}
+	}
+}
+
+func TestCombine_ModelFailureRecordsGuardedFallbackMode(t *testing.T) {
+	a := assess.Combine(assess.Facts{}, assess.Verdict{Risk: assess.RiskLow, Available: true}, assess.Verdict{Reason: "timeout"}, "guarded")
+	if a.Mode != "deterministic_guarded_fallback" {
+		t.Fatalf("assessment mode = %q", a.Mode)
+	}
+}
+
 func ineligibleParams(t *testing.T) release.ReleaseParams {
 	t.Helper()
 	now := time.Date(2026, 8, 20, 14, 0, 0, 0, time.UTC)
@@ -111,8 +133,8 @@ func ineligibleParams(t *testing.T) release.ReleaseParams {
 		ID: id,
 		Request: release.ReleaseRequest{
 			SchemaVersion: release.RequestSchemaVersion,
-			Target:        release.Target{Application: "podinfo", Environment: "production", Cluster: "safelane-demo", Namespace: "podinfo"},
-			Source:        release.ClaimedSource{Repository: "AndrewMaged814/podinfo", BaseBranch: "master"},
+			Target:        release.Target{Application: "safelane-demo-api", Environment: "production", Cluster: "safelane-demo", Namespace: "safelane-demo-api"},
+			Source:        release.ClaimedSource{Repository: "AndrewMaged814/safelane-demo-api", BaseBranch: "master"},
 			PullRequest:   release.ClaimedPullRequest{PullRequestNumber: 9},
 			Caller:        release.CallerIdentity{Identity: "safelane-cli", Kind: release.CallerAgent},
 			Metadata:      release.RequestMetadata{RequestID: "req-test", SubmittedAt: now},

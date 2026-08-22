@@ -24,7 +24,7 @@ The caller cannot name its own risk or lane. It cannot send Kubernetes configura
 | --- | --- |
 | A caller claims that an image is reviewed and safe. | SafeLane checks the merged commit, publish check, and immutable GHCR digest. |
 | A caller chooses a rollout weight. | The policy lane supplies the next weight. |
-| Release facts live in logs and chat. | <code>safelane proof &lt;release-id&gt;</code> reads the persisted record. |
+| Release facts live in logs and chat. | <code>safelane release proof &lt;release-id&gt;</code> reads the persisted record. |
 
 ## Why the caller cannot submit risk
 

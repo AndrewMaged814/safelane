@@ -70,7 +70,7 @@ func completeRelease(t *testing.T) *release.Release {
 	}
 	id, _ := release.ParseReleaseID(fixtureReleaseID)
 	facts := github.Facts{
-		Repository: "AndrewMaged814/podinfo", Number: 4, URL: "https://github.com/AndrewMaged814/podinfo/pull/4",
+		Repository: "AndrewMaged814/safelane-demo-api", Number: 4, URL: "https://github.com/AndrewMaged814/safelane-demo-api/pull/4",
 		Merged: true, MergedAt: time.Date(2026, 8, 20, 14, 0, 0, 0, time.UTC), BaseRef: "master",
 		MergeCommitSHA: fixtureMergeSHA, AuthorLogin: "AndrewMaged814",
 		CheckRuns: []github.CheckRun{{Name: "build-and-push", Conclusion: "success", HeadSHA: fixtureMergeSHA}},
@@ -79,32 +79,32 @@ func completeRelease(t *testing.T) *release.Release {
 	fs := &store.FileStore{Dir: dir}
 	d := orchestrate.Deps{
 		GitHub: fakeFetcher{facts}, GHCR: fakeResolver{fixtureDigest}, Template: tmpl, Store: fs,
-		Project: project.Config{Version: 1, Application: "podinfo", Repository: project.Repository{Name: "AndrewMaged814/podinfo", DefaultBranch: "master"},
-			Release: project.Release{Environment: "production", ImageRepository: "ghcr.io/andrewmaged814/podinfo", ImageTag: "sha-{{merge_sha_short8}}", RequiredCheck: "build-and-push", TemplatePath: ".safelane/release-template"},
-			Target:  project.Target{Cluster: "safelane-demo", Namespace: "podinfo", Rollout: "podinfo"}},
+		Project: project.Config{Version: 1, Application: "safelane-demo-api", Repository: project.Repository{Name: "AndrewMaged814/safelane-demo-api", DefaultBranch: "master"},
+			Release: project.Release{Environment: "production", ImageRepository: "ghcr.io/andrewmaged814/safelane-demo-api", ImageTag: "sha-{{merge_sha_short8}}", RequiredCheck: "build-and-push", TemplatePath: ".safelane/release-template"},
+			Target:  project.Target{Cluster: "safelane-demo", Namespace: "safelane-demo-api", Rollout: "safelane-demo-api"}},
 		ChangeFacts: fakeFacts{fromJSON[assess.Facts](t, `{"files":[{"path":"one"},{"path":"two"},{"path":"three"}],"additions":64,"deletions":12,"agent_authored":true,"agent_evidence":"Co-authored-by: Claude <noreply@anthropic.com>"}`)},
 		Heuristic:   fakeAssessor{fromJSON[assess.Verdict](t, `{"risk":"medium","rules":["agent_authored","path:pkg/api/**"],"available":true}`)},
 		Model:       fakeAssessor{fromJSON[assess.Verdict](t, `{"assessor":"claude","risk":"high","rationale":"error path returns before writing a status","available":true}`)},
 		Now:         func() time.Time { return time.Date(2026, 8, 20, 14, 20, 0, 0, time.UTC) },
 		NewID:       func() (release.ReleaseID, error) { return id, nil },
 	}
-	r, err := orchestrate.SubmitRelease(context.Background(), release.Intent{SchemaVersion: release.RequestSchemaVersion, Repository: "AndrewMaged814/podinfo", PullRequest: 4, Environment: "production"}, d)
+	r, err := orchestrate.SubmitRelease(context.Background(), release.Intent{SchemaVersion: release.RequestSchemaVersion, Repository: "AndrewMaged814/safelane-demo-api", PullRequest: 4, Environment: "production"}, d)
 	if err != nil {
 		t.Fatalf("SubmitRelease: %v", err)
 	}
 	r, err = r.WithBoundary(release.Boundary{
-		ControllerIdentity: "system:serviceaccount:podinfo:safelane-controller",
-		CallerIdentity:     "system:serviceaccount:podinfo:safelane-caller",
+		ControllerIdentity: "system:serviceaccount:safelane-demo-api:safelane-controller",
+		CallerIdentity:     "system:serviceaccount:safelane-demo-api:safelane-caller",
 		CallerCapability:   release.CallerCapability{AssertedAt: time.Date(2026, 8, 20, 14, 26, 0, 0, time.UTC), Method: "SubjectAccessReview", GetRollouts: true},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	entries := []release.ExecutionEntry{
-		{At: time.Date(2026, 8, 20, 14, 26, 3, 0, time.UTC), Verb: release.VerbStart, RequestedWeight: 1, Outcome: release.OutcomeGranted},
+		{At: time.Date(2026, 8, 20, 14, 26, 3, 0, time.UTC), Verb: release.VerbStart, RequestedWeight: 25, Outcome: release.OutcomeGranted},
 		{At: time.Date(2026, 8, 20, 14, 26, 41, 0, time.UTC), Verb: release.VerbAdvance, RequestedWeight: 100, Outcome: release.OutcomeRefused, ReasonCode: "transition_exceeds_envelope"},
-		{At: time.Date(2026, 8, 20, 14, 26, 48, 0, time.UTC), Verb: release.VerbAdvance, RequestedWeight: 5, Outcome: release.OutcomeGranted},
-		{At: time.Date(2026, 8, 20, 14, 29, 8, 0, time.UTC), Verb: release.VerbArgoAbort, Outcome: release.OutcomeAborted, ReasonCode: "analysis_failed", Analysis: "podinfo-success-rate-4", Detail: "request-success-rate 0.71 < 0.99"},
+		{At: time.Date(2026, 8, 20, 14, 26, 48, 0, time.UTC), Verb: release.VerbAdvance, RequestedWeight: 50, Outcome: release.OutcomeGranted},
+		{At: time.Date(2026, 8, 20, 14, 29, 8, 0, time.UTC), Verb: release.VerbArgoAbort, Outcome: release.OutcomeAborted, ReasonCode: "analysis_failed", Analysis: "safelane-demo-api-success-rate-4", Detail: "request-success-rate 0.71 < 0.99"},
 	}
 	for _, entry := range entries {
 		r, err = r.WithExecution(entry)
@@ -181,7 +181,7 @@ func TestDetailsMatchesA35SectionsAndRecordedOrder(t *testing.T) {
 		"change            3 files, +64 −12",
 		"heuristic         medium", "model (claude)    high", "combined by       worse-of", "risk              high", "lane              guarded",
 		"14:26:41Z  advance    weight 100", "REFUSED  transition_exceeds_envelope",
-		"14:29:08Z  argo_abort", "aborted  analysis_failed", "podinfo-success-rate-4: request-success-rate 0.71 < 0.99",
+		"14:29:08Z  argo_abort", "aborted  analysis_failed", "safelane-demo-api-success-rate-4: request-success-rate 0.71 < 0.99",
 		"caller capability     get rollouts: yes | patch rollouts: no", "asserted by SubjectAccessReview at 14:26:00Z",
 	} {
 		if !strings.Contains(out, want) {

@@ -7,7 +7,7 @@ import (
 
 func baseFacts() Facts {
 	return Facts{
-		Repository:     "acme/podinfo",
+		Repository:     "acme/safelane-demo-api",
 		Number:         42,
 		Merged:         true,
 		MergedAt:       time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC),
@@ -22,7 +22,7 @@ func baseFacts() Facts {
 
 func baseClaim() Claim {
 	return Claim{
-		Repository:             "acme/podinfo",
+		Repository:             "acme/safelane-demo-api",
 		PullRequestNumber:      42,
 		ExpectedMergeCommitSHA: "merge-sha-1",
 		RequiredCheckName:      "publish",
@@ -42,7 +42,7 @@ func TestEvaluate_Verified(t *testing.T) {
 
 func TestEvaluate_RepositoryMismatch(t *testing.T) {
 	facts := baseFacts()
-	facts.Repository = "someone-else/podinfo"
+	facts.Repository = "someone-else/safelane-demo-api"
 	got := Evaluate(baseClaim(), facts)
 	assertRejected(t, got, ReasonRepositoryMismatch)
 }

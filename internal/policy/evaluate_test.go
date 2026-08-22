@@ -50,9 +50,9 @@ func testEnvelope(t *testing.T, risk string) release.RolloutEnvelope {
 func verifiedEvidence(t *testing.T) release.EvidenceResult {
 	t.Helper()
 	ev, err := release.NewReleaseEvidence(release.EvidenceInput{
-		Repository: release.RepositoryRef{Owner: "AndrewMaged814", Name: "podinfo"},
+		Repository: release.RepositoryRef{Owner: "AndrewMaged814", Name: "safelane-demo-api"},
 		PullRequest: release.VerifiedPullRequest{
-			Number: 1, URL: "https://github.com/AndrewMaged814/podinfo/pull/1",
+			Number: 1, URL: "https://github.com/AndrewMaged814/safelane-demo-api/pull/1",
 			Author: "AndrewMaged814", BaseBranch: "main", MergedAt: testTime,
 		},
 		MergeCommitSHA: mergeSHA,
@@ -61,7 +61,7 @@ func verifiedEvidence(t *testing.T) release.EvidenceResult {
 			Conclusion: release.CheckConclusionSuccess, RunID: 16453210987, CompletedAt: testTime,
 		},
 		Artifact: release.VerifiedArtifact{
-			Reference:      release.ImageReference{Registry: "ghcr.io", Repository: "andrewmaged814/podinfo", Digest: digestA},
+			Reference:      release.ImageReference{Registry: "ghcr.io", Repository: "andrewmaged814/safelane-demo-api", Digest: digestA},
 			ObservedDigest: digestA,
 			ResolvedAt:     testTime,
 		},

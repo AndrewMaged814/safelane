@@ -152,7 +152,7 @@ func SubmitRelease(ctx context.Context, intent release.Intent, d Deps) (*release
 // The Release alone cannot say *which* evidence check reached which
 // answer -- it records the combined outcome and the reasons, which is the
 // right shape for a record but not enough to print a per-check report.
-// These two results are what `release inspect` reads to say "the merged
+// These two results are what `release plan` reads to say "the merged
 // commit was found, the publish check has not concluded, the digest could
 // not be looked up because of the first two". They are not persisted:
 // they are the working detail behind a decision the record already holds.
@@ -177,6 +177,11 @@ func Submit(ctx context.Context, intent release.Intent, d Deps) (Inspection, err
 	if err := d.Project.Validate(); err != nil {
 		return Inspection{}, err
 	}
+	if d.Project.Version >= 4 {
+		if _, err := release.ParseImageReference(d.Project.Analysis.ProbeImage); err != nil {
+			return Inspection{}, release.Invalid("invalid_probe_image", "analysis.probe_image", "the mandatory external probe is not pinned by an immutable OCI digest", "Publish the probe, update operator configuration, and plan again.")
+		}
+	}
 
 	req, evidenceResult, verified, ghResult, ghcrResult := collectAndVerify(ctx, intent, d)
 	out := Inspection{GitHub: ghResult, GHCR: ghcrResult}
@@ -190,7 +195,7 @@ func Submit(ctx context.Context, intent release.Intent, d Deps) (Inspection, err
 		err        error
 	)
 	if verified != nil {
-		assessment, lane, err = assessRelease(ctx, intent, d)
+		assessment, lane, err = assessRelease(ctx, intent, req, d)
 	} else {
 		_, lane, err = d.policy().LaneFor("")
 	}
@@ -204,7 +209,7 @@ func Submit(ctx context.Context, intent release.Intent, d Deps) (Inspection, err
 		return out, err
 	}
 	if verified != nil {
-		bundle, err := render.Render(d.Template, req.Target, *verified, lane.Weights)
+		bundle, err := render.RenderWithOptions(d.Template, req.Target, *verified, lane.Weights, render.Options{ProbeImage: d.Project.Analysis.ProbeImage})
 		if err != nil {
 			return out, err
 		}
@@ -264,25 +269,18 @@ func Submit(ctx context.Context, intent release.Intent, d Deps) (Inspection, err
 //
 // Three failure modes, three different answers:
 //
-//   - Change Facts cannot be collected: both verdicts record themselves
-//     unavailable and the lane falls back to DefaultLane, the narrowest
-//     one declared. Not being able to look at a change is not a licence
-//     to ship it widely.
+//   - Change Facts cannot be collected: planning fails closed because there
+//     is no exact Change Dossier to assess.
 //   - The heuristic returns an error: that is a malformed operator
 //     configuration, and the release is refused. The heuristic is not
 //     optional.
-//   - The model cannot run: expected, and never a low verdict. Its Risk
-//     stays empty, [assess.Worse] ignores it, and the heuristic's floor
-//     stands alone.
-func assessRelease(ctx context.Context, intent release.Intent, d Deps) (assess.Assessment, policy.Lane, error) {
-	facts, factsErr := changeFacts(ctx, intent, d)
+//   - The model cannot run: expected, and never a low verdict. The
+//     deterministic floor is recorded while the lane falls back to the
+//     guarded default with all configured mandatory analysis.
+func assessRelease(ctx context.Context, intent release.Intent, req release.ReleaseRequest, d Deps) (assess.Assessment, policy.Lane, error) {
+	facts, factsErr := changeFacts(ctx, intent, req, d)
 	if factsErr != nil {
-		unavailable := assess.Verdict{Available: false, Reason: factsErr.Error()}
-		name, lane, err := d.policy().LaneFor("")
-		if err != nil {
-			return assess.Assessment{}, policy.Lane{}, err
-		}
-		return assess.Combine(facts, unavailable, unavailable, name), lane, nil
+		return assess.Assessment{}, policy.Lane{}, release.Invalid("change_dossier_unavailable", "assessment.dossier", factsErr.Error(), "Restore access to the exact merged change facts and plan again.")
 	}
 
 	heuristic, err := d.heuristic().Assess(ctx, facts)
@@ -291,20 +289,43 @@ func assessRelease(ctx context.Context, intent release.Intent, d Deps) (assess.A
 			err.Error(),
 			"Correct policy.yml's assessment.heuristic block. The heuristic is not optional; SafeLane will not fall back to a lane it cannot justify.")
 	}
+	facts.DeterministicRisk = heuristic.Risk
+	facts.DeterministicFindings = append([]string(nil), heuristic.Rules...)
 
 	// The model verdict never fails the release: Assess reports an
 	// unavailable assessor through the Verdict, not through an error.
 	model, _ := d.model().Assess(ctx, facts)
+	if model.Insufficient {
+		return assess.Assessment{}, policy.Lane{}, release.Invalid("semantic_assessment_insufficient", "assessment.model", "the semantic assessor could not form a cited assessment", "Review the Change Dossier or add the missing evidence before planning again.")
+	}
 
 	risk := assess.Worse(heuristic.Risk, model.Risk)
-	name, lane, err := d.policy().LaneFor(string(risk))
+	resolvedRisk := string(risk)
+	// An operational model failure is not evidence that the deterministic
+	// risk is low. Preserve that floor in proof, but bind the rollout to the
+	// configured guarded default and all of its mandatory runtime analysis.
+	if !model.Available {
+		resolvedRisk = ""
+	} else if hasUncoveredHazard(model.Hazards) {
+		resolvedRisk = ""
+	}
+	name, lane, err := d.policy().LaneFor(resolvedRisk)
 	if err != nil {
 		return assess.Assessment{}, policy.Lane{}, err
 	}
 	return assess.Combine(facts, heuristic, model, name), lane, nil
 }
 
-func changeFacts(ctx context.Context, intent release.Intent, d Deps) (assess.Facts, error) {
+func hasUncoveredHazard(hazards []assess.Hazard) bool {
+	for _, hazard := range hazards {
+		if !hazard.Covered {
+			return true
+		}
+	}
+	return false
+}
+
+func changeFacts(ctx context.Context, intent release.Intent, req release.ReleaseRequest, d Deps) (assess.Facts, error) {
 	if d.ChangeFacts == nil {
 		return assess.Facts{}, fmt.Errorf("no change-facts collector is configured")
 	}
@@ -316,7 +337,17 @@ func changeFacts(ctx context.Context, intent release.Intent, d Deps) (assess.Fac
 	if err != nil {
 		return assess.Facts{}, err
 	}
-	return d.ChangeFacts.FetchChangeFacts(ctx, repo.Owner, repo.Name, intent.PullRequest)
+	facts, err := d.ChangeFacts.FetchChangeFacts(ctx, repo.Owner, repo.Name, intent.PullRequest)
+	if err != nil {
+		return assess.Facts{}, err
+	}
+	facts.RuntimeAssertions = d.Project.Analysis.AssertionIDs()
+	facts.ArtifactIdentity = req.Artifact.ImageReference
+	facts.CIEvidence = []string{req.CI.CheckName}
+	for _, assertion := range d.Project.Analysis.Assertions {
+		facts.CriticalSurfaces = append(facts.CriticalSurfaces, assertion.Surface)
+	}
+	return facts, nil
 }
 
 func collectAndVerify(ctx context.Context, intent release.Intent, d Deps) (release.ReleaseRequest, release.EvidenceResult, *release.ReleaseEvidence, github.Result, ghcr.Result) {

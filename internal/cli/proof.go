@@ -13,7 +13,7 @@ import (
 	"github.com/AndrewMaged814/safelane/internal/store"
 )
 
-// ProofCommand builds `safelane proof <release-id>`: a read of an already
+// ProofCommand builds `safelane release proof <release-id>`: a read of an already
 // persisted Release. It never calls GitHub, GHCR, or policy.Evaluate.
 func ProofCommand(defaultStoreDir string) Command {
 	return Command{
@@ -35,18 +35,18 @@ func runProof(args []string, stdout, stderr io.Writer, defaultStoreDir string) i
 		return ExitUsage
 	}
 	if *details && *jsonOut {
-		fmt.Fprintln(stderr, "safelane proof: --details and --json cannot be used together")
+		fmt.Fprintln(stderr, "safelane release proof: --details and --json cannot be used together")
 		fs.Usage()
 		return ExitUsage
 	}
 	rest := fs.Args()
 	if len(rest) == 0 {
-		fmt.Fprintln(stderr, "safelane proof: release id is required")
+		fmt.Fprintln(stderr, "safelane release proof: release id is required")
 		fs.Usage()
 		return ExitUsage
 	}
 	if len(rest) > 1 {
-		fmt.Fprintf(stderr, "safelane proof: unexpected extra arguments %q\n", rest[1:])
+		fmt.Fprintf(stderr, "safelane release proof: unexpected extra arguments %q\n", rest[1:])
 		fs.Usage()
 		return ExitUsage
 	}
@@ -65,7 +65,7 @@ func runProof(args []string, stdout, stderr io.Writer, defaultStoreDir string) i
 				"Use the release id SafeLane returned from `safelane release`. Proof cannot invent a record."))
 			return ExitFail
 		}
-		fmt.Fprintf(stderr, "safelane proof: %v\n", err)
+		fmt.Fprintf(stderr, "safelane release proof: %v\n", err)
 		return ExitFail
 	}
 
@@ -74,7 +74,7 @@ func runProof(args []string, stdout, stderr io.Writer, defaultStoreDir string) i
 		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")
 		if err := enc.Encode(p); err != nil {
-			fmt.Fprintf(stderr, "safelane proof: could not encode the result: %v\n", err)
+			fmt.Fprintf(stderr, "safelane release proof: could not encode the result: %v\n", err)
 			return ExitFail
 		}
 		return ExitOK
@@ -90,7 +90,7 @@ func runProof(args []string, stdout, stderr io.Writer, defaultStoreDir string) i
 func printProofError(w io.Writer, err error) {
 	var errs release.Errors
 	if errors.As(err, &errs) {
-		fmt.Fprintf(w, "safelane proof: rejected (%d problem(s)):\n", len(errs))
+		fmt.Fprintf(w, "safelane release proof: rejected (%d problem(s)):\n", len(errs))
 		for _, e := range errs {
 			printError(w, e)
 		}
@@ -98,9 +98,9 @@ func printProofError(w io.Writer, err error) {
 	}
 	var single *release.Error
 	if errors.As(err, &single) {
-		fmt.Fprintln(w, "safelane proof:")
+		fmt.Fprintln(w, "safelane release proof:")
 		printError(w, single)
 		return
 	}
-	fmt.Fprintf(w, "safelane proof: %v\n", err)
+	fmt.Fprintf(w, "safelane release proof: %v\n", err)
 }

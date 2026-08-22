@@ -22,34 +22,6 @@ import (
 // on a cluster that will never answer.
 const defaultGateTimeout = 5 * time.Minute
 
-// RolloutCommand builds `safelane rollout start <release-id>`. root is the
-// application clone whose GitHub remote selects the operator-owned app.
-func RolloutCommand(root, defaultStoreDir string) Command {
-	return Command{
-		Name:    "rollout",
-		Summary: "start, advance, pause, or abort a release's canary rollout",
-		Run: func(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-			if len(args) == 0 {
-				fmt.Fprintln(stderr, "safelane rollout: a subcommand is required (start, advance, pause, abort)")
-				return ExitUsage
-			}
-			switch args[0] {
-			case "start":
-				return runRolloutStart(ctx, args[1:], stdout, stderr, root, defaultStoreDir)
-			case "advance":
-				return runRolloutAdvance(ctx, args[1:], stdout, stderr, root, defaultStoreDir)
-			case "pause":
-				return runRolloutPause(ctx, args[1:], stdout, stderr, root, defaultStoreDir)
-			case "abort":
-				return runRolloutAbort(ctx, args[1:], stdout, stderr, root, defaultStoreDir)
-			default:
-				fmt.Fprintf(stderr, "safelane rollout: unknown subcommand %q (supported: start, advance, pause, abort)\n", args[0])
-				return ExitUsage
-			}
-		},
-	}
-}
-
 type rolloutStartFlags struct {
 	storeDir             string
 	projectFile          string
@@ -73,7 +45,7 @@ func parseRolloutStartFlags(args []string, stderr io.Writer, defaultStoreDir str
 	}
 	rest := fs.Args()
 	if len(rest) != 1 {
-		fmt.Fprintln(stderr, "safelane rollout start: exactly one release id is required")
+		fmt.Fprintln(stderr, "safelane release run: exactly one release id is required")
 		fs.Usage()
 		return f, "", flag.ErrHelp
 	}
@@ -110,7 +82,7 @@ func runRolloutStart(ctx context.Context, args []string, stdout, stderr io.Write
 				"Use the release id `safelane release` returned. rollout start cannot invent a record."))
 			return ExitFail
 		}
-		fmt.Fprintf(stderr, "safelane rollout start: %v\n", err)
+		fmt.Fprintf(stderr, "safelane release run: %v\n", err)
 		return ExitFail
 	}
 	if err := refuseIfNotEligible(r); err != nil {
@@ -120,7 +92,7 @@ func runRolloutStart(ctx context.Context, args []string, stdout, stderr io.Write
 	if r.State() != release.StateReady {
 		printRolloutRejection(stderr, release.Invalid("release_not_ready", "release_id",
 			fmt.Sprintf("release %s is %s; rollout start only accepts ready attempts", r.ID, r.State()),
-			"Run `safelane release inspect --pr <n>` and follow its next_command."))
+			"Run `safelane release plan --pr <n>` and follow its next_command."))
 		return ExitFail
 	}
 	if paths.projectFile == "" {
@@ -159,7 +131,7 @@ func runRolloutStart(ctx context.Context, args []string, stdout, stderr io.Write
 		return ExitFail
 	}
 	if err := st.Update(r); err != nil {
-		fmt.Fprintf(stderr, "safelane rollout start: could not persist starting state: %v\n", err)
+		fmt.Fprintf(stderr, "safelane release run: could not persist starting state: %v\n", err)
 		return ExitFail
 	}
 
@@ -193,7 +165,7 @@ func runRolloutStart(ctx context.Context, args []string, stdout, stderr io.Write
 	}
 	if err != nil && result.release != nil {
 		if serr := st.Update(result.release); serr != nil {
-			fmt.Fprintf(stderr, "safelane rollout start: the attempted start could not be persisted: %v\n", serr)
+			fmt.Fprintf(stderr, "safelane release run: the attempted start could not be persisted: %v\n", serr)
 			return ExitFail
 		}
 	}
@@ -213,7 +185,7 @@ func runRolloutStart(ctx context.Context, args []string, stdout, stderr io.Write
 	}
 
 	if err := st.Update(result.release); err != nil {
-		fmt.Fprintf(stderr, "safelane rollout start: the rollout was granted but could not be persisted: %v\n", err)
+		fmt.Fprintf(stderr, "safelane release run: the rollout was granted but could not be persisted: %v\n", err)
 		return ExitFail
 	}
 
@@ -241,7 +213,7 @@ func refuseIfNotEligible(r *release.Release) error {
 func printRolloutRejection(w io.Writer, err error) {
 	var errs release.Errors
 	if errors.As(err, &errs) {
-		fmt.Fprintln(w, "safelane rollout: rejected:")
+		fmt.Fprintln(w, "safelane release run: rejected:")
 		for _, e := range errs {
 			printError(w, e)
 		}
@@ -249,15 +221,15 @@ func printRolloutRejection(w io.Writer, err error) {
 	}
 	var single *release.Error
 	if errors.As(err, &single) {
-		fmt.Fprintln(w, "safelane rollout: rejected:")
+		fmt.Fprintln(w, "safelane release run: rejected:")
 		printError(w, single)
 		return
 	}
-	fmt.Fprintf(w, "safelane rollout: %v\n", err)
+	fmt.Fprintf(w, "safelane release run: %v\n", err)
 }
 
 func printRolloutFailure(w io.Writer, err error) {
-	fmt.Fprintln(w, "safelane rollout: failed after applying the Rendered Manifest Bundle:")
+	fmt.Fprintln(w, "safelane release run: failed after applying the Rendered Manifest Bundle:")
 	var single *release.Error
 	if errors.As(err, &single) {
 		printError(w, single)
@@ -291,7 +263,7 @@ func (s startResult) RenderFailure() string {
 	if s.final.Message != "" {
 		fmt.Fprintf(&b, "Argo message: %s\n", s.final.Message)
 	}
-	fmt.Fprintf(&b, "The failed start was recorded. Run: safelane proof --details %s\n\n", s.release.ID)
+	fmt.Fprintf(&b, "The failed start was recorded. Run: safelane release proof %s --details\n\n", s.release.ID)
 	return b.String()
 }
 
@@ -389,7 +361,7 @@ func startRolloutAttempt(ctx context.Context, r *release.Release, ex *execute.Ex
 		result.release = updated
 		return result, release.Invalid("rollout_did_not_reach_a_gate", "",
 			fmt.Sprintf("the rollout reached state %q instead of pausing at its first gate", status.State),
-			"Read `safelane status <id>` and `safelane proof --details <id>`. This release did not start cleanly.")
+			"Read `safelane release status <id>` and `safelane release proof <id> --details`. This release did not start cleanly.")
 	}
 	if progressingWeight == 0 {
 		// The very first observed status was already at_gate -- a fast

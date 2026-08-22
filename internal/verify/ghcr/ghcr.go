@@ -44,7 +44,7 @@ const (
 // its own — it must resolve against the real registry.
 type Claim struct {
 	ExpectedRegistry   string
-	ExpectedRepository string // "owner/name", e.g. "acme/podinfo"
+	ExpectedRepository string // "owner/name", e.g. "acme/safelane-demo-api"
 	Reference          release.ImageReference
 }
 

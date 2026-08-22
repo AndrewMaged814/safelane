@@ -1,7 +1,6 @@
 package setup
 
 import (
-	"context"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -41,14 +40,39 @@ func TestDiscoverDerivesRepositoryAndWorkflowChecksWithoutSecrets(t *testing.T) 
 	}
 }
 
+func TestSnapshotJSONContainsCompactFileEvidenceNotSourceContent(t *testing.T) {
+	snapshot := Snapshot{Files: []File{{Path: "src/Program.cs", Bytes: 14, ContentSHA256: "sha256:abc", Content: "TOP SECRET CODE"}}}
+	raw, err := json.Marshal(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(raw)
+	if strings.Contains(text, "TOP SECRET CODE") {
+		t.Fatalf("inspection leaked source content: %s", text)
+	}
+	if !strings.Contains(text, `"content_sha256":"sha256:abc"`) || !strings.Contains(text, `"bytes":14`) {
+		t.Fatalf("inspection omitted compact file evidence: %s", text)
+	}
+}
+
+func TestFingerprintChangesWithFileContentDigest(t *testing.T) {
+	first := Snapshot{Files: []File{{Path: "src/Program.cs", ContentSHA256: "sha256:first"}}}
+	second := Snapshot{Files: []File{{Path: "src/Program.cs", ContentSHA256: "sha256:second"}}}
+	if Fingerprint(first) == Fingerprint(second) {
+		t.Fatal("fingerprint did not bind compact file content digest")
+	}
+}
+
 func TestConservativeProposalIsProjectShapedAndValid(t *testing.T) {
-	proposal := ConservativeProposal(Snapshot{
-		Application:    "safelane-demo-api",
-		Repository:     "AndrewMaged814/safelane-demo-api",
-		RequiredChecks: []string{"Publish image"},
-		Files:          []File{{Path: "Dockerfile"}, {Path: ".github/workflows/ci.yml"}},
-	})
-	if err := ValidateProposal(proposal, Snapshot{}); err != nil {
+	snapshot := Snapshot{
+		Application:       "safelane-demo-api",
+		Repository:        "AndrewMaged814/safelane-demo-api",
+		RequiredChecks:    []string{"Publish image"},
+		Files:             []File{{Path: "Dockerfile"}, {Path: ".github/workflows/ci.yml"}},
+		RuntimeAssertions: []RuntimeAssertion{{ID: "response", Surface: "GET /api/demo", Expectation: "status ok", Covers: "correctness"}},
+	}
+	proposal := ConservativeProposal(snapshot)
+	if err := ValidateProposal(proposal, snapshot); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(proposal.PolicyYAML, `glob: "Dockerfile"`) {
@@ -57,45 +81,43 @@ func TestConservativeProposalIsProjectShapedAndValid(t *testing.T) {
 	if len(proposal.PolicyHighlights) == 0 || len(proposal.TemplateHighlights) == 0 {
 		t.Fatal("fallback proposal did not include structured recommendation highlights")
 	}
-	if len(proposal.TemplateFiles) != 3 {
-		t.Fatalf("fallback template files = %d, want stable service, canary service, and rollout", len(proposal.TemplateFiles))
+	if len(proposal.TemplateFiles) != 4 {
+		t.Fatalf("fallback template files = %d, want two services, analysis, and rollout", len(proposal.TemplateFiles))
 	}
 }
 
 func TestValidateProposalRejectsMultiDocumentTemplateFile(t *testing.T) {
-	proposal := ConservativeProposal(Snapshot{Application: "app"})
+	snapshot := validSnapshot()
+	proposal := ConservativeProposal(snapshot)
 	proposal.TemplateFiles[0].Content += "---\napiVersion: v1\nkind: Service\nmetadata:\n  name: second\n"
 
-	if err := ValidateProposal(proposal, Snapshot{}); err == nil || !strings.Contains(err.Error(), "multi_document_template") {
+	if err := ValidateProposal(proposal, snapshot); err == nil || !strings.Contains(err.Error(), "multi_document_template") {
 		t.Fatalf("error = %v, want multi_document_template", err)
 	}
 }
 
-func TestRecommendExtractsStructuredResultNestedInStreamEvent(t *testing.T) {
-	want := ConservativeProposal(Snapshot{Application: "app", RequiredChecks: []string{"Test"}})
-	payload, err := json.Marshal(want)
-	if err != nil {
-		t.Fatal(err)
+func TestValidateProposalRejectsTemplateThatDropsExternalCanaryProbe(t *testing.T) {
+	snapshot := validSnapshot()
+	proposal := ConservativeProposal(snapshot)
+	for i := range proposal.TemplateFiles {
+		proposal.TemplateFiles[i].Content = strings.ReplaceAll(proposal.TemplateFiles[i].Content, "{{ .ProbeImage }}", "busybox:latest")
 	}
-	stream := `{"type":"result","structured_output":` + string(payload) + "}\n"
-	got, err := Recommend(context.Background(), Snapshot{}, func(context.Context, string) ([]byte, error) {
-		return []byte(stream), nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.Summary != want.Summary || len(got.TemplateFiles) != len(want.TemplateFiles) || len(got.PolicyHighlights) != len(want.PolicyHighlights) || len(got.TemplateHighlights) != len(want.TemplateHighlights) {
-		t.Fatalf("got %+v, want %+v", got, want)
+	if err := ValidateProposal(proposal, snapshot); err == nil || !strings.Contains(err.Error(), "ProbeImage") {
+		t.Fatalf("error = %v, want mandatory ProbeImage rejection", err)
 	}
 }
 
-func TestRecommendationPromptRequiresCompletePolicyShape(t *testing.T) {
-	prompt := recommendationPrompt(Snapshot{})
-	for _, required := range []string{"COMPLETE policy.yml", "lanes", "risk_to_lane", "default_lane", "assessment.heuristic", "assessment.model", "changed_lines_at_least", "timeout: 90s", "Do not turn paths or size into maps", ".yaml.tmpl", "exactly one Kubernetes object/YAML document", "Never use the YAML document", "Do not return .yaml", "exactly low, medium, or high", "standard is a lane name"} {
-		if !strings.Contains(prompt, required) {
-			t.Fatalf("prompt missing policy contract %q", required)
-		}
+func TestValidateProposalRejectsMissingRequiredChecks(t *testing.T) {
+	snapshot := validSnapshot()
+	proposal := ConservativeProposal(snapshot)
+	proposal.RequiredChecks = nil
+	if err := ValidateProposal(proposal, snapshot); err == nil || !strings.Contains(err.Error(), "required CI checks") {
+		t.Fatalf("error = %v, want required CI checks rejection", err)
 	}
+}
+
+func validSnapshot() Snapshot {
+	return Snapshot{Application: "app", RequiredChecks: []string{"Test"}, RuntimeAssertions: []RuntimeAssertion{{ID: "response", Surface: "GET /api/demo", Expectation: "status ok", Covers: "correctness"}}}
 }
 
 func writeFile(t *testing.T, path, body string) {

@@ -1,7 +1,7 @@
-safelane rollout: rejected:
+safelane release run: rejected:
   - [policy] transition_exceeds_envelope (to)
-      you requested weight 100; the envelope permits 5 next
-      current weight 1, granted 14:26:03Z
-      envelope 1 → 5 → 25 → 50 → 100 (lane "guarded",
+      you requested weight 100; the envelope permits 50 next
+      current weight 25, granted 14:26:03Z
+      envelope 25 → 50 → 75 → 100 (lane "guarded",
                digest sha256:6d59567a…50f7)
-      remedy: request 5, or run advance with no --to flag
+      remedy: request 50, or run advance with no --to flag

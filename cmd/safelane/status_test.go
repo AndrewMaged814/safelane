@@ -5,12 +5,23 @@ import (
 	"testing"
 )
 
-func TestStatusIsRegisteredAsATopLevelCommand(t *testing.T) {
+func TestNoArgumentsPrintsPrimaryWorkflowHelpAndSucceeds(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	if code := run(nil, &stdout, &stderr); code != 2 {
-		t.Fatalf("run exit = %d, want usage exit 2", code)
+	if code := run(nil, &stdout, &stderr); code != 0 {
+		t.Fatalf("run exit = %d, want 0", code)
 	}
-	if !bytes.Contains(stderr.Bytes(), []byte("status     show one live rollout or list open releases")) {
-		t.Fatalf("top-level usage does not include status:\n%s", stderr.String())
+	for _, command := range [][]byte{[]byte("setup"), []byte("doctor"), []byte("release"), []byte("demo")} {
+		if !bytes.Contains(stdout.Bytes(), command) {
+			t.Fatalf("help does not include %q:\n%s", command, stdout.String())
+		}
+	}
+}
+
+func TestDeletedCommandsAreOrdinaryUsageErrors(t *testing.T) {
+	for _, args := range [][]string{{"init"}, {"rollout", "start"}, {"status"}, {"proof", "rel_01"}, {"release", "inspect"}, {"release", "--pr", "1"}} {
+		var stdout, stderr bytes.Buffer
+		if code := run(args, &stdout, &stderr); code != 2 {
+			t.Errorf("%v exit = %d, want 2", args, code)
+		}
 	}
 }

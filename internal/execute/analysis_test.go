@@ -37,7 +37,7 @@ func TestGetAnalysisRun_ParsesPhaseAndMeasurement(t *testing.T) {
 	fr.enqueue(analysisRunJSON, nil)
 	ex := newTestExecutor(fr)
 
-	run, err := ex.GetAnalysisRun(context.Background(), "podinfo-5f9b48bf7c-2")
+	run, err := ex.GetAnalysisRun(context.Background(), "safelane-demo-api-5f9b48bf7c-2")
 	if err != nil {
 		t.Fatalf("GetAnalysisRun: %v", err)
 	}
@@ -62,11 +62,11 @@ func TestGetAnalysisRun_ReadsTheRealNameNotAFriendlyOne(t *testing.T) {
 	ex.ControllerKubeconfig = "controller.kubeconfig"
 	ex.ControllerContext = "safelane-controller"
 
-	if _, err := ex.GetAnalysisRun(context.Background(), "podinfo-5f9b48bf7c-2"); err != nil {
+	if _, err := ex.GetAnalysisRun(context.Background(), "safelane-demo-api-5f9b48bf7c-2"); err != nil {
 		t.Fatalf("GetAnalysisRun: %v", err)
 	}
 	args := strings.Join(fr.calls[0], " ")
-	if !strings.Contains(args, "get analysisrun podinfo-5f9b48bf7c-2") {
+	if !strings.Contains(args, "get analysisrun safelane-demo-api-5f9b48bf7c-2") {
 		t.Errorf("args = %q, want the real Argo-assigned name queried verbatim", args)
 	}
 	if !strings.Contains(args, "--kubeconfig controller.kubeconfig --context safelane-controller") {
@@ -81,7 +81,7 @@ func TestGetAnalysisRun_LowerCaseMeasurement(t *testing.T) {
 		`"spec":{"metrics":[{"name":"request-success-rate","successCondition":"len(result) == 0 || result[0] >= 0.99"}]}}`, nil)
 	ex := newTestExecutor(fr)
 
-	run, err := ex.GetAnalysisRun(context.Background(), "podinfo-5f9b48bf7c-3")
+	run, err := ex.GetAnalysisRun(context.Background(), "safelane-demo-api-5f9b48bf7c-3")
 	if err != nil {
 		t.Fatalf("GetAnalysisRun: %v", err)
 	}

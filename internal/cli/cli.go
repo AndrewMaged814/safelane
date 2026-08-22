@@ -22,10 +22,11 @@ import (
 // have taken effect, and retrying it would be the one thing Appendix C6
 // forbids. Only `rollout start` and `rollout advance` return it.
 const (
-	ExitOK      = 0
-	ExitFail    = 1
-	ExitUsage   = 2
-	ExitTimeout = 3
+	ExitOK       = 0
+	ExitFail     = 1
+	ExitUsage    = 2
+	ExitTimeout  = 3
+	ExitDecision = 4
 )
 
 // Command is one top-level safelane subcommand.

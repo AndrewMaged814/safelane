@@ -83,7 +83,7 @@ func TestHeuristic_TableDriven(t *testing.T) {
 			facts: assess.Facts{
 				Files: []assess.FileChange{
 					{Path: "pkg/api/echo.go", Additions: 1},
-					{Path: "charts/podinfo/values.yaml", Additions: 1},
+					{Path: "charts/safelane-demo-api/values.yaml", Additions: 1},
 				},
 			},
 			wantRisk:  assess.RiskHigh,

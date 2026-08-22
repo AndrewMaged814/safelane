@@ -16,13 +16,13 @@ func fixtureRegistry(t *testing.T, reportedDigest string) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
-		if got := r.URL.Query().Get("scope"); got != "repository:acme/podinfo:pull" {
+		if got := r.URL.Query().Get("scope"); got != "repository:acme/safelane-demo-api:pull" {
 			t.Errorf("unexpected token scope: %s", got)
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"token": "fixture-anonymous-token"}`))
 	})
-	mux.HandleFunc("/v2/acme/podinfo/manifests/"+validDigest, func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/v2/acme/safelane-demo-api/manifests/"+validDigest, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodHead {
 			t.Errorf("want HEAD, got %s", r.Method)
 		}
@@ -40,7 +40,7 @@ func fixtureRegistry(t *testing.T, reportedDigest string) *httptest.Server {
 func TestClient_ResolveDigest_MatchesRealFlowShape(t *testing.T) {
 	srv := fixtureRegistry(t, validDigest)
 	client := &Client{BaseURL: srv.URL}
-	ref := mustParse(t, "ghcr.io/acme/podinfo@"+validDigest)
+	ref := mustParse(t, "ghcr.io/acme/safelane-demo-api@"+validDigest)
 
 	got, err := client.ResolveDigest(context.Background(), ref)
 	if err != nil {
@@ -82,7 +82,7 @@ func TestClient_ResolveDigest_TokenEndpointFails_IsError(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 	client := &Client{BaseURL: srv.URL}
-	ref := mustParse(t, "ghcr.io/acme/podinfo@"+validDigest)
+	ref := mustParse(t, "ghcr.io/acme/safelane-demo-api@"+validDigest)
 
 	_, err := client.ResolveDigest(context.Background(), ref)
 	if err == nil {
@@ -95,13 +95,13 @@ func TestClient_ResolveDigest_ManifestMissingDigestHeader_IsError(t *testing.T) 
 	mux.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`{"token": "t"}`))
 	})
-	mux.HandleFunc("/v2/acme/podinfo/manifests/"+validDigest, func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/v2/acme/safelane-demo-api/manifests/"+validDigest, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK) // no Docker-Content-Digest header
 	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 	client := &Client{BaseURL: srv.URL}
-	ref := mustParse(t, "ghcr.io/acme/podinfo@"+validDigest)
+	ref := mustParse(t, "ghcr.io/acme/safelane-demo-api@"+validDigest)
 
 	_, err := client.ResolveDigest(context.Background(), ref)
 	if err == nil {

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -24,9 +25,10 @@ import (
 	"github.com/AndrewMaged814/safelane/internal/store"
 	"github.com/AndrewMaged814/safelane/internal/verify/ghcr"
 	"github.com/AndrewMaged814/safelane/internal/verify/github"
+	"github.com/spf13/pflag"
 )
 
-// ReleaseCommand builds `safelane release inspect --pr <n>` (and `--file`
+// ReleaseCommand builds `safelane release plan --pr <n>` (and `--file`
 // for CI). root is the application clone whose GitHub remote selects the
 // operator-owned app under SAFELANE_HOME.
 func ReleaseCommand(root, defaultStoreDir string) Command {
@@ -47,6 +49,20 @@ func ReleaseCommand(root, defaultStoreDir string) Command {
 			return runRelease(ctx, args, stdout, stderr, root, defaultStoreDir, false, 0, "")
 		},
 	}
+}
+
+// ReleasePlanCommand builds the public `safelane release plan` adapter.
+func ReleasePlanCommand(root, defaultStoreDir string) Command {
+	return Command{Name: "plan", Summary: "compile and persist a Safety Contract", Run: func(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+		return runPublicReleasePlan(ctx, args, stdout, stderr, root, defaultStoreDir)
+	}}
+}
+
+// ReleaseRetryCommand creates a fresh, re-verified attempt from a terminal release.
+func ReleaseRetryCommand(root, defaultStoreDir string) Command {
+	return Command{Name: "retry", Summary: "create a re-verified release attempt", Run: func(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+		return runReleaseRetry(ctx, args, stdout, stderr, root, defaultStoreDir)
+	}}
 }
 
 // releaseFlags is the flag set both forms of `safelane release` share.
@@ -78,7 +94,7 @@ func parseReleaseFlags(args []string, stderr io.Writer, defaultStoreDir string) 
 	fs.StringVar(&f.projectFile, "project", "", "path to project.yml (default: matched app under SAFELANE_HOME)")
 	fs.StringVar(&f.policyFile, "policy", "", "path to policy.yml (default: matched app under SAFELANE_HOME)")
 	fs.StringVar(&f.storeDir, "store-dir", defaultStoreDir, "directory Release records are persisted under")
-	fs.StringVar(&f.githubToken, "github-token", os.Getenv("GITHUB_TOKEN"), "GitHub API token (optional; unauthenticated calls work against public repos, rate-limited)")
+	f.githubToken = os.Getenv("GITHUB_TOKEN")
 	if err := fs.Parse(args); err != nil {
 		return f, fs, err
 	}
@@ -311,16 +327,24 @@ func printInspection(stdout, stderr io.Writer, in inspection, jsonOut, report bo
 }
 
 func runReleaseRetry(ctx context.Context, args []string, stdout, stderr io.Writer, root, defaultStoreDir string) int {
-	if len(args) != 1 {
+	fs := pflag.NewFlagSet("release retry", pflag.ContinueOnError)
+	fs.SetOutput(stderr)
+	projectFile := fs.String("project", "", "path to operator project.yml")
+	storeDir := fs.String("store-dir", defaultStoreDir, "release record directory")
+	jsonOut := fs.Bool("json", false, "print a stable command result")
+	if err := fs.Parse(args); err != nil {
+		return ExitUsage
+	}
+	if fs.NArg() != 1 {
 		fmt.Fprintln(stderr, "usage: safelane release retry <release-id>")
 		return ExitUsage
 	}
-	id := release.ReleaseID(args[0])
+	id := release.ReleaseID(fs.Arg(0))
 	if err := id.Validate(); err != nil {
 		printRejection(stderr, err)
 		return ExitUsage
 	}
-	paths, err := resolveRuntime(root, "", "", defaultStoreDir)
+	paths, err := resolveRuntime(root, *projectFile, "", *storeDir)
 	if err != nil {
 		printRejection(stderr, err)
 		return ExitFail
@@ -336,7 +360,34 @@ func runReleaseRetry(ctx context.Context, args []string, stdout, stderr io.Write
 	if intent.Image != "" {
 		callArgs = append(callArgs, "--image", intent.Image)
 	}
-	return runRelease(ctx, callArgs, stdout, stderr, root, defaultStoreDir, true, attempt, id)
+	callArgs = append(callArgs, "--project", paths.projectFile, "--store-dir", paths.storeDir)
+	if !*jsonOut {
+		return runRelease(ctx, callArgs, stdout, stderr, root, paths.storeDir, true, attempt, id)
+	}
+	callArgs = append(callArgs, "--json")
+	var raw bytes.Buffer
+	code := runRelease(ctx, callArgs, &raw, stderr, root, paths.storeDir, true, attempt, id)
+	if raw.Len() == 0 {
+		return code
+	}
+	var result map[string]any
+	if err := json.Unmarshal(raw.Bytes(), &result); err != nil {
+		return writeResultError(stderr, "release retry", err)
+	}
+	newID, _ := result["release_id"].(string)
+	state, _ := result["effective_state"].(string)
+	if state == "" {
+		state, _ = result["recorded_state"].(string)
+	}
+	next := ""
+	if code == ExitOK && newID != "" {
+		next = fmt.Sprintf("safelane release run %s --yes --json", newID)
+	}
+	envelope := ResultEnvelope{SchemaVersion: "safelane.command.result/v1", Command: "release retry", OK: code == ExitOK, ReleaseID: newID, State: state, NextCommand: next, Warnings: []string{}, Result: result}
+	if err := jsonEncode(stdout, envelope); err != nil {
+		return writeResultError(stderr, "release retry", err)
+	}
+	return code
 }
 
 func writeJSON(w io.Writer, v any) error {

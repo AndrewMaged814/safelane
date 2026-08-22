@@ -105,16 +105,16 @@ func (discardStore) Save(*release.Release) error { return nil }
 func demoProject() project.Config {
 	return project.Config{
 		Version:     1,
-		Application: "podinfo",
-		Repository:  project.Repository{Name: "AndrewMaged814/podinfo", DefaultBranch: "master"},
+		Application: "safelane-demo-api",
+		Repository:  project.Repository{Name: "AndrewMaged814/safelane-demo-api", DefaultBranch: "master"},
 		Release: project.Release{
 			Environment:     "production",
-			ImageRepository: "ghcr.io/andrewmaged814/podinfo",
+			ImageRepository: "ghcr.io/andrewmaged814/safelane-demo-api",
 			ImageTag:        "sha-{{merge_sha}}",
 			RequiredCheck:   "build-and-push",
 			TemplatePath:    ".safelane/release-template",
 		},
-		Target: project.Target{Cluster: "safelane-demo", Namespace: "podinfo", Rollout: "podinfo"},
+		Target: project.Target{Cluster: "safelane-demo", Namespace: "safelane-demo-api", Rollout: "safelane-demo-api"},
 	}
 }
 
@@ -122,9 +122,9 @@ func demoProject() project.Config {
 // check green -- the shape every positive case starts from.
 func mergedFacts(number int, sha string) github.Facts {
 	return github.Facts{
-		Repository:     "AndrewMaged814/podinfo",
+		Repository:     "AndrewMaged814/safelane-demo-api",
 		Number:         number,
-		URL:            fmt.Sprintf("https://github.com/AndrewMaged814/podinfo/pull/%d", number),
+		URL:            fmt.Sprintf("https://github.com/AndrewMaged814/safelane-demo-api/pull/%d", number),
 		Merged:         true,
 		MergedAt:       time.Date(2026, 8, 20, 14, 0, 0, 0, time.UTC),
 		BaseRef:        "master",
@@ -156,7 +156,7 @@ func demoTemplate(t *testing.T) render.Template {
 	return tmpl
 }
 
-// inspectCase is one whole `release inspect` run with every external
+// inspectCase is one whole `release plan` run with every external
 // dependency replaced.
 type inspectCase struct {
 	id      string
@@ -196,7 +196,7 @@ func (c inspectCase) run(t *testing.T) string {
 
 	result, err := orchestrate.Submit(context.Background(), release.Intent{
 		SchemaVersion: release.RequestSchemaVersion,
-		Repository:    "AndrewMaged814/podinfo",
+		Repository:    "AndrewMaged814/safelane-demo-api",
 		PullRequest:   c.pr,
 		Environment:   "production",
 	}, deps)
@@ -260,11 +260,11 @@ func TestInspect_RiskyChange_MatchesA31(t *testing.T) {
 // Rollout carries steps, so exactly one of the five resource hashes may
 // differ between the two lanes.
 func TestInspect_LaneReachesTheManifest(t *testing.T) {
-	fast, err := render.Render(demoTemplate(t), demoTarget(), demoEvidence(t, safeMergeSHA, safeDigest), []int{5, 100})
+	fast, err := render.Render(demoTemplate(t), demoTarget(), demoEvidence(t, safeMergeSHA, safeDigest), []int{50, 100})
 	if err != nil {
 		t.Fatalf("render fast lane: %v", err)
 	}
-	guarded, err := render.Render(demoTemplate(t), demoTarget(), demoEvidence(t, safeMergeSHA, safeDigest), []int{1, 5, 25, 50, 100})
+	guarded, err := render.Render(demoTemplate(t), demoTarget(), demoEvidence(t, safeMergeSHA, safeDigest), []int{25, 50, 75, 100})
 	if err != nil {
 		t.Fatalf("render guarded lane: %v", err)
 	}
@@ -285,21 +285,21 @@ func TestInspect_LaneReachesTheManifest(t *testing.T) {
 }
 
 func demoTarget() release.Target {
-	return release.Target{Application: "podinfo", Environment: "production", Cluster: "safelane-demo", Namespace: "podinfo"}
+	return release.Target{Application: "safelane-demo-api", Environment: "production", Cluster: "safelane-demo", Namespace: "safelane-demo-api"}
 }
 
 func demoEvidence(t *testing.T, sha, digest string) release.ReleaseEvidence {
 	t.Helper()
 	now := time.Date(2026, 8, 20, 14, 0, 0, 0, time.UTC)
 	ev, err := release.NewReleaseEvidence(release.EvidenceInput{
-		Repository:     release.RepositoryRef{Owner: "AndrewMaged814", Name: "podinfo"},
-		PullRequest:    release.VerifiedPullRequest{Number: 3, URL: "https://github.com/AndrewMaged814/podinfo/pull/3", Author: "AndrewMaged814", BaseBranch: "master", MergedAt: now},
+		Repository:     release.RepositoryRef{Owner: "AndrewMaged814", Name: "safelane-demo-api"},
+		PullRequest:    release.VerifiedPullRequest{Number: 3, URL: "https://github.com/AndrewMaged814/safelane-demo-api/pull/3", Author: "AndrewMaged814", BaseBranch: "master", MergedAt: now},
 		MergeCommitSHA: sha,
 		RequiredCheck: release.VerifiedCheckRun{
 			Name: "build-and-push", HeadSHA: sha, Conclusion: release.CheckConclusionSuccess, CompletedAt: now,
 		},
 		Artifact: release.VerifiedArtifact{
-			Reference:      release.ImageReference{Registry: "ghcr.io", Repository: "andrewmaged814/podinfo", Digest: digest},
+			Reference:      release.ImageReference{Registry: "ghcr.io", Repository: "andrewmaged814/safelane-demo-api", Digest: digest},
 			ObservedDigest: digest, ResolvedAt: now,
 		},
 		VerifiedAt: now,
@@ -454,7 +454,7 @@ func TestInspect_ModelUnavailable_KeepsTheHeuristicFloor(t *testing.T) {
 		"claude: exit 1 after 2 retries (api overloaded)",
 		"codex: not found on PATH",
 		"  risk              medium  (heuristic only)",
-		"  lane              standard",
+		"  lane              guarded",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("want %q in:\n%s", want, out)
@@ -483,8 +483,8 @@ func TestInspectJSON_CarriesTheSameDecision(t *testing.T) {
 	if j.Decision.Eligibility != "eligible" || j.Decision.Lane != "fast" {
 		t.Fatalf("want eligible/fast, got %s/%s", j.Decision.Eligibility, j.Decision.Lane)
 	}
-	if got := j.Decision.Weights; len(got) != 2 || got[0] != 5 || got[1] != 100 {
-		t.Fatalf("want weights 5,100, got %v", got)
+	if got := j.Decision.Weights; len(got) != 2 || got[0] != 50 || got[1] != 100 {
+		t.Fatalf("want weights 50,100, got %v", got)
 	}
 	if j.Decision.Gates != 1 {
 		t.Fatalf("want 1 gate, got %d", j.Decision.Gates)
@@ -511,7 +511,7 @@ func (c inspectCase) inspection(t *testing.T) inspection {
 	now := time.Date(2026, 8, 20, 14, 21, 44, 0, time.UTC)
 	result, err := orchestrate.Submit(context.Background(), release.Intent{
 		SchemaVersion: release.RequestSchemaVersion,
-		Repository:    "AndrewMaged814/podinfo",
+		Repository:    "AndrewMaged814/safelane-demo-api",
 		PullRequest:   c.pr,
 		Environment:   "production",
 	}, orchestrate.Deps{

@@ -105,7 +105,7 @@ func ParseRepositoryRef(s string) (RepositoryRef, error) {
 	if !ok || owner == "" || name == "" || strings.Contains(name, "/") {
 		return RepositoryRef{}, Invalid("malformed_repository", "source.repository",
 			fmt.Sprintf("%q is not a repository reference", s),
-			`Use "owner/name", for example "AndrewMaged814/podinfo".`)
+			`Use "owner/name", for example "AndrewMaged814/safelane-demo-api".`)
 	}
 	if !isGitHubLogin(owner) {
 		return RepositoryRef{}, Invalid("malformed_repository", "source.repository",
@@ -128,7 +128,7 @@ func ParseRepositoryRef(s string) (RepositoryRef, error) {
 // is not an identity and is rejected at intake rather than resolved.
 type ImageReference struct {
 	Registry   string `json:"registry"`   // e.g. "ghcr.io"
-	Repository string `json:"repository"` // e.g. "andrewmaged814/podinfo"
+	Repository string `json:"repository"` // e.g. "andrewmaged814/safelane-demo-api"
 	Digest     string `json:"digest"`     // e.g. "sha256:<64 hex>"
 }
 
@@ -155,7 +155,7 @@ func ParseImageReference(s string) (ImageReference, error) {
 	if s == "" {
 		return ImageReference{}, Invalid("missing_image_reference", field,
 			"no image reference was supplied",
-			"Supply the immutable digest reference published by CI, for example ghcr.io/owner/podinfo@sha256:<digest>.")
+			"Supply the immutable digest reference published by CI, for example ghcr.io/owner/safelane-demo-api@sha256:<digest>.")
 	}
 	name, digest, ok := strings.Cut(s, "@")
 	if !ok {
@@ -177,7 +177,7 @@ func ParseImageReference(s string) (ImageReference, error) {
 	if !ok || repository == "" {
 		return ImageReference{}, Invalid("malformed_image_reference", field,
 			fmt.Sprintf("%q has no registry host", s),
-			"Include the registry host, for example ghcr.io/owner/podinfo@sha256:<digest>.")
+			"Include the registry host, for example ghcr.io/owner/safelane-demo-api@sha256:<digest>.")
 	}
 	if strings.Contains(repository, ":") {
 		return ImageReference{}, Invalid("mutable_image_reference", field,
@@ -192,7 +192,7 @@ func ParseImageReference(s string) (ImageReference, error) {
 	if !strings.Contains(registry, ".") && registry != "localhost" {
 		return ImageReference{}, Invalid("malformed_image_reference", field,
 			fmt.Sprintf("%q does not look like a registry host", registry),
-			"Include the registry host, for example ghcr.io/owner/podinfo@sha256:<digest>.")
+			"Include the registry host, for example ghcr.io/owner/safelane-demo-api@sha256:<digest>.")
 	}
 	if err := validateImagePathSegment(registry, field); err != nil {
 		return ImageReference{}, err

@@ -1,89 +1,64 @@
 ---
 name: safelane
-description: Release a merged pull request through SafeLane. Use when the user asks to inspect, release, deploy, promote, monitor, or diagnose a SafeLane release.
+description: Coordinate a merged pull request through SafeLane. Use for SafeLane setup, release, deploy, rollout monitoring, emergency control, or release proof.
 user-invocable: true
 ---
 
-# SafeLane release
+# SafeLane
 
-SafeLane is the only production path for the protected application. Use its CLI
-for every production read and transition; direct Kubernetes or Argo access is
-outside your authority.
+SafeLane is the release coordinator. Use its commands as the complete production
+interface. SafeLane assesses and authorizes progression; Argo executes analysis,
+promotion, abort, and rollback.
 
-## 1. Establish the change
+## Setup
 
-Identify one merged pull request and its repository. Read its checks with:
+For a normal deterministic setup, run:
 
-`gh pr checks <pr> --repo <owner/repo>`
+`safelane setup`
 
-Report every failed or cancelled check. These are safety signals even when the
-operator's SafeLane policy does not make them mandatory. Keep the terms exact:
+When the user asks for an agent-shaped setup:
 
-- **eligibility** means the configured mandatory evidence verified;
-- **assessment** selects a bounded lane;
-- neither means the change is correct or safe.
+1. Run `safelane setup inspect --json`.
+2. Treat the returned file list as compact evidence, not source text. Read only
+   repository files relevant to the reported checks, critical surfaces, Kubernetes
+   resources, and uncertainties using this active session's normal file tools.
+3. Build one `safelane.setup.proposal/v1` JSON proposal from that inspection.
+   Preserve its `inspection_fingerprint`. Cite every critical surface and configure
+   a concrete runtime assertion for each identified hazard.
+4. Write the proposal to an absolute temporary path.
+5. Explain the proposal once, then ask approval.
+6. After approval, run `safelane setup apply --proposal <absolute-path> --yes --json`.
+7. Run `safelane doctor`. Setup is complete only when doctor passes.
 
-## 2. Inspect without mutation
+## Release
 
-Run `safelane release inspect --pr <pr> --repo <owner/repo>`.
+Require an exact merged pull-request number from the user. Ask for it when absent;
+never select a recent or “latest” pull request.
 
-Read `history`, `recorded_state`, `live_state`, `effective_state`, `state_source`,
-and `next_command` from inspect's JSON. The ledger is authoritative for attempt
-identity: repeated inspection reuses the latest attempt. Report actual check
-outcomes before the model assessment. Treat its rationale as a hypothesis and
-never supply a CI cause that the report did not contain.
+1. Run `safelane release plan --pr <number> --json` once.
+2. Explain the exact artifact, target, deterministic and semantic risk, cited
+   hazards, assertion coverage, lane, weights, and authority ceiling. Treat model
+   rationale as a hypothesis; it may raise risk but cannot lower deterministic risk.
+3. Ask one approval for that frozen Safety Contract.
+4. After approval, run
+   `safelane release run <release-id> --yes --json` and remain attached.
+5. On exit 0 or 1, run `safelane release proof <release-id> --json` and report the
+   terminal outcome. Attribute AnalysisRun failure and normal rollback to Argo.
+6. On exit 3, run `safelane release status <release-id> --json`, report that the
+   mutation outcome is unknown, then reconnect with `release run`; it reconciles
+   before acting. Never issue a direct promotion to resolve uncertainty.
+7. On exit 4, report the exact uncovered hazard. Ask only whether the user accepts
+   that hazard. When approved and policy permits it, run
+   `safelane release accept-risk <release-id> --hazard <hazard-id> --reason <reason> --yes --json`,
+   then reconnect with `release run`.
 
-Exit 1: report every Failed and Unavailable line and stop. Retry only when the
-typed result says `retryable true`.
+A paused release continues only after the user explicitly requests
+`safelane release resume <release-id> --reason <reason>`. Emergency pause,
+resume, and abort always carry a durable reason.
 
-Follow only `next_command`. A terminal or `unknown` attempt has no start action.
-When inspect offers start or advance, ask explicit approval by quoting the exact
-command, release ID, application, and full production target. Completion means
-the user approved that exact mutation.
+## Completion
 
-## 3. Start and classify the result
-
-Run the exact approved `safelane rollout start <release-id>` command.
-
-- `exit 0`: first gate reached; continue with the next action printed.
-- `rejected`: nothing was applied. Report the reason code and remedy verbatim.
-- `failed after applying`: production mutation was attempted and the failed
-  execution was recorded. Run the diagnostic reads below, then stop.
-- `exit 3`: outcome is unknown. Run the diagnostic reads below and do not retry.
-
-Diagnostic reads:
-
-`safelane status <release-id> --json`
-
-`safelane proof --details <release-id>`
-
-`release_match: false` means annotation, execution binding, target, digest, and
-generation did not all correlate. Describe live state as unrelated, never as
-this attempt's outcome.
-
-## 4. Advance one gate at a time
-
-Ask approval with the exact advance command and target, then run it once. Repeat
-inspection/status before asking for another gate.
-Never pass `--to`; the recorded envelope chooses the next weight.
-
-- `exit 0`: follow the printed next action.
-- `exit 1`: report the refusal or recorded abort and stop.
-- `exit 3`: read status and proof; do not retry the advance.
-
-## 5. Report proof
-
-Run `safelane proof --details <release-id>` and report the final outcome,
-execution entries, analysis evidence, and boundary evidence.
-
-## Causality gate
-
-Name a runtime cause only when all three agree: `release_match: true`, the
-persisted execution belongs to this release, and its AnalysisRun or Argo message
-contains the supporting evidence. Otherwise say **cause unknown** and separate
-facts from hypotheses. A temporal coincidence such as “aborted after this
-change” is not causal evidence.
-
-You do not choose a lane, request a weight, edit SafeLane configuration, or work
-around a refusal. A refusal is a correct terminal result, distinct from a
-post-apply failure.
+Completion is a terminal proof, not a successful command invocation. Report the
+release ID, artifact digest, lane, Argo analysis outcome, final state, and proof
+command. When correlation is incomplete, state “cause unknown” and separate
+observed facts from hypotheses.

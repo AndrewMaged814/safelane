@@ -103,5 +103,5 @@ func ResolveIn(root, home string) (Locations, error) {
 func missingConfig() error {
 	return release.Invalid("missing_project_config", "project",
 		"no operator configuration for this repository",
-		"run safelane init --app <name> --repo <owner/name>")
+		"run safelane setup from the application repository")
 }

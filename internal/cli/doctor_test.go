@@ -21,9 +21,11 @@ func doctorRuntime(t *testing.T) (projectFile, policyFile, templateDir string) {
 	projectFile = filepath.Join(dir, "project.yml")
 	policyFile = filepath.Join(dir, "policy.yml")
 	templateDir = filepath.Join(dir, "release-template")
-	if err := os.WriteFile(projectFile, project.DefaultYAML(
-		"podinfo", "AndrewMaged814/podinfo", "master", "ghcr.io/andrewmaged814/podinfo",
-	), 0o644); err != nil {
+	projectYAML := project.DefaultYAML(
+		"safelane-demo-api", "AndrewMaged814/safelane-demo-api", "master", "ghcr.io/andrewmaged814/safelane-demo-api",
+	)
+	projectYAML = bytes.ReplaceAll(projectYAML, []byte("sha256:REPLACE_WITH_PUBLISHED_DIGEST"), []byte("sha256:"+strings.Repeat("a", 64)))
+	if err := os.WriteFile(projectFile, projectYAML, 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(policyFile, policy.DefaultYAML(), 0o644); err != nil {
@@ -50,14 +52,14 @@ func healthyDoctorRunner(t *testing.T) (func(context.Context, []string, []byte) 
 		joined := strings.Join(args, " ")
 		switch {
 		case strings.HasSuffix(joined, "--context safelane-controller auth whoami -o json"):
-			return []byte(`{"status":{"userInfo":{"username":"system:serviceaccount:podinfo:safelane-controller"}}}`), nil
+			return []byte(`{"status":{"userInfo":{"username":"system:serviceaccount:safelane-demo-api:safelane-controller"}}}`), nil
 		case joined == "auth whoami -o json":
-			return []byte(`{"status":{"userInfo":{"username":"system:serviceaccount:podinfo:safelane-caller"}}}`), nil
-		case strings.HasSuffix(joined, "--context safelane-controller auth can-i patch rollouts.argoproj.io --namespace podinfo"):
+			return []byte(`{"status":{"userInfo":{"username":"system:serviceaccount:safelane-demo-api:safelane-caller"}}}`), nil
+		case strings.HasSuffix(joined, "--context safelane-controller auth can-i patch rollouts.argoproj.io --namespace safelane-demo-api"):
 			return []byte("yes\n"), nil
-		case joined == "auth can-i get rollouts.argoproj.io --namespace podinfo":
+		case joined == "auth can-i get rollouts.argoproj.io --namespace safelane-demo-api":
 			return []byte("yes\n"), nil
-		case joined == "auth can-i patch rollouts.argoproj.io --namespace podinfo":
+		case joined == "auth can-i patch rollouts.argoproj.io --namespace safelane-demo-api":
 			return []byte("no\n"), nil
 		}
 		switch joined {
@@ -65,9 +67,9 @@ func healthyDoctorRunner(t *testing.T) (func(context.Context, []string, []byte) 
 			return []byte(`{"clientVersion":{"gitVersion":"v1.31.2"}}`), nil
 		case "argo rollouts version --short":
 			return []byte("v1.7.2\n"), nil
-		case "get rollout podinfo -n podinfo -o json":
+		case "get rollout safelane-demo-api -n safelane-demo-api -o json":
 			return []byte(`{"status":{"phase":"Healthy","stableRS":"abc","currentPodHash":"abc"},` +
-				`"spec":{"template":{"spec":{"containers":[{"image":"ghcr.io/andrewmaged814/podinfo@sha256:` + digest + `"}]}}}}`), nil
+				`"spec":{"template":{"spec":{"containers":[{"image":"ghcr.io/andrewmaged814/safelane-demo-api@sha256:` + digest + `"}]}}}}`), nil
 		case "config get-contexts -o name":
 			return []byte("safelane-caller\n"), nil
 		}
@@ -90,7 +92,7 @@ func TestDoctorClusterReachabilityUsesCallerRolloutRead(t *testing.T) {
 		"--project", projectFile, "--policy", policyFile, "--template-dir", templateDir,
 	}, &stdout, &stderr, ".", deps)
 
-	want := []string{"get", "rollout", "podinfo", "-n", "podinfo", "-o", "json"}
+	want := []string{"get", "rollout", "safelane-demo-api", "-n", "safelane-demo-api", "-o", "json"}
 	for _, call := range *calls {
 		if slices.Equal(call, want) {
 			continue
@@ -120,8 +122,8 @@ func TestDoctorHealthyMatchesA1Golden(t *testing.T) {
 	if code != ExitOK {
 		t.Fatalf("doctor exit = %d, stderr: %s\n%s", code, stderr.String(), stdout.String())
 	}
-	actual := strings.ReplaceAll(stdout.String(), filepath.ToSlash(projectFile), "~/.safelane/apps/podinfo/project.yml")
-	actual = strings.ReplaceAll(actual, filepath.ToSlash(policyFile), "~/.safelane/apps/podinfo/policy.yml")
+	actual := strings.ReplaceAll(stdout.String(), filepath.ToSlash(projectFile), "~/.safelane/apps/safelane-demo-api/project.yml")
+	actual = strings.ReplaceAll(actual, filepath.ToSlash(policyFile), "~/.safelane/apps/safelane-demo-api/policy.yml")
 	assertGolden(t, "a1-doctor.txt", actual)
 }
 
@@ -208,8 +210,8 @@ func TestDoctorMissingKubectlMatchesN2AndSkipsDependents(t *testing.T) {
 	if calls != 1 {
 		t.Fatalf("kubectl runner calls = %d, want only the availability probe", calls)
 	}
-	actual := strings.ReplaceAll(stdout.String(), filepath.ToSlash(projectFile), "~/.safelane/apps/podinfo/project.yml")
-	actual = strings.ReplaceAll(actual, filepath.ToSlash(policyFile), "~/.safelane/apps/podinfo/policy.yml")
+	actual := strings.ReplaceAll(stdout.String(), filepath.ToSlash(projectFile), "~/.safelane/apps/safelane-demo-api/project.yml")
+	actual = strings.ReplaceAll(actual, filepath.ToSlash(policyFile), "~/.safelane/apps/safelane-demo-api/policy.yml")
 	assertGolden(t, "n2-doctor-kubectl-missing.txt", actual)
 }
 
@@ -217,7 +219,7 @@ func TestDoctorUnreachableClusterMatchesN3Fragment(t *testing.T) {
 	projectFile, policyFile, templateDir := doctorRuntime(t)
 	healthy, _ := healthyDoctorRunner(t)
 	run := func(ctx context.Context, args []string, stdin []byte) ([]byte, error) {
-		if strings.Join(args, " ") == "get rollout podinfo -n podinfo -o json" {
+		if strings.Join(args, " ") == "get rollout safelane-demo-api -n safelane-demo-api -o json" {
 			return nil, errors.New("dial tcp 10.0.0.12:6443: i/o timeout")
 		}
 		return healthy(ctx, args, stdin)

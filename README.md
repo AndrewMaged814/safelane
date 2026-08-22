@@ -4,72 +4,66 @@
 
 # SafeLane
 
-<p align="center">
-  <strong>Ship on autopilot. Stay in control.</strong>
-</p>
+<p align="center"><strong>Stop shipping every change the same way.</strong></p>
 
-<p align="center">
-  <a href="https://andrewmaged814.github.io/safelane/">Read the documentation</a> ·
-  <a href="https://github.com/AndrewMaged814/safelane">View the source</a>
-</p>
+SafeLane is release coordination for coding agents. Give it an exact merged pull request once; it turns code and CI evidence into a frozen Safety Contract, asks for one approval, then coordinates Argo Rollouts until the release is promoted, rolled back, or needs one specific human decision.
 
-SafeLane is the missing safety layer for deployment agents. Agents can plan a release, watch a
-canary, and repair a bad step. They should not set their own limits or hold the keys to production.
+## Why use it
 
-SafeLane gives Claude Code, Codex, CI, and humans one guarded path to production. You identify a
-merged pull request. SafeLane collects GitHub and GHCR evidence, applies the operator-owned Release
-Policy, renders trusted Kubernetes objects, and allows only the rollout step that policy permits.
+Deployment agents are good at operating tools but inconsistent at release discipline. They rediscover the latest PR, choose ad-hoc rollout steps, check generic health endpoints, and return for approval at every gate.
 
-The agent can drive the release. SafeLane remains the release authority.
+SafeLane supplies the missing release loop:
 
-## One request. One decision. One proof.
-
-```mermaid
-flowchart LR
-    A["Codex, Claude Code,<br/>CI, or a human"] -->|"Release Request"| B["SafeLane"]
-    B --> C["Verify<br/>GitHub + GHCR"]
-    C --> D["Render<br/>trusted YAML"]
-    D --> E["Decide<br/>Release Policy"]
-    E -->|"Allowed rollout step"| F["Execute<br/>Argo Rollouts"]
-    F --> G["Enforce<br/>Kubernetes"]
-    C --> H["Release Proof"]
-    E --> H
-    F --> H
-    G --> H
+```text
+merged PR
+   │
+   ▼
+Safety Contract ── artifact + hazards + concrete canary assertions + authority
+   │ one approval
+   ▼
+SafeLane coordinates ──► Argo executes analysis and traffic mechanics
+   │
+   └──────────── durable Release Proof
 ```
 
-SafeLane verifies the artifact and decision before execution. Argo Rollouts runs the canary.
-Kubernetes enforces the identity boundary. SafeLane records the artifact, decision, execution, and
-enforced boundary in one Release Proof.
+- Deterministic setup never launches a hidden Claude or Codex process.
+- Semantic assessment can identify cited hazards, but cannot choose weights or operations.
+- Model outages select a recorded guarded fallback; they do not invent confidence.
+- Runtime analysis exercises the canary-only `/api/demo` behavior and verifies its commit, not a hard-coded “healthy” URL.
+- Argo owns analysis failure, abort, and rollback. SafeLane reconciles and proves what happened.
+- `release run` stays attached and progresses within approved authority—no gate-by-gate babysitting.
 
-SafeLane now includes a Claude Code skill, /safelane, for agent-driven releases.
-
-## Setup from inside a repository
-
-From a fresh clone with a GitHub `origin`, run:
+## Workflow
 
 ```bash
 safelane setup
+safelane doctor
+safelane release plan --pr 42
+safelane release run rel_...
+safelane release proof rel_...
 ```
 
-SafeLane discovers the repository, CI check names, default branch, and image repository locally.
-It asks Claude for a project-shaped Release Policy and Release Template, shows a structured summary,
-and automatically writes the validated operator-owned configuration during this phase-one flow.
-Claude receives a bounded, read-only snapshot and has no tools, so it cannot edit the application
-repository. If Claude is unavailable or its recommendation is invalid, SafeLane offers a conservative
-repository-derived proposal instead. Use `safelane setup --no-agent` to choose that fallback directly.
-
-Setup writes under `~/.safelane/apps/<application>/`; it never creates `.safelane` files in the
-application repository and never provisions credentials or a cluster. Existing `project.yml` files
-are not overwritten. After setup completes, run:
+For an isolated local environment:
 
 ```bash
+safelane demo up --yes
+safelane demo reset --yes
+safelane demo down --yes
+```
+
+`demo` requires a running Docker engine. SafeLane downloads checksum-verified pinned Kind, kubectl, and Argo Rollouts CLI binaries into its private demo directory, uses the owned cluster `safelane-demo` and a private kubeconfig, and never changes the ambient PATH or Kubernetes context.
+
+## Setup with an agent
+
+Human setup is deterministic and conservative. An active Codex or Claude session can make it project-specific without SafeLane nesting another agent process:
+
+```bash
+safelane setup inspect --json
+safelane setup apply --proposal C:\absolute\proposal.json --yes
 safelane doctor
 ```
 
-`doctor` remains a deterministic readiness check. It validates the generated policy, Release Template,
-GitHub/GHCR access, and target identities; it is not another conversational setup step. See the
-[setup guide](docs/setup.md) for the exact flow and fallback behavior.
+The proposal is rejected atomically when its inspection fingerprint is stale, its assertions are missing, or it targets unsafe/unknown fields. Setup writes operator configuration outside the application repository.
 
 ## Install
 
@@ -85,22 +79,15 @@ Windows PowerShell:
 irm https://raw.githubusercontent.com/AndrewMaged814/SafeLane/main/docs/install.ps1 | iex
 ```
 
-The installers download the latest checksummed GitHub Release. They always reuse one
-canonical location: `~/.local/bin/safelane` on macOS and Linux, and
-`%LOCALAPPDATA%\SafeLane\bin\safelane.exe` on Windows. Rerun the same command to upgrade.
-
-To build from source, install Go 1.26.5 or later:
+Build from source with Go 1.26.5 or later:
 
 ```bash
-git clone https://github.com/AndrewMaged814/safelane.git
-cd safelane
 go build -o ./bin/safelane ./cmd/safelane
-./bin/safelane version
+./bin/safelane --help
 ```
 
-See the [documentation](https://andrewmaged814.github.io/safelane/) for the current command
-reference, configuration schemas, and release workflow.
+See the [documentation](https://andrewmaged814.github.io/safelane/) and [CLI reference](website/src/content/docs/reference/cli.md).
 
 ## License
 
-SafeLane is available under the [MIT License](LICENSE).
+[MIT](LICENSE)

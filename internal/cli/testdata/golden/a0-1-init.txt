@@ -1,9 +1,0 @@
-created  ~/.safelane/apps/podinfo/project.yml
-created  ~/.safelane/apps/podinfo/policy.yml
-created  ~/.safelane/apps/podinfo/release-template/  (5 files)
-created  ~/.safelane/apps/podinfo/releases/
-created  ~/.claude/skills/safelane/SKILL.md
-created  ~/.agents/skills/safelane/SKILL.md
-
-The operator configuration is outside your application repository.
-An agent working in AndrewMaged814/podinfo has no write path to it.

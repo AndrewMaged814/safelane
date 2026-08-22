@@ -18,13 +18,13 @@ const (
 	otherSHA = "aa0c1b9e7ac2d5386b1d9f4a5c8e2b7d3a6f0e91"
 	digestA  = "sha256:3fbc1d9a7e42c8056d1f9b3e7a5c204d8e6b1f39a7c50d28e4b6f19a3c7d50e8"
 	digestB  = "sha256:0011223344556677889900aabbccddeeff00112233445566778899aabbccddee"
-	imageRef = "ghcr.io/andrewmaged814/podinfo@" + digestA
+	imageRef = "ghcr.io/andrewmaged814/safelane-demo-api@" + digestA
 )
 
 var testTime = time.Date(2026, 8, 15, 9, 30, 0, 0, time.UTC)
 
 func validTarget() release.Target {
-	return release.Target{Application: "podinfo", Environment: "production", Cluster: "safelane-demo", Namespace: "podinfo"}
+	return release.Target{Application: "safelane-demo-api", Environment: "production", Cluster: "safelane-demo", Namespace: "safelane-demo-api"}
 }
 
 func validRequest() release.ReleaseRequest {
@@ -32,13 +32,13 @@ func validRequest() release.ReleaseRequest {
 		SchemaVersion: release.RequestSchemaVersion,
 		Target:        validTarget(),
 		Source: release.ClaimedSource{
-			Repository:     "AndrewMaged814/podinfo",
+			Repository:     "AndrewMaged814/safelane-demo-api",
 			BaseBranch:     "main",
 			MergeCommitSHA: mergeSHA,
 		},
 		PullRequest: release.ClaimedPullRequest{
 			PullRequestNumber: 1,
-			PullRequestURL:    "https://github.com/AndrewMaged814/podinfo/pull/1",
+			PullRequestURL:    "https://github.com/AndrewMaged814/safelane-demo-api/pull/1",
 			Author:            "AndrewMaged814",
 		},
 		CI:       release.ClaimedCI{Workflow: "publish", CheckName: "publish / build-and-push", RunID: 16453210987},
@@ -50,9 +50,9 @@ func validRequest() release.ReleaseRequest {
 
 func validEvidenceInput() release.EvidenceInput {
 	return release.EvidenceInput{
-		Repository: release.RepositoryRef{Owner: "AndrewMaged814", Name: "podinfo"},
+		Repository: release.RepositoryRef{Owner: "AndrewMaged814", Name: "safelane-demo-api"},
 		PullRequest: release.VerifiedPullRequest{
-			Number: 1, URL: "https://github.com/AndrewMaged814/podinfo/pull/1",
+			Number: 1, URL: "https://github.com/AndrewMaged814/safelane-demo-api/pull/1",
 			Author: "AndrewMaged814", BaseBranch: "main", MergedAt: testTime,
 		},
 		MergeCommitSHA: mergeSHA,
@@ -61,7 +61,7 @@ func validEvidenceInput() release.EvidenceInput {
 			Conclusion: release.CheckConclusionSuccess, RunID: 16453210987, CompletedAt: testTime,
 		},
 		Artifact: release.VerifiedArtifact{
-			Reference:      release.ImageReference{Registry: "ghcr.io", Repository: "andrewmaged814/podinfo", Digest: digestA},
+			Reference:      release.ImageReference{Registry: "ghcr.io", Repository: "andrewmaged814/safelane-demo-api", Digest: digestA},
 			ObservedDigest: digestA,
 			ResolvedAt:     testTime,
 		},
@@ -89,16 +89,16 @@ func mustVerified(t *testing.T, ev release.ReleaseEvidence) release.EvidenceResu
 
 func mustBundle(t *testing.T, target release.Target, digest string) *release.RenderedBundle {
 	t.Helper()
-	body := []byte("apiVersion: argoproj.io/v1alpha1\nkind: Rollout\nmetadata:\n  name: podinfo\n  namespace: " +
-		target.Namespace + "\nspec:\n  image: ghcr.io/andrewmaged814/podinfo@" + digest + "\n")
+	body := []byte("apiVersion: argoproj.io/v1alpha1\nkind: Rollout\nmetadata:\n  name: safelane-demo-api\n  namespace: " +
+		target.Namespace + "\nspec:\n  image: ghcr.io/andrewmaged814/safelane-demo-api@" + digest + "\n")
 	res, err := release.NewRenderedResource(release.ResourceRef{
 		TemplatePath: "40-rollout.yaml.tmpl", APIVersion: "argoproj.io/v1alpha1",
-		Kind: "Rollout", Namespace: target.Namespace, Name: "podinfo",
+		Kind: "Rollout", Namespace: target.Namespace, Name: "safelane-demo-api",
 	}, body)
 	if err != nil {
 		t.Fatalf("NewRenderedResource: %v", err)
 	}
-	tmplID := release.TemplateIdentity{Name: "podinfo-canary", Version: "v0.1.0-fixture", ContentDigest: digestB, FileCount: 7}
+	tmplID := release.TemplateIdentity{Name: "safelane-demo-api-canary", Version: "v0.1.0-fixture", ContentDigest: digestB, FileCount: 7}
 	bundle, err := release.NewRenderedBundle(tmplID, target, digest, []release.RenderedResource{res})
 	if err != nil {
 		t.Fatalf("NewRenderedBundle: %v", err)
@@ -228,19 +228,19 @@ func TestRequestValidationRejects(t *testing.T) {
 		wantErr  error
 	}{
 		{"mutable tag", func(r *release.ReleaseRequest) {
-			r.Artifact.ImageReference = "ghcr.io/andrewmaged814/podinfo:1.2.3"
+			r.Artifact.ImageReference = "ghcr.io/andrewmaged814/safelane-demo-api:1.2.3"
 		}, "mutable_image_reference", release.ErrInvalidRequest},
 		{"tag and digest", func(r *release.ReleaseRequest) {
-			r.Artifact.ImageReference = "ghcr.io/andrewmaged814/podinfo:1.2.3@" + digestA
+			r.Artifact.ImageReference = "ghcr.io/andrewmaged814/safelane-demo-api:1.2.3@" + digestA
 		}, "mutable_image_reference", release.ErrInvalidRequest},
 		{"no registry host", func(r *release.ReleaseRequest) {
-			r.Artifact.ImageReference = "podinfo@" + digestA
+			r.Artifact.ImageReference = "safelane-demo-api@" + digestA
 		}, "malformed_image_reference", release.ErrInvalidRequest},
 		{"missing namespace", func(r *release.ReleaseRequest) {
 			r.Target.Namespace = ""
 		}, "missing_target_component", release.ErrInvalidRequest},
 		{"unsafe namespace", func(r *release.ReleaseRequest) {
-			r.Target.Namespace = "podinfo\n  privileged: true"
+			r.Target.Namespace = "safelane-demo-api\n  privileged: true"
 		}, "unsafe_target_component", release.ErrInvalidRequest},
 		{"abbreviated merge sha", func(r *release.ReleaseRequest) {
 			r.Source.MergeCommitSHA = "4f0c1b9"
@@ -279,7 +279,7 @@ func TestRequestReportsEveryProblemAtOnce(t *testing.T) {
 	req := validRequest()
 	req.Target.Namespace = ""
 	req.Source.MergeCommitSHA = ""
-	req.Artifact.ImageReference = "ghcr.io/andrewmaged814/podinfo:latest"
+	req.Artifact.ImageReference = "ghcr.io/andrewmaged814/safelane-demo-api:latest"
 
 	err := req.Validate()
 	var errs release.Errors
@@ -587,7 +587,7 @@ func TestUnrecognizedOutcomeDecodesToUnknown(t *testing.T) {
 // ---------------------------------------------------------------- rendered bundle
 
 func TestRenderedResourceHashIsDerivedFromItsBytes(t *testing.T) {
-	ref := release.ResourceRef{TemplatePath: "a.yaml.tmpl", APIVersion: "v1", Kind: "Service", Namespace: "podinfo", Name: "podinfo-stable"}
+	ref := release.ResourceRef{TemplatePath: "a.yaml.tmpl", APIVersion: "v1", Kind: "Service", Namespace: "safelane-demo-api", Name: "safelane-demo-api-stable"}
 	one, err := release.NewRenderedResource(ref, []byte("apiVersion: v1\n"))
 	if err != nil {
 		t.Fatalf("NewRenderedResource: %v", err)
@@ -660,7 +660,7 @@ func TestRenderedBundleJSONDetectsTamperedBytes(t *testing.T) {
 		t.Fatalf("resource bytes are %T", first["bytes"])
 	}
 	first["bytes"] = base64.StdEncoding.EncodeToString(
-		[]byte("apiVersion: argoproj.io/v1alpha1\nkind: Rollout\nmetadata:\n  name: podinfo\n  namespace: podinfo\nspec:\n  image: evil\n"))
+		[]byte("apiVersion: argoproj.io/v1alpha1\nkind: Rollout\nmetadata:\n  name: safelane-demo-api\n  namespace: safelane-demo-api\nspec:\n  image: evil\n"))
 	if first["bytes"] == original {
 		t.Fatal("test setup: tampered bytes are identical to the originals")
 	}
@@ -802,7 +802,7 @@ func TestNewReleaseRejectsCrossReleaseAndCrossTargetCombination(t *testing.T) {
 		}, "artifact_mismatch"},
 		{"evidence verified in another repository", func() release.ReleaseParams {
 			in := validEvidenceInput()
-			in.Repository = release.RepositoryRef{Owner: "someone-else", Name: "podinfo"}
+			in.Repository = release.RepositoryRef{Owner: "someone-else", Name: "safelane-demo-api"}
 			return release.ReleaseParams{
 				ID: mustID(t), Request: validRequest(),
 				Evidence:  mustVerified(t, mustEvidence(t, in)),
@@ -825,7 +825,7 @@ func TestNewReleaseRejectsCrossReleaseAndCrossTargetCombination(t *testing.T) {
 
 func TestNewReleaseRequiresAValidID(t *testing.T) {
 	_, err := newRelease(t, release.ReleaseParams{
-		ID: "podinfo-2026-08-15", Request: validRequest(),
+		ID: "safelane-demo-api-2026-08-15", Request: validRequest(),
 		Evidence:  mustVerified(t, mustEvidence(t, validEvidenceInput())),
 		CreatedAt: testTime,
 	})

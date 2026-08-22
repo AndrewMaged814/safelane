@@ -11,7 +11,7 @@ func TestCompileGlob(t *testing.T) {
 		{"pkg/api/**", "pkg/api/echo.go", true},
 		{"pkg/api/**", "pkg/api/nested/deep/file.go", true},
 		{"pkg/api/**", "pkg/version/version.go", false},
-		{"charts/**", "charts/podinfo/values.yaml", true},
+		{"charts/**", "charts/safelane-demo-api/values.yaml", true},
 		{"charts/**", "pkg/api/echo.go", false},
 		{"**/migrations/**", "db/migrations/0001_init.sql", true},
 		{"*.md", "README.md", true},

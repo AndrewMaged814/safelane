@@ -38,7 +38,7 @@ func TestParse_ValidFixture_Succeeds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if intent.PullRequest != 1 || intent.Repository != "AndrewMaged814/podinfo" {
+	if intent.PullRequest != 1 || intent.Repository != "AndrewMaged814/safelane-demo-api" {
 		t.Fatalf("unexpected intent: %+v", intent)
 	}
 }
@@ -174,7 +174,7 @@ func TestParse_MissingPullRequest_RejectedByValidate(t *testing.T) {
 // them out of a map, would reverse that pair for no reason a reader of
 // the request could see.
 func TestParse_ForbiddenFieldsReportedInDocumentOrder(t *testing.T) {
-	_, err := Parse([]byte(`{ "repository": "AndrewMaged814/podinfo", "pull_request": 4,
+	_, err := Parse([]byte(`{ "repository": "AndrewMaged814/safelane-demo-api", "pull_request": 4,
   "risk": "low", "lane": "fast" }`))
 	errs := release.Flatten(err)
 	if len(errs) != 2 {
@@ -202,7 +202,7 @@ func TestParse_ForbiddenFieldsReportedInDocumentOrder(t *testing.T) {
 // A caller cannot assert its own evidence any more than it can name its
 // own lane; both are the same rejection with different wording.
 func TestParse_EvidenceClaim_IsAnUnknownField(t *testing.T) {
-	_, err := Parse([]byte(`{ "repository": "AndrewMaged814/podinfo", "pull_request": 3,
+	_, err := Parse([]byte(`{ "repository": "AndrewMaged814/safelane-demo-api", "pull_request": 3,
   "evidence": { "approved": true, "check": "success" } }`))
 	errs := release.Flatten(err)
 	if len(errs) != 1 {

@@ -26,6 +26,7 @@ type rolloutPauseFlags struct {
 	projectFile          string
 	controllerKubeconfig string
 	controllerContext    string
+	reason               string
 }
 
 func parseRolloutPauseFlags(args []string, stderr io.Writer, defaultStoreDir string) (rolloutPauseFlags, string, error) {
@@ -37,12 +38,13 @@ func parseRolloutPauseFlags(args []string, stderr io.Writer, defaultStoreDir str
 	fs.StringVar(&f.controllerKubeconfig, "controller-kubeconfig", "",
 		"kubeconfig for the privileged controller identity (default: project.yml)")
 	fs.StringVar(&f.controllerContext, "controller-context", "", "kubeconfig context for the privileged controller identity (default: project.yml)")
+	fs.StringVar(&f.reason, "reason", "", "why this rollout is being paused")
 	if err := fs.Parse(args); err != nil {
 		return f, "", err
 	}
 	rest := fs.Args()
 	if len(rest) != 1 {
-		fmt.Fprintln(stderr, "safelane rollout pause: exactly one release id is required")
+		fmt.Fprintln(stderr, "safelane release pause: exactly one release id is required")
 		fs.Usage()
 		return f, "", flag.ErrHelp
 	}
@@ -76,7 +78,7 @@ func runRolloutPause(ctx context.Context, args []string, stdout, stderr io.Write
 				"Use the release id `safelane release` returned. rollout pause cannot invent a record."))
 			return ExitFail
 		}
-		fmt.Fprintf(stderr, "safelane rollout pause: %v\n", err)
+		fmt.Fprintf(stderr, "safelane release pause: %v\n", err)
 		return ExitFail
 	}
 
@@ -94,14 +96,14 @@ func runRolloutPause(ctx context.Context, args []string, stdout, stderr io.Write
 		ControllerContext:    f.controllerContext,
 	})
 
-	updated, err := pauseRollout(ctx, r, ex, time.Now)
+	updated, err := pauseRollout(ctx, r, ex, time.Now, f.reason)
 	if err != nil {
 		printRolloutRejection(stderr, err)
 		return ExitFail
 	}
 
 	if err := st.Update(updated); err != nil {
-		fmt.Fprintf(stderr, "safelane rollout pause: the pause was sent but could not be recorded: %v\n", err)
+		fmt.Fprintf(stderr, "safelane release pause: the pause was sent but could not be recorded: %v\n", err)
 		return ExitFail
 	}
 
@@ -113,11 +115,20 @@ func runRolloutPause(ctx context.Context, args []string, stdout, stderr io.Write
 // narrowing the release to exactly where it is. It is never refused
 // (Appendix A's "shape of it" table): there is no eligibility check and
 // no envelope check, only the kubectl call and the record.
-func pauseRollout(ctx context.Context, r *release.Release, ex *execute.Executor, now func() time.Time) (*release.Release, error) {
+func pauseRollout(ctx context.Context, r *release.Release, ex *execute.Executor, now func() time.Time, reason ...string) (*release.Release, error) {
 	if err := ex.Pause(ctx); err != nil {
 		return nil, err
 	}
-	return r.WithExecution(release.ExecutionEntry{At: now(), Verb: release.VerbPause, Outcome: release.OutcomeGranted})
+	detail := ""
+	if len(reason) > 0 {
+		detail = reason[0]
+	}
+	updated, err := r.WithExecution(release.ExecutionEntry{At: now(), Verb: release.VerbPause, Outcome: release.OutcomeGranted, Detail: detail})
+	if err != nil {
+		return nil, err
+	}
+	binding, _ := updated.Binding()
+	return updated.WithState(release.StatePaused, binding)
 }
 
 func renderPause(r *release.Release) string {

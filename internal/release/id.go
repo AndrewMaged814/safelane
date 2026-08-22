@@ -80,7 +80,7 @@ func NewReleaseID(t time.Time, entropy io.Reader) (ReleaseID, error) {
 func MintReleaseID() (ReleaseID, error) { return NewReleaseID(time.Now(), rand.Reader) }
 
 // ParseReleaseID validates an ID received from a caller, for example the argument to
-// `safelane proof <release-id>`.
+// `safelane release proof <release-id>`.
 func ParseReleaseID(s string) (ReleaseID, error) {
 	bad := func(msg string) error {
 		return Invalid("malformed_release_id", "release_id", msg,

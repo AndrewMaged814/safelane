@@ -20,6 +20,11 @@ const (
 	// VerbPause is a caller's own `rollout pause` -- narrowing a release
 	// by stopping it exactly where it is. Never refused (ticket 11).
 	VerbPause ExecutionVerb = "pause"
+	// VerbResume records the explicit exit from an emergency pause.
+	VerbResume ExecutionVerb = "resume"
+	// VerbAcceptRisk records a hazard-specific human decision without
+	// pretending the hazard became covered by runtime analysis.
+	VerbAcceptRisk ExecutionVerb = "accept_risk"
 	// VerbAbort is a caller's own `rollout abort --reason`, distinct from
 	// [VerbArgoAbort]: this one SafeLane performed at the caller's own
 	// request, not one Argo Rollouts decided on its own. Never refused
@@ -54,7 +59,8 @@ type ExecutionEntry struct {
 	Analysis string `json:"analysis,omitempty"`
 	// Detail is the measured evidence behind a refusal or an abort, for
 	// example the metric value that failed its condition.
-	Detail string `json:"detail,omitempty"`
+	Detail   string `json:"detail,omitempty"`
+	HazardID string `json:"hazard_id,omitempty"`
 }
 
 // Validate reports whether the entry is well formed. It does not check the
@@ -67,7 +73,7 @@ func (e ExecutionEntry) Validate() error {
 			"an execution entry must record when it happened"))
 	}
 	switch e.Verb {
-	case VerbStart, VerbAdvance, VerbArgoAbort, VerbPause, VerbAbort:
+	case VerbStart, VerbAdvance, VerbArgoAbort, VerbPause, VerbResume, VerbAcceptRisk, VerbAbort:
 	default:
 		errs = append(errs, Internal("invalid_execution_verb",
 			fmt.Sprintf("%q is not a recognised execution verb", e.Verb)))

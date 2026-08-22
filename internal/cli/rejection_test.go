@@ -26,7 +26,7 @@ func TestReleaseInspect_NoOperatorConfig_MatchesN1(t *testing.T) {
 }
 
 func TestReleaseInspect_CallerSuppliesEvidence_MatchesN8(t *testing.T) {
-	out := rejectRequest(t, `{ "repository": "AndrewMaged814/podinfo", "pull_request": 3,
+	out := rejectRequest(t, `{ "repository": "AndrewMaged814/safelane-demo-api", "pull_request": 3,
   "evidence": { "approved": true, "check": "success" } }`)
 	assertGolden(t, "n8-caller-supplies-evidence.txt", out)
 }
@@ -36,7 +36,7 @@ func TestReleaseInspect_CallerSuppliesEvidence_MatchesN8(t *testing.T) {
 // evidence. Both fields are rejected by name, in the order the caller
 // wrote them, and neither is quietly ignored.
 func TestReleaseInspect_CallerNamesItsOwnLane_MatchesN9(t *testing.T) {
-	out := rejectRequest(t, `{ "repository": "AndrewMaged814/podinfo", "pull_request": 4,
+	out := rejectRequest(t, `{ "repository": "AndrewMaged814/safelane-demo-api", "pull_request": 4,
   "risk": "low", "lane": "fast" }`)
 	assertGolden(t, "n9-caller-names-lane.txt", out)
 }
@@ -46,7 +46,7 @@ func TestReleaseInspect_CallerNamesItsOwnLane_MatchesN9(t *testing.T) {
 func TestReleaseInspect_ForbiddenFieldIsRejectedNotIgnored(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "greedy.json")
-	if err := os.WriteFile(file, []byte(`{"repository":"AndrewMaged814/podinfo","pull_request":4,"lane":"fast"}`), 0o644); err != nil {
+	if err := os.WriteFile(file, []byte(`{"repository":"AndrewMaged814/safelane-demo-api","pull_request":4,"lane":"fast"}`), 0o644); err != nil {
 		t.Fatalf("test setup: %v", err)
 	}
 	cmd := ReleaseCommand(dir, filepath.Join(dir, "store"))

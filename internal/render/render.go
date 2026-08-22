@@ -30,9 +30,9 @@ type TemplateData struct {
 
 	// Verified artifact. ImageReference is the full immutable reference and is what a
 	// pod template should use.
-	ImageReference  string // ghcr.io/owner/podinfo@sha256:<hex>
+	ImageReference  string // ghcr.io/owner/safelane-demo-api@sha256:<hex>
 	ImageRegistry   string // ghcr.io
-	ImageRepository string // owner/podinfo
+	ImageRepository string // owner/safelane-demo-api
 	ImageDigest     string // sha256:<hex>
 
 	// Verified source identity, for traceability annotations. Deterministic: both
@@ -50,6 +50,7 @@ type TemplateData struct {
 	CanaryServiceName    string // <application>-canary
 	AnalysisTemplateName string // <application>-success-rate
 	IngressName          string // <application>
+	ProbeImage           string // operator-owned digest-pinned black-box probe
 
 	// Steps are the explicit canary steps to render: one setWeight
 	// followed by a 60s pause per entry. This is weights[:len(weights)-1]
@@ -79,6 +80,14 @@ type TemplateData struct {
 // not know what "risk" means. weights must be non-empty: every lane declares at
 // least one weight, its final one, which [DeriveEnvelope] always reconstructs.
 func Render(t Template, target release.Target, evidence release.ReleaseEvidence, weights []int) (release.RenderedBundle, error) {
+	return RenderWithOptions(t, target, evidence, weights, Options{})
+}
+
+// Options carries operator-owned render inputs that are neither caller intent
+// nor properties of the application artifact.
+type Options struct{ ProbeImage string }
+
+func RenderWithOptions(t Template, target release.Target, evidence release.ReleaseEvidence, weights []int, options Options) (release.RenderedBundle, error) {
 	if t.IsZero() {
 		return release.RenderedBundle{}, release.RenderError("template_not_loaded", "template",
 			"no Release Template was loaded",
@@ -101,6 +110,10 @@ func Render(t Template, target release.Target, evidence release.ReleaseEvidence,
 	data, err := newTemplateData(target, evidence, weights)
 	if err != nil {
 		return release.RenderedBundle{}, err
+	}
+	data.ProbeImage = options.ProbeImage
+	if data.ProbeImage != "" && !isSafeScalar(data.ProbeImage) {
+		return release.RenderedBundle{}, release.RenderError("unsafe_template_value", "template_data.ProbeImage", "probe image contains unsafe YAML characters", "Use a digest-pinned OCI reference.")
 	}
 
 	resources := make([]release.RenderedResource, 0, len(t.resources))
@@ -179,7 +192,7 @@ func newTemplateData(target release.Target, evidence release.ReleaseEvidence, we
 		RolloutName:          target.Application,
 		StableServiceName:    target.Application + "-stable",
 		CanaryServiceName:    target.Application + "-canary",
-		AnalysisTemplateName: target.Application + "-success-rate",
+		AnalysisTemplateName: target.Application + "-demo-behavior",
 		IngressName:          target.Application,
 	}
 

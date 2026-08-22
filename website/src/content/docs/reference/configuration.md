@@ -10,13 +10,13 @@ SafeLane reads these files from SAFELANE_HOME (default ~/.safelane). Keep them o
 ### project.yml
 
     version: 3
-    application: podinfo
+    application: safelane-demo-api
     repository:
-      name: AndrewMaged814/podinfo
+      name: AndrewMaged814/safelane-demo-api
       default_branch: main
     release:
       environment: production
-      image_repository: ghcr.io/andrewmaged814/podinfo
+      image_repository: ghcr.io/andrewmaged814/safelane-demo-api
       image_tag: sha-{{merge_sha}}
       required_checks:
         - build-and-push
@@ -24,8 +24,8 @@ SafeLane reads these files from SAFELANE_HOME (default ~/.safelane). Keep them o
       template_path: release-template
     target:
       cluster: safelane-demo
-      namespace: podinfo
-      rollout: podinfo
+      namespace: safelane-demo-api
+      rollout: safelane-demo-api
     controller_kubeconfig: controller.kubeconfig
     controller_context: safelane-controller
 

@@ -1,59 +1,35 @@
 # SafeLane setup
 
-`setup` is the low-click entry point for a repository that has no SafeLane operator configuration.
-Run it from the application repository:
+Run setup from the application repository:
 
 ```bash
 safelane setup
 ```
 
-## What happens
+SafeLane discovers the GitHub remote, default branch, workflow checks, image workflow, Kubernetes resources, critical application surfaces, and concrete runtime assertions. It previews a conservative configuration, asks once, writes operator-owned files under `~/.safelane/apps/<application>/`, and installs the SafeLane skill. It never invokes Claude or Codex and never edits the application repository.
 
-1. SafeLane reads the GitHub `origin`, default branch, bounded text snapshots of the repository,
-   workflow job names, and any GHCR image reference it can find. Secrets, build output, and large or
-   binary files are excluded.
-2. SafeLane invokes Claude once with that snapshot. Claude has no tools and no session persistence;
-   it can recommend data but cannot edit the repository, create credentials, or provision a cluster.
-3. SafeLane validates the structured recommendation. The recommendation contains a project-specific
-   `policy.yml` and operator-owned Release Template files. The three mandatory evidence requirements
-   are preserved: `merged_commit_on_default_branch`, `passing_publish_workflow`, and
-   `immutable_ghcr_digest`.
-4. SafeLane shows a structured summary and automatically applies the validated setup. It writes files
-   under `~/.safelane/apps/<application>/` and does not modify the application checkout.
+## Project-specific setup with Codex or Claude
 
-The setup command does not write `.safelane` files into the application repository. It also does not
-deploy anything. It creates the operator project record, policy, Release Template directory, and
-agent skill pointers needed by later release commands.
-
-## Fallback and safety
-
-If Claude is not installed, times out, or returns invalid data, SafeLane falls back to a conservative
-proposal derived from the repository facts and applies it automatically. To choose it without invoking
-Claude:
+The active agent session can propose a smarter policy without a nested process:
 
 ```bash
-safelane setup --no-agent
-```
-
-An invalid or declined proposal writes nothing. Setup never overwrites an existing operator
-`project.yml`; inspect or remove an old configuration deliberately before starting a new setup.
-
-## Doctor after setup
-
-`doctor` is intentionally deterministic and non-conversational:
-
-```bash
+safelane setup inspect --json > inspection.json
+safelane setup apply --proposal /absolute/path/proposal.json --yes
 safelane doctor
 ```
 
-It validates the active `project.yml`, policy, Release Template, GitHub and GHCR access, and the
-configured target identities. A successful setup therefore gives you a clear hand-off: approve the
-recommendation once, then use `doctor` to see what external readiness still needs attention.
+`setup inspect` is read-only. Its JSON includes an inspection fingerprint and uncertainties. The agent must preserve the fingerprint and cite concrete assertions for critical surfaces.
 
-The lower-level command remains available for scripted or fully manual setup:
+`setup apply` validates the complete proposal atomically. It rejects stale fingerprints, unknown fields, unsafe targets, invalid policy, or missing assertions. Interactive use requires typing `APPLY`; noninteractive use requires `--yes`.
+
+## Demo environment
+
+To create the isolated Kind environment and seed a healthy first-party baseline:
 
 ```bash
-safelane init --app <application> --repo <owner/name>
+safelane demo up --yes
 ```
 
-`init` keeps its deterministic defaults; `setup` is the repository-aware, agent-assisted path.
+Docker must be running. SafeLane downloads checksum-verified pinned Kind, kubectl, and Argo Rollouts CLI binaries under `~/.safelane/demo/bin`, owns only the cluster named `safelane-demo`, keeps its kubeconfig under the SafeLane home directory, installs the pinned controller, resolves published fixtures to immutable digests, and binds the operator configuration when setup already exists. The private tool directory is visible only to SafeLane processes; the command never changes the ambient PATH or Kubernetes context.
+
+Run `safelane doctor` after setup. Doctor reports external prerequisites and target readiness without changing them.

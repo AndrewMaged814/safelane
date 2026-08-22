@@ -13,7 +13,7 @@ import (
 func fixtureServer(t *testing.T, pullBody, filesBody, commitBody, diffBody string) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
-	mux.HandleFunc("/repos/acme/podinfo/pulls/42", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/repos/acme/safelane-demo-api/pulls/42", func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Accept") == "application/vnd.github.v3.diff" {
 			w.Header().Set("Content-Type", "text/plain")
 			w.Write([]byte(diffBody))
@@ -22,7 +22,7 @@ func fixtureServer(t *testing.T, pullBody, filesBody, commitBody, diffBody strin
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(pullBody))
 	})
-	mux.HandleFunc("/repos/acme/podinfo/pulls/42/files", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/repos/acme/safelane-demo-api/pulls/42/files", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Query().Get("page") == "2" {
 			w.Write([]byte(`[]`))
@@ -30,7 +30,7 @@ func fixtureServer(t *testing.T, pullBody, filesBody, commitBody, diffBody strin
 		}
 		w.Write([]byte(filesBody))
 	})
-	mux.HandleFunc("/repos/acme/podinfo/commits/merge-sha-1", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/repos/acme/safelane-demo-api/commits/merge-sha-1", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(commitBody))
 	})
@@ -62,7 +62,7 @@ func TestClient_FetchChangeFacts_CollectsFilesAndTotals(t *testing.T) {
 	srv := fixtureServer(t, fixturePull, fixtureFiles, fixtureHumanCommit, fixtureDiff)
 	client := &Client{BaseURL: srv.URL}
 
-	facts, err := client.FetchChangeFacts(context.Background(), "acme", "podinfo", 42)
+	facts, err := client.FetchChangeFacts(context.Background(), "acme", "safelane-demo-api", 42)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -84,7 +84,7 @@ func TestClient_FetchChangeFacts_HumanCommitIsNotAgentAuthored(t *testing.T) {
 	srv := fixtureServer(t, fixturePull, fixtureFiles, fixtureHumanCommit, fixtureDiff)
 	client := &Client{BaseURL: srv.URL}
 
-	facts, err := client.FetchChangeFacts(context.Background(), "acme", "podinfo", 42)
+	facts, err := client.FetchChangeFacts(context.Background(), "acme", "safelane-demo-api", 42)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -100,7 +100,7 @@ func TestClient_FetchChangeFacts_AgentTrailerIsRecordedVerbatim(t *testing.T) {
 	srv := fixtureServer(t, fixturePull, fixtureFiles, fixtureAgentCommit, fixtureDiff)
 	client := &Client{BaseURL: srv.URL}
 
-	facts, err := client.FetchChangeFacts(context.Background(), "acme", "podinfo", 42)
+	facts, err := client.FetchChangeFacts(context.Background(), "acme", "safelane-demo-api", 42)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -121,7 +121,7 @@ func TestClient_FetchChangeFacts_BotAuthorLoginIsAgentAuthored(t *testing.T) {
 	srv := fixtureServer(t, fixturePull, fixtureFiles, fixtureBotCommit, fixtureDiff)
 	client := &Client{BaseURL: srv.URL}
 
-	facts, err := client.FetchChangeFacts(context.Background(), "acme", "podinfo", 42)
+	facts, err := client.FetchChangeFacts(context.Background(), "acme", "safelane-demo-api", 42)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -135,7 +135,7 @@ func TestClient_FetchChangeFacts_BotAuthorLoginIsAgentAuthored(t *testing.T) {
 
 func TestClient_FetchChangeFacts_PaginatesFiles(t *testing.T) {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/repos/acme/podinfo/pulls/42", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/repos/acme/safelane-demo-api/pulls/42", func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Accept") == "application/vnd.github.v3.diff" {
 			w.Write([]byte(fixtureDiff))
 			return
@@ -152,7 +152,7 @@ func TestClient_FetchChangeFacts_PaginatesFiles(t *testing.T) {
 		pageOne = append(pageOne, []byte(`{"filename":"f.go","additions":1,"deletions":0}`)...)
 	}
 	pageOne = append(pageOne, ']')
-	mux.HandleFunc("/repos/acme/podinfo/pulls/42/files", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/repos/acme/safelane-demo-api/pulls/42/files", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Query().Get("page") {
 		case "2":
@@ -161,7 +161,7 @@ func TestClient_FetchChangeFacts_PaginatesFiles(t *testing.T) {
 			w.Write(pageOne)
 		}
 	})
-	mux.HandleFunc("/repos/acme/podinfo/commits/merge-sha-1", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/repos/acme/safelane-demo-api/commits/merge-sha-1", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(fixtureHumanCommit))
 	})
@@ -169,7 +169,7 @@ func TestClient_FetchChangeFacts_PaginatesFiles(t *testing.T) {
 	t.Cleanup(srv.Close)
 	client := &Client{BaseURL: srv.URL}
 
-	facts, err := client.FetchChangeFacts(context.Background(), "acme", "podinfo", 42)
+	facts, err := client.FetchChangeFacts(context.Background(), "acme", "safelane-demo-api", 42)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

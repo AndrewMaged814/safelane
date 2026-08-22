@@ -22,7 +22,7 @@ func statusRuntime(t *testing.T, r *release.Release) (projectFile, storeDir stri
 	dir := t.TempDir()
 	projectFile = filepath.Join(dir, "project.yml")
 	if err := os.WriteFile(projectFile, project.DefaultYAML(
-		"podinfo", "AndrewMaged814/podinfo", "master", "ghcr.io/andrewmaged814/podinfo",
+		"safelane-demo-api", "AndrewMaged814/safelane-demo-api", "master", "ghcr.io/andrewmaged814/safelane-demo-api",
 	), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +73,7 @@ func TestStatusJSON_AllSevenExecutorStatesAreReachable(t *testing.T) {
 			if got.State != wantState {
 				t.Fatalf("state = %q, want %q", got.State, wantState)
 			}
-			if len(q.calls) != 1 || strings.Join(q.calls[0], " ") != "get rollout podinfo -n podinfo -o json" {
+			if len(q.calls) != 1 || strings.Join(q.calls[0], " ") != "get rollout safelane-demo-api -n safelane-demo-api -o json" {
 				t.Fatalf("kubectl calls = %v", q.calls)
 			}
 		})
@@ -82,8 +82,8 @@ func TestStatusJSON_AllSevenExecutorStatesAreReachable(t *testing.T) {
 
 func TestStatusJSONReportsLaneRiskEnvelopeAndGate(t *testing.T) {
 	r := fastLaneStarted(t)
-	report := buildStatusReport(r, execute.Status{State: execute.StateAtGate, CurrentWeight: 5, Gate: 1})
-	if report.Lane != "fast" || report.Risk != "low" || report.Weight != 5 || report.Gate != 1 || report.GateCount != 1 {
+	report := buildStatusReport(r, execute.Status{State: execute.StateAtGate, CurrentWeight: 50, Gate: 1})
+	if report.Lane != "fast" || report.Risk != "low" || report.Weight != 50 || report.Gate != 1 || report.GateCount != 1 {
 		t.Fatalf("report = %+v", report)
 	}
 	if report.NextAllowedWeight == nil || *report.NextAllowedWeight != 100 {
@@ -143,7 +143,7 @@ func TestStatusJSONIncludesFailedAnalysisMeasurement(t *testing.T) {
 	projectFile, storeDir := statusRuntime(t, r)
 	q := &queueRunner{}
 	q.enqueue(`{"status":{"phase":"Degraded","abort":true,"canary":`+
-		`{"currentBackgroundAnalysisRunStatus":{"name":"podinfo-abc-2","status":"Failed"}}}}`, nil)
+		`{"currentBackgroundAnalysisRunStatus":{"name":"safelane-demo-api-abc-2","status":"Failed"}}}}`, nil)
 	q.enqueue(`{"status":{"phase":"Failed","metricResults":[{"name":"request-success-rate",`+
 		`"count":2,"successful":0,"measurements":[{"value":"[0.74]"}]}]},`+
 		`"spec":{"metrics":[{"name":"request-success-rate",`+
@@ -168,7 +168,7 @@ func TestStatusJSONIncludesFailedAnalysisMeasurement(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.AnalysisRun != "podinfo-abc-2" || got.AnalysisPhase != "Failed" ||
+	if got.AnalysisRun != "safelane-demo-api-abc-2" || got.AnalysisPhase != "Failed" ||
 		got.AnalysisMetric != "request-success-rate" || got.AnalysisMeasured == nil || *got.AnalysisMeasured != 0.74 ||
 		got.AnalysisCondition != ">= 0.99" || got.AnalysisCount != 2 || got.AnalysisFailureLimit != 1 {
 		t.Fatalf("analysis diagnostics = %+v", got)
@@ -183,7 +183,7 @@ func TestStatusListReconcilesLiveStateAndFormatsStalledDuration(t *testing.T) {
 		t.Fatal("test release has no bundle")
 	}
 	q := &queueRunner{}
-	q.enqueue(fmt.Sprintf(`{"metadata":{"generation":8},"status":{"observedGeneration":8,"phase":"Paused","pauseConditions":[{}],"currentStepIndex":0},"spec":{"template":{"spec":{"containers":[{"image":"ghcr.io/andrewmaged814/podinfo@%s"}]}},"strategy":{"canary":{"steps":[{"setWeight":5},{"pause":{}}]}}}}`, bundle.PinnedDigest()), nil)
+	q.enqueue(fmt.Sprintf(`{"metadata":{"generation":8},"status":{"observedGeneration":8,"phase":"Paused","pauseConditions":[{}],"currentStepIndex":0},"spec":{"template":{"spec":{"containers":[{"image":"ghcr.io/andrewmaged814/safelane-demo-api@%s"}]}},"strategy":{"canary":{"steps":[{"setWeight":50},{"pause":{}}]}}}}`, bundle.PinnedDigest()), nil)
 	originalNewExecutor := newExecutor
 	t.Cleanup(func() { newExecutor = originalNewExecutor })
 	newExecutor = func(cfg execute.Config) *execute.Executor {
@@ -201,7 +201,7 @@ func TestStatusListReconcilesLiveStateAndFormatsStalledDuration(t *testing.T) {
 		t.Fatalf("status exit = %d, stderr: %s", code, stderr.String())
 	}
 	out := stdout.String()
-	for _, want := range []string{"1 open release", string(r.ID), "podinfo/production", "fast", "at_gate", "weight 5", "stalled 41m"} {
+	for _, want := range []string{"1 open release", string(r.ID), "safelane-demo-api/production", "fast", "at_gate", "weight 50", "stalled 41m"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("listing missing %q:\n%s", want, out)
 		}
@@ -219,7 +219,7 @@ func TestStatusListDoesNotShowMatchingTerminalRolloutAsOpen(t *testing.T) {
 		t.Fatal("test release has no bundle")
 	}
 	q := &queueRunner{}
-	q.enqueue(fmt.Sprintf(`{"metadata":{"generation":8},"status":{"observedGeneration":8,"phase":"Degraded","abort":true},"spec":{"template":{"spec":{"containers":[{"image":"ghcr.io/andrewmaged814/podinfo@%s"}]}}}}`, bundle.PinnedDigest()), nil)
+	q.enqueue(fmt.Sprintf(`{"metadata":{"generation":8},"status":{"observedGeneration":8,"phase":"Degraded","abort":true},"spec":{"template":{"spec":{"containers":[{"image":"ghcr.io/andrewmaged814/safelane-demo-api@%s"}]}}}}`, bundle.PinnedDigest()), nil)
 
 	originalNewExecutor := newExecutor
 	t.Cleanup(func() { newExecutor = originalNewExecutor })

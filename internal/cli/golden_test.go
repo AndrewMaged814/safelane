@@ -33,7 +33,7 @@ var normalisers = []struct {
 	{regexp.MustCompile(`\b\d{4}-\d{2}-\d{2}T[\d:.]+Z\b`), "<TIME>"},
 	{regexp.MustCompile(`\b\d{2}:\d{2}:\d{2}Z\b`), "<TIME>"},
 	{regexp.MustCompile(`\b(\d+m)?\d+s\b`), "<DURATION>"},
-	{regexp.MustCompile(`podinfo-success-rate-\d+`), "podinfo-success-rate-<N>"},
+	{regexp.MustCompile(`safelane-demo-api-success-rate-\d+`), "safelane-demo-api-success-rate-<N>"},
 }
 
 func normalise(s string) string {

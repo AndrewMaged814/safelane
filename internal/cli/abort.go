@@ -38,12 +38,12 @@ func parseRolloutAbortFlags(args []string, stderr io.Writer, defaultStoreDir str
 	}
 	rest := fs.Args()
 	if len(rest) != 1 {
-		fmt.Fprintln(stderr, "safelane rollout abort: exactly one release id is required")
+		fmt.Fprintln(stderr, "safelane release abort: exactly one release id is required")
 		fs.Usage()
 		return f, "", flag.ErrHelp
 	}
 	if strings.TrimSpace(f.reason) == "" {
-		fmt.Fprintln(stderr, "safelane rollout abort: --reason is required")
+		fmt.Fprintln(stderr, "safelane release abort: --reason is required")
 		fs.Usage()
 		return f, "", flag.ErrHelp
 	}
@@ -77,7 +77,7 @@ func runRolloutAbort(ctx context.Context, args []string, stdout, stderr io.Write
 				"Use the release id `safelane release` returned. rollout abort cannot invent a record."))
 			return ExitFail
 		}
-		fmt.Fprintf(stderr, "safelane rollout abort: %v\n", err)
+		fmt.Fprintf(stderr, "safelane release abort: %v\n", err)
 		return ExitFail
 	}
 
@@ -102,7 +102,7 @@ func runRolloutAbort(ctx context.Context, args []string, stdout, stderr io.Write
 	}
 
 	if err := st.Update(updated); err != nil {
-		fmt.Fprintf(stderr, "safelane rollout abort: the abort was sent but could not be recorded: %v\n", err)
+		fmt.Fprintf(stderr, "safelane release abort: the abort was sent but could not be recorded: %v\n", err)
 		return ExitFail
 	}
 

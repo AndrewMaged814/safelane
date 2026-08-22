@@ -49,22 +49,22 @@ time-dependent or random.
 
 | Placeholder | Example | Source |
 | --- | --- | --- |
-| `{{ .Application }}` | `podinfo` | target |
+| `{{ .Application }}` | `safelane-demo-api` | target |
 | `{{ .Environment }}` | `production` | target |
 | `{{ .Cluster }}` | `safelane-demo` | target |
-| `{{ .Namespace }}` | `podinfo` | target |
-| `{{ .ImageReference }}` | `ghcr.io/andrewmaged814/podinfo@sha256:…` | **verified** artifact |
+| `{{ .Namespace }}` | `safelane-demo-api` | target |
+| `{{ .ImageReference }}` | `ghcr.io/andrewmaged814/safelane-demo-api@sha256:…` | **verified** artifact |
 | `{{ .ImageRegistry }}` | `ghcr.io` | **verified** artifact |
-| `{{ .ImageRepository }}` | `andrewmaged814/podinfo` | **verified** artifact |
+| `{{ .ImageRepository }}` | `andrewmaged814/safelane-demo-api` | **verified** artifact |
 | `{{ .ImageDigest }}` | `sha256:…` | **verified** artifact |
-| `{{ .SourceRepository }}` | `AndrewMaged814/podinfo` | **verified** evidence |
+| `{{ .SourceRepository }}` | `AndrewMaged814/safelane-demo-api` | **verified** evidence |
 | `{{ .SourceRevision }}` | merge commit SHA on the base branch | **verified** evidence |
 | `{{ .SourceBranch }}` | `main` | **verified** evidence |
-| `{{ .RolloutName }}` | `podinfo` | derived: `<application>` |
-| `{{ .StableServiceName }}` | `podinfo-stable` | derived: `<application>-stable` |
-| `{{ .CanaryServiceName }}` | `podinfo-canary` | derived: `<application>-canary` |
-| `{{ .AnalysisTemplateName }}` | `podinfo-success-rate` | derived: `<application>-success-rate` |
-| `{{ .IngressName }}` | `podinfo` | derived: `<application>` |
+| `{{ .RolloutName }}` | `safelane-demo-api` | derived: `<application>` |
+| `{{ .StableServiceName }}` | `safelane-demo-api-stable` | derived: `<application>-stable` |
+| `{{ .CanaryServiceName }}` | `safelane-demo-api-canary` | derived: `<application>-canary` |
+| `{{ .AnalysisTemplateName }}` | `safelane-demo-api-success-rate` | derived: `<application>-success-rate` |
+| `{{ .IngressName }}` | `safelane-demo-api` | derived: `<application>` |
 
 Every substituted value is validated against a strict character set before
 interpolation. `text/template` does not escape its output, so an unvalidated namespace
@@ -87,7 +87,7 @@ These are **fixture guesses about Ahmed's cluster**, not SafeLane decisions. Eac
 be confirmed against the real environment before the 26 August demo — a rendered bundle
 that does not match the pre-created Rollout (#55) will not apply:
 
-- **Resource names.** The derived names above must match the pre-created `podinfo`
+- **Resource names.** The derived names above must match the pre-created `safelane-demo-api`
   Rollout, its `stable`/`canary` Services, and the Ingress. If Ahmed's names differ,
   change the derivation in `render.newTemplateData` — do not paper over it in the
   template.
@@ -104,5 +104,5 @@ that does not match the pre-created Rollout (#55) will not apply:
   Prometheus in `monitoring` scraping `http_requests_total` with `namespace`/`service`
   labels. Replace with whatever the demo cluster actually runs, or drop the
   AnalysisTemplate.
-- **`containerPort: 9898`** and the `/healthz` and `/readyz` paths are real Podinfo
+- **`containerPort: 9898`** and the `/healthz` and `/readyz` paths are real SafeLane Demo API
   values and should not need changing.

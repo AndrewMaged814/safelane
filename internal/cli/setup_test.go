@@ -3,113 +3,100 @@ package cli
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/AndrewMaged814/safelane/internal/project"
 	setupengine "github.com/AndrewMaged814/safelane/internal/setup"
 )
 
-func TestSetupDiscoversRepoAndActivatesProposalOutsideAppRepo(t *testing.T) {
-	root := t.TempDir()
-	home := t.TempDir()
-	userHome := t.TempDir()
+func setUserHome(t *testing.T, home string) {
+	t.Helper()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+}
+
+func runGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+}
+
+func TestDeterministicSetupWritesOutsideRepositoryWithoutCallingAnAgent(t *testing.T) {
+	root, home := setupRepository(t)
+	var stdout, stderr bytes.Buffer
+	code := runDeterministicSetup(context.Background(), []string{"--yes", "--json"}, strings.NewReader(""), &stdout, &stderr, root)
+	if code != ExitOK {
+		t.Fatalf("exit = %d, stderr: %s", code, stderr.String())
+	}
+	loc := project.ForApp(home, "safelane-demo-api")
+	for _, path := range []string{loc.ProjectFile, loc.PolicyFile, filepath.Join(loc.TemplateDir, "20-rollout.yaml.tmpl")} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("missing %s: %v", path, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(root, ".safelane")); !os.IsNotExist(err) {
+		t.Fatalf("setup wrote inside repository: %v", err)
+	}
+	var result ResultEnvelope
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+		t.Fatalf("stdout is not JSON: %v\n%s", err, stdout.String())
+	}
+	if result.State != "configured" || result.NextCommand != "safelane doctor" {
+		t.Fatalf("result = %+v", result)
+	}
+}
+
+func TestSetupRequiresOneExplicitConfirmation(t *testing.T) {
+	root, _ := setupRepository(t)
+	var stdout, stderr bytes.Buffer
+	if code := runDeterministicSetup(context.Background(), nil, strings.NewReader("no\n"), &stdout, &stderr, root); code != ExitDecision {
+		t.Fatalf("exit = %d, want %d", code, ExitDecision)
+	}
+}
+
+func TestSetupApplyRejectsStaleFingerprintBeforeWriting(t *testing.T) {
+	root, home := setupRepository(t)
+	snapshot, err := setupengine.Discover(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proposal := setupengine.ConservativeProposal(snapshot)
+	proposal.InspectionFingerprint = "sha256:stale"
+	raw, _ := json.Marshal(proposal)
+	path := filepath.Join(t.TempDir(), "proposal.json")
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	code := runSetupApply(context.Background(), []string{"--proposal", path, "--yes"}, strings.NewReader(""), &stdout, &stderr, root)
+	if code != ExitFail || !strings.Contains(stderr.String(), "fingerprint is stale") {
+		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
+	}
+	if _, err := os.Stat(project.ForApp(home, "safelane-demo-api").ProjectFile); !os.IsNotExist(err) {
+		t.Fatalf("stale proposal wrote configuration: %v", err)
+	}
+}
+
+func setupRepository(t *testing.T) (string, string) {
+	t.Helper()
+	root, home, userHome := t.TempDir(), t.TempDir(), t.TempDir()
 	t.Setenv(project.HomeEnv, home)
 	setUserHome(t, userHome)
 	runGit(t, root, "init")
 	runGit(t, root, "remote", "add", "origin", "https://github.com/AndrewMaged814/safelane-demo-api.git")
-	writeSetupFile(t, filepath.Join(root, ".github", "workflows", "ci.yml"), "jobs:\n  publish:\n    name: Publish image\n")
-	writeSetupFile(t, filepath.Join(root, "Dockerfile"), "FROM mcr.microsoft.com/dotnet/aspnet:10.0\n")
-
-	proposal := setupengine.ConservativeProposal(setupengine.Snapshot{
-		Application:     "safelane-demo-api",
-		Repository:      "AndrewMaged814/safelane-demo-api",
-		DefaultBranch:   "main",
-		ImageRepository: "ghcr.io/andrewmaged814/safelane-demo-api",
-		RequiredChecks:  []string{"Publish image"},
-		Files:           []setupengine.File{{Path: "Dockerfile"}},
-	})
-	var stdout, stderr bytes.Buffer
-	code := setupCommand(root, setupDeps{
-		recommend: func(context.Context, setupengine.Snapshot) (setupengine.Proposal, error) {
-			return proposal, nil
-		},
-	}).Run(context.Background(), nil, &stdout, &stderr)
-	if code != ExitOK {
-		t.Fatalf("setup exit = %d, stderr: %s\nstdout: %s", code, stderr.String(), stdout.String())
-	}
-
-	loc := project.ForApp(home, "safelane-demo-api")
-	if _, err := os.Stat(loc.ProjectFile); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(loc.PolicyFile); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(filepath.Join(loc.TemplateDir, "20-rollout.yaml.tmpl")); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(filepath.Join(root, ".safelane")); !os.IsNotExist(err) {
-		t.Fatalf("setup wrote into application repository: %v", err)
-	}
-	if !strings.Contains(stdout.String(), "setup ready") {
-		t.Fatalf("setup output missing completion: %s", stdout.String())
-	}
-	if strings.Contains(stdout.String(), "Apply this setup?") {
-		t.Fatalf("setup still asked for approval: %s", stdout.String())
-	}
-	for _, section := range []string{"Recommendation", "Policy:", "Release Template", "- Default lane"} {
-		if !strings.Contains(stdout.String(), section) {
-			t.Fatalf("setup output missing structured section %q: %s", section, stdout.String())
-		}
-	}
+	writeSetupFixture(t, filepath.Join(root, ".github", "workflows", "ci.yml"), "jobs:\n  publish:\n    name: Publish image\n")
+	writeSetupFixture(t, filepath.Join(root, "Program.cs"), `app.MapGet("/api/demo", () => new { status = "ok" }); app.MapGet("/version", () => "abc");`)
+	return root, home
 }
 
-func TestSetupAutomaticallyActivatesWithoutApproval(t *testing.T) {
-	root := t.TempDir()
-	home := t.TempDir()
-	t.Setenv(project.HomeEnv, home)
-	runGit(t, root, "init")
-	runGit(t, root, "remote", "add", "origin", "https://github.com/AndrewMaged814/safelane-demo-api.git")
-	proposal := setupengine.ConservativeProposal(setupengine.Snapshot{Application: "safelane-demo-api", RequiredChecks: []string{"Test"}})
-	var stdout, stderr bytes.Buffer
-	code := setupCommand(root, setupDeps{
-		recommend: func(context.Context, setupengine.Snapshot) (setupengine.Proposal, error) { return proposal, nil },
-	}).Run(context.Background(), nil, &stdout, &stderr)
-	if code != ExitOK {
-		t.Fatalf("setup auto-apply exit = %d, stderr: %s\nstdout: %s", code, stderr.String(), stdout.String())
-	}
-	loc := project.ForApp(home, "safelane-demo-api")
-	if _, err := os.Stat(loc.ProjectFile); err != nil {
-		t.Fatalf("auto-apply did not write operator project: %v", err)
-	}
-	if strings.Contains(stdout.String(), "Apply this setup?") {
-		t.Fatalf("setup still asked for approval: %s", stdout.String())
-	}
-}
-
-func TestSetupRecommendationProgressUsesChangingStatuses(t *testing.T) {
-	var progress bytes.Buffer
-	want := setupengine.ConservativeProposal(setupengine.Snapshot{Application: "app"})
-	_, err := recommendWithProgress(context.Background(), setupengine.Snapshot{}, func(context.Context, setupengine.Snapshot) (setupengine.Proposal, error) {
-		time.Sleep(1100 * time.Millisecond)
-		return want, nil
-	}, &progress)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(progress.String(), "Preparing SafeLane setup") || !strings.Contains(progress.String(), "SafeLane recommendation ready") {
-		t.Fatalf("progress output did not show the calm setup lifecycle: %q", progress.String())
-	}
-	if strings.Contains(progress.String(), "\r") || strings.Contains(progress.String(), "⠋") {
-		t.Fatalf("non-terminal progress should not contain animation control sequences: %q", progress.String())
-	}
-}
-
-func writeSetupFile(t *testing.T, path, body string) {
+func writeSetupFixture(t *testing.T, path, body string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)

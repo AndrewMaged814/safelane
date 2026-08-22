@@ -24,6 +24,7 @@ type Config struct {
 	Target               Target     `yaml:"target"`
 	ControllerKubeconfig string     `yaml:"controller_kubeconfig"`
 	ControllerContext    string     `yaml:"controller_context"`
+	Analysis             Analysis   `yaml:"analysis"`
 }
 
 // Repository identifies the GitHub source SafeLane collects evidence from.
@@ -49,6 +50,28 @@ type Target struct {
 	Rollout   string `yaml:"rollout"`
 }
 
+// Analysis declares operator-approved black-box assertions. The probe image
+// is digest pinned and receives no Kubernetes API credential.
+type Analysis struct {
+	ProbeImage string             `yaml:"probe_image"`
+	Assertions []RuntimeAssertion `yaml:"assertions"`
+}
+
+type RuntimeAssertion struct {
+	ID          string `yaml:"id"`
+	Surface     string `yaml:"surface"`
+	Expectation string `yaml:"expectation"`
+	Covers      string `yaml:"covers"`
+}
+
+func (a Analysis) AssertionIDs() []string {
+	ids := make([]string, 0, len(a.Assertions))
+	for _, assertion := range a.Assertions {
+		ids = append(ids, assertion.ID)
+	}
+	return ids
+}
+
 // Load reads and validates a project.yml file.
 func Load(path string) (Config, error) {
 	raw, err := os.ReadFile(path)
@@ -56,7 +79,7 @@ func Load(path string) (Config, error) {
 		if os.IsNotExist(err) {
 			return Config{}, release.Invalid("missing_project_config", "project",
 				"no operator configuration for this repository",
-				"run safelane init --app <name> --repo <owner/name>")
+				"run safelane setup from the application repository")
 		}
 		return Config{}, release.Invalid("unreadable_project_config", "project",
 			fmt.Sprintf("could not read %s: %v", path, err),
@@ -77,10 +100,28 @@ func Load(path string) (Config, error) {
 // Validate reports every missing or unsafe operator field at once.
 func (c Config) Validate() error {
 	var errs release.Errors
-	if c.Version != 1 && c.Version != 2 && c.Version != 3 {
+	if c.Version != 1 && c.Version != 2 && c.Version != 3 && c.Version != 4 {
 		errs = append(errs, release.Malformed("unsupported_project_version", "version",
 			fmt.Sprintf("project version %d is not supported", c.Version),
 			"Set version to 2."))
+	}
+	if c.Version >= 4 {
+		if strings.TrimSpace(c.Analysis.ProbeImage) == "" {
+			errs = append(errs, release.Invalid("missing_project_field", "analysis.probe_image", "no external analysis probe image was configured", "Set a digest-pinned probe image."))
+		}
+		if len(c.Analysis.Assertions) == 0 {
+			errs = append(errs, release.Invalid("missing_project_field", "analysis.assertions", "no concrete runtime assertions were configured", "Configure assertions for critical application behavior."))
+		}
+		seenAssertions := map[string]bool{}
+		for i, assertion := range c.Analysis.Assertions {
+			if assertion.ID == "" || assertion.Surface == "" || assertion.Expectation == "" || assertion.Covers == "" {
+				errs = append(errs, release.Invalid("invalid_runtime_assertion", fmt.Sprintf("analysis.assertions[%d]", i), "runtime assertions require id, surface, expectation, and covers", "Complete or remove the assertion."))
+			}
+			if seenAssertions[assertion.ID] {
+				errs = append(errs, release.Invalid("duplicate_runtime_assertion", "analysis.assertions", fmt.Sprintf("assertion %q is duplicated", assertion.ID), "Use each assertion ID once."))
+			}
+			seenAssertions[assertion.ID] = true
+		}
 	}
 	for _, f := range []struct {
 		name, value string
@@ -284,7 +325,7 @@ func YAML(application, repo, defaultBranch, imageRepository string, requiredChec
 	for _, check := range requiredChecks {
 		fmt.Fprintf(&checks, "    - %s\n", check)
 	}
-	body := fmt.Sprintf(`version: 3
+	body := fmt.Sprintf(`version: 4
 
 application: %s
 
@@ -303,6 +344,26 @@ target:
   cluster: safelane-demo
   namespace: %s
   rollout: %s
+
+analysis:
+  probe_image: ghcr.io/andrewmaged814/safelane-demo-probe@sha256:REPLACE_WITH_PUBLISHED_DIGEST
+  assertions:
+    - id: demo-response
+      surface: GET /api/demo
+      expectation: HTTP 200 and JSON status equals "ok"
+      covers: correctness
+    - id: demo-success-rate
+      surface: GET /api/demo
+      expectation: success rate is at least 95 percent over 20 requests
+      covers: availability
+    - id: demo-latency
+      surface: GET /api/demo
+      expectation: p95 latency is at most 500ms over 20 requests
+      covers: latency
+    - id: canary-identity
+      surface: GET /version
+      expectation: commit equals the inspected merge commit
+      covers: artifact-identity
 
 controller_kubeconfig: controller.kubeconfig
 controller_context: safelane-controller

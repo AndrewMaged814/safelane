@@ -15,7 +15,7 @@ import (
 	"github.com/AndrewMaged814/safelane/internal/store"
 )
 
-// StatusCommand builds the top-level, read-only `safelane status` command.
+// StatusCommand builds the top-level, read-only `safelane release status` command.
 // Both forms reconcile with Argo so terminal live state is never presented as
 // an open release merely because an older client failed to record the outcome.
 func StatusCommand(root, defaultStoreDir string) Command {
@@ -57,11 +57,11 @@ func parseStatusFlags(args []string, stderr io.Writer, defaultStoreDir string) (
 		idArg, positional = positional[0], positional[1:]
 	}
 	if len(positional) != 0 {
-		fmt.Fprintln(stderr, "safelane status: at most one release id is allowed")
+		fmt.Fprintln(stderr, "safelane release status: at most one release id is allowed")
 		return f, "", flag.ErrHelp
 	}
 	if idArg == "" && f.jsonOut {
-		fmt.Fprintln(stderr, "safelane status: --json requires a release id")
+		fmt.Fprintln(stderr, "safelane release status: --json requires a release id")
 		return f, "", flag.ErrHelp
 	}
 	return f, idArg, nil
@@ -74,7 +74,7 @@ func runStatus(ctx context.Context, args []string, stdout, stderr io.Writer, roo
 	}
 	paths, err := resolveRuntime(root, f.projectFile, "", f.storeDir)
 	if err != nil {
-		fmt.Fprintf(stderr, "safelane status: %v\n", err)
+		fmt.Fprintf(stderr, "safelane release status: %v\n", err)
 		return ExitFail
 	}
 	st := &store.FileStore{Dir: paths.storeDir}
@@ -82,12 +82,12 @@ func runStatus(ctx context.Context, args []string, stdout, stderr io.Writer, roo
 	if idArg == "" {
 		releases, err := st.List()
 		if err != nil {
-			fmt.Fprintf(stderr, "safelane status: %v\n", err)
+			fmt.Fprintf(stderr, "safelane release status: %v\n", err)
 			return ExitFail
 		}
 		cfg, err := project.Load(paths.projectFile)
 		if err != nil {
-			fmt.Fprintf(stderr, "safelane status: %v\n", err)
+			fmt.Fprintf(stderr, "safelane release status: %v\n", err)
 			return ExitFail
 		}
 		controllerKubeconfig, controllerContext := paths.controllerCredentials("", "")
@@ -117,12 +117,12 @@ func runStatus(ctx context.Context, args []string, stdout, stderr io.Writer, roo
 				"Use the release id `safelane release` returned."))
 			return ExitFail
 		}
-		fmt.Fprintf(stderr, "safelane status: %v\n", err)
+		fmt.Fprintf(stderr, "safelane release status: %v\n", err)
 		return ExitFail
 	}
 	cfg, err := project.Load(paths.projectFile)
 	if err != nil {
-		fmt.Fprintf(stderr, "safelane status: %v\n", err)
+		fmt.Fprintf(stderr, "safelane release status: %v\n", err)
 		return ExitFail
 	}
 	controllerKubeconfig, controllerContext := paths.controllerCredentials("", "")
@@ -152,7 +152,7 @@ func runStatus(ctx context.Context, args []string, stdout, stderr io.Writer, roo
 	}
 	if f.jsonOut {
 		if err := writeJSON(stdout, report); err != nil {
-			fmt.Fprintf(stderr, "safelane status: could not encode the result: %v\n", err)
+			fmt.Fprintf(stderr, "safelane release status: could not encode the result: %v\n", err)
 			return ExitFail
 		}
 	} else {

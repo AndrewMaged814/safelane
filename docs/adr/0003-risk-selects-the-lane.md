@@ -22,5 +22,4 @@ path — no override flag, no "trust the model when it is confident". A model ca
 ever narrow a lane. It can never widen one, and it never chooses whether the change may
 ship at all.
 
-Missing, malformed, or failed assessment resolves to the most cautious configured lane —
-never the widest, and never a blocked release. Risk decides width, not entry.
+Operational semantic-model failure resolves to the Guarded lane and records deterministic guarded fallback; it does not erase a valid deterministic assessment. Missing deterministic evidence, invalid policy, dossier construction failure, semantic insufficiency, and missing mandatory runtime analysis still stop before exposure. Risk shapes the lane, while hazard coverage may impose a lower Progression Authority ceiling within it.

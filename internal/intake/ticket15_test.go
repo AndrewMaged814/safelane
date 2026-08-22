@@ -7,7 +7,7 @@ import (
 )
 
 func TestParseRejectsCallerSuppliedRiskAndLane(t *testing.T) {
-	_, err := Parse([]byte(`{"schema_version":"safelane.release.request/v1","repository":"AndrewMaged814/podinfo","pull_request":4,"environment":"production","risk":"high","lane":"guarded"}`))
+	_, err := Parse([]byte(`{"schema_version":"safelane.release.request/v1","repository":"AndrewMaged814/safelane-demo-api","pull_request":4,"environment":"production","risk":"high","lane":"guarded"}`))
 	if err == nil {
 		t.Fatal("risk and lane were accepted")
 	}

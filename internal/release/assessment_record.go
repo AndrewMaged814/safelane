@@ -9,32 +9,37 @@ import (
 // AssessmentRecord is Appendix C2's immutable assessment proof. It records the
 // two verdicts and their combination without retaining the per-file dossier.
 type AssessmentRecord struct {
-	Facts      AssessmentFacts `json:"facts"`
-	Heuristic  assess.Verdict  `json:"heuristic"`
-	Model      assess.Verdict  `json:"model"`
-	Risk       assess.Risk     `json:"risk"`
-	CombinedBy string          `json:"combined_by"`
-	Lane       string          `json:"lane"`
+	Facts           AssessmentFacts `json:"facts"`
+	Heuristic       assess.Verdict  `json:"heuristic"`
+	Model           assess.Verdict  `json:"model"`
+	Risk            assess.Risk     `json:"risk"`
+	CombinedBy      string          `json:"combined_by"`
+	Lane            string          `json:"lane"`
+	AuthorizedUntil int             `json:"authorized_until"`
+	AssessmentMode  string          `json:"assessment_mode,omitempty"`
 }
 
 type AssessmentFacts struct {
-	FilesChanged  int    `json:"files_changed"`
-	Additions     int    `json:"additions"`
-	Deletions     int    `json:"deletions"`
-	AgentAuthored bool   `json:"agent_authored"`
-	AgentEvidence string `json:"agent_evidence,omitempty"`
+	FilesChanged      int      `json:"files_changed"`
+	Additions         int      `json:"additions"`
+	Deletions         int      `json:"deletions"`
+	AgentAuthored     bool     `json:"agent_authored"`
+	AgentEvidence     string   `json:"agent_evidence,omitempty"`
+	RuntimeAssertions []string `json:"runtime_assertions,omitempty"`
 }
 
 func assessmentRecordFrom(a assess.Assessment) AssessmentRecord {
 	return AssessmentRecord{
 		Facts: AssessmentFacts{FilesChanged: len(a.Facts.Files), Additions: a.Facts.TotalAdditions, Deletions: a.Facts.TotalDeletions,
-			AgentAuthored: a.Facts.AgentAuthored, AgentEvidence: a.Facts.AgentEvidence},
-		Heuristic: a.Heuristic, Model: a.Model, Risk: a.Risk, CombinedBy: a.CombinedBy, Lane: a.Lane,
+			AgentAuthored: a.Facts.AgentAuthored, AgentEvidence: a.Facts.AgentEvidence, RuntimeAssertions: append([]string(nil), a.Facts.RuntimeAssertions...)},
+		Heuristic: a.Heuristic, Model: a.Model, Risk: a.Risk, CombinedBy: a.CombinedBy, Lane: a.Lane, AuthorizedUntil: a.AuthorizedUntil, AssessmentMode: a.Mode,
 	}
 }
 
 func (a AssessmentRecord) IsZero() bool {
-	return a.Facts == (AssessmentFacts{}) && a.Risk == "" && a.CombinedBy == "" && a.Lane == "" &&
+	return a.Facts.FilesChanged == 0 && a.Facts.Additions == 0 && a.Facts.Deletions == 0 &&
+		!a.Facts.AgentAuthored && a.Facts.AgentEvidence == "" && len(a.Facts.RuntimeAssertions) == 0 &&
+		a.Risk == "" && a.CombinedBy == "" && a.Lane == "" && a.AssessmentMode == "" &&
 		!a.Heuristic.Available && a.Heuristic.Risk == "" && len(a.Heuristic.Rules) == 0 &&
 		!a.Model.Available && a.Model.Risk == "" && a.Model.Assessor == "" && a.Model.Rationale == ""
 }

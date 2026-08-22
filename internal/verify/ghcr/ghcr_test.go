@@ -22,8 +22,8 @@ func baseClaim(t *testing.T) Claim {
 	t.Helper()
 	return Claim{
 		ExpectedRegistry:   "ghcr.io",
-		ExpectedRepository: "acme/podinfo",
-		Reference:          mustParse(t, "ghcr.io/acme/podinfo@"+validDigest),
+		ExpectedRepository: "acme/safelane-demo-api",
+		Reference:          mustParse(t, "ghcr.io/acme/safelane-demo-api@"+validDigest),
 	}
 }
 
@@ -46,7 +46,7 @@ func TestEvaluateResolved_RegistryMismatch(t *testing.T) {
 
 func TestEvaluateResolved_RepositoryMismatch(t *testing.T) {
 	claim := baseClaim(t)
-	claim.ExpectedRepository = "someone-else/podinfo"
+	claim.ExpectedRepository = "someone-else/safelane-demo-api"
 	got := EvaluateResolved(claim, validDigest, nil)
 	if got.Status != StatusRejected || got.Reason != ReasonRepositoryMismatch {
 		t.Fatalf("want Rejected/RepositoryMismatch, got %+v", got)

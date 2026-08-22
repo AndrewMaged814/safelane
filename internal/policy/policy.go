@@ -94,9 +94,9 @@ func Default() Policy {
 	return Policy{
 		Version: "2",
 		Lanes: map[string]Lane{
-			"fast":     {Weights: []int{5, 100}},
-			"standard": {Weights: []int{5, 25, 50, 100}},
-			"guarded":  {Weights: []int{1, 5, 25, 50, 100}},
+			"fast":     {Weights: []int{50, 100}},
+			"standard": {Weights: []int{25, 50, 100}},
+			"guarded":  {Weights: []int{25, 50, 75, 100}},
 		},
 		RiskToLane: map[string]string{
 			"low":    "fast",
@@ -132,7 +132,7 @@ func DefaultYAML() []byte {
 	var b strings.Builder
 	fmt.Fprintf(&b, "version: %s\n\n", p.Version)
 	b.WriteString("mandatory_evidence:\n  - merged_commit_on_default_branch\n  - passing_publish_workflow\n  - immutable_ghcr_digest\n\n")
-	b.WriteString("lanes:\n  fast:\n    weights: [5, 100]\n  standard:\n    weights: [5, 25, 50, 100]\n  guarded:\n    weights: [1, 5, 25, 50, 100]\n\n")
+	b.WriteString("lanes:\n  fast:\n    weights: [50, 100]\n  standard:\n    weights: [25, 50, 100]\n  guarded:\n    weights: [25, 50, 75, 100]\n\n")
 	b.WriteString("risk_to_lane:\n  low: fast\n  medium: standard\n  high: guarded\n\n")
 	b.WriteString("default_lane: guarded\n\n")
 	b.WriteString("assessment:\n  heuristic:\n    agent_authored_minimum: medium\n    paths:\n      - { glob: \"pkg/api/**\", minimum: medium }\n      - { glob: \"**/migrations/**\", minimum: high }\n      - { glob: \"charts/**\", minimum: high }\n    size:\n      - { changed_lines_at_least: 200, minimum: medium }\n      - { files_at_least: 15, minimum: medium }\n\n")

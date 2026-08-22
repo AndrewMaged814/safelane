@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/AndrewMaged814/safelane/internal/assess"
 	"github.com/AndrewMaged814/safelane/internal/project"
 	"github.com/AndrewMaged814/safelane/internal/release"
 	"github.com/AndrewMaged814/safelane/internal/render"
@@ -32,6 +33,22 @@ func (f fakeFetcher) FetchPullRequestFacts(ctx context.Context, owner, repo stri
 type fakeResolver struct {
 	digest string
 	err    error
+}
+
+type fakeChangeFetcher struct{}
+
+func (fakeChangeFetcher) FetchChangeFacts(context.Context, string, string, int) (assess.Facts, error) {
+	return assess.Facts{Files: []assess.FileChange{{Path: "src/Program.cs", Additions: 1}}, TotalAdditions: 1, UnifiedDiff: "+return ok;"}, nil
+}
+
+type fixedAssessor struct {
+	name    string
+	verdict assess.Verdict
+}
+
+func (f fixedAssessor) Name() string { return f.name }
+func (f fixedAssessor) Assess(context.Context, assess.Facts) (assess.Verdict, error) {
+	return f.verdict, nil
 }
 
 func (f fakeResolver) ResolveDigest(ctx context.Context, ref release.ImageReference) (string, error) {
@@ -69,7 +86,7 @@ const fixtureMergeSHA = "4f0c1b9e7ac2d5386b1d9f4a5c8e2b7d3a6f0e91"
 func fixtureIntent() release.Intent {
 	return release.Intent{
 		SchemaVersion: release.RequestSchemaVersion,
-		Repository:    "AndrewMaged814/podinfo",
+		Repository:    "AndrewMaged814/safelane-demo-api",
 		PullRequest:   1,
 		Environment:   "production",
 	}
@@ -78,16 +95,16 @@ func fixtureIntent() release.Intent {
 func fixtureProject() project.Config {
 	return project.Config{
 		Version:     1,
-		Application: "podinfo",
-		Repository:  project.Repository{Name: "AndrewMaged814/podinfo", DefaultBranch: "main"},
+		Application: "safelane-demo-api",
+		Repository:  project.Repository{Name: "AndrewMaged814/safelane-demo-api", DefaultBranch: "main"},
 		Release: project.Release{
 			Environment:     "production",
-			ImageRepository: "ghcr.io/andrewmaged814/podinfo",
+			ImageRepository: "ghcr.io/andrewmaged814/safelane-demo-api",
 			ImageTag:        "sha-{{merge_sha_short8}}",
 			RequiredCheck:   "publish / build-and-push",
 			TemplatePath:    ".safelane/release-template",
 		},
-		Target: project.Target{Cluster: "safelane-demo", Namespace: "podinfo", Rollout: "podinfo"},
+		Target: project.Target{Cluster: "safelane-demo", Namespace: "safelane-demo-api", Rollout: "safelane-demo-api"},
 	}
 }
 
@@ -104,9 +121,9 @@ func loadTemplate(t *testing.T) render.Template {
 // fixture request submitted against these fakes verifies end to end.
 func verifiedFacts() github.Facts {
 	return github.Facts{
-		Repository:     "AndrewMaged814/podinfo",
+		Repository:     "AndrewMaged814/safelane-demo-api",
 		Number:         1,
-		URL:            "https://github.com/AndrewMaged814/podinfo/pull/1",
+		URL:            "https://github.com/AndrewMaged814/safelane-demo-api/pull/1",
 		Merged:         true,
 		MergedAt:       time.Date(2026, 8, 15, 9, 0, 0, 0, time.UTC),
 		BaseRef:        "main",
@@ -115,7 +132,7 @@ func verifiedFacts() github.Facts {
 		CheckRuns: []github.CheckRun{
 			{
 				Name: "publish / build-and-push", Conclusion: "success", HeadSHA: fixtureMergeSHA,
-				RunID: 16453210987, URL: "https://github.com/AndrewMaged814/podinfo/actions/runs/16453210987",
+				RunID: 16453210987, URL: "https://github.com/AndrewMaged814/safelane-demo-api/actions/runs/16453210987",
 				CompletedAt: time.Date(2026, 8, 15, 8, 30, 0, 0, time.UTC),
 			},
 		},
@@ -135,13 +152,16 @@ func baseDeps(t *testing.T) (Deps, *fakeStore) {
 	t.Helper()
 	store := &fakeStore{}
 	deps := Deps{
-		GitHub:   fakeFetcher{facts: verifiedFacts()},
-		GHCR:     fakeResolver{digest: fixtureDigest},
-		Template: loadTemplate(t),
-		Store:    store,
-		Project:  fixtureProject(),
-		Now:      func() time.Time { return time.Date(2026, 8, 15, 12, 0, 0, 0, time.UTC) },
-		NewID:    fixedReleaseID(t),
+		GitHub:      fakeFetcher{facts: verifiedFacts()},
+		GHCR:        fakeResolver{digest: fixtureDigest},
+		Template:    loadTemplate(t),
+		Store:       store,
+		Project:     fixtureProject(),
+		ChangeFacts: fakeChangeFetcher{},
+		Heuristic:   fixedAssessor{name: "heuristic", verdict: assess.Verdict{Risk: assess.RiskLow, Available: true}},
+		Model:       fixedAssessor{name: "model", verdict: assess.Verdict{Available: false, Reason: "fixture model unavailable"}},
+		Now:         func() time.Time { return time.Date(2026, 8, 15, 12, 0, 0, 0, time.UTC) },
+		NewID:       fixedReleaseID(t),
 	}
 	return deps, store
 }
@@ -184,11 +204,14 @@ func TestSubmitRelease_ValidFixture_ProducesVerifiedPersistedRelease(t *testing.
 	if env.NextAction() != "start" {
 		t.Errorf("next action = %q, want start", env.NextAction())
 	}
-	// No assessment is wired into SubmitRelease yet, so this resolves to
-	// the default policy's DefaultLane (guarded) -- the most cautious
-	// configured lane, per Appendix C1's third rule.
-	if got := env.Stages(); len(got) != 5 || got[0] != 1 || got[4] != 100 {
-		t.Errorf("stages = %v, want 1 → 5 → 25 → 50 → 100", got)
+	// The unavailable model selects the guarded fallback while retaining the
+	// deterministic risk floor in the recorded assessment.
+	if got := env.Stages(); len(got) != 4 || got[0] != 25 || got[3] != 100 {
+		t.Errorf("stages = %v, want 25 → 50 → 75 → 100", got)
+	}
+	assessment, ok := r.RecordedAssessment()
+	if !ok || assessment.AssessmentMode != "deterministic_guarded_fallback" || assessment.Lane != "guarded" || assessment.AuthorizedUntil != 100 {
+		t.Fatalf("guarded fallback assessment = %+v, present=%v", assessment, ok)
 	}
 	if r.Eligibility().Retryable() {
 		t.Error("eligible is not retryable")
@@ -338,7 +361,7 @@ func TestSubmitRelease_DigestMismatch_PersistsFailedEvidence(t *testing.T) {
 	deps, _ := baseDeps(t)
 	deps.GHCR = fakeResolver{digest: "sha256:" + strings.Repeat("9", 64)}
 	intent := fixtureIntent()
-	intent.Image = "ghcr.io/andrewmaged814/podinfo@" + fixtureDigest
+	intent.Image = "ghcr.io/andrewmaged814/safelane-demo-api@" + fixtureDigest
 
 	r, err := SubmitRelease(context.Background(), intent, deps)
 	if err != nil {

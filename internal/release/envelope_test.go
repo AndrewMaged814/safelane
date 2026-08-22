@@ -13,7 +13,7 @@ func hexDigest(seed string) string {
 
 func testTemplateIdentity() release.TemplateIdentity {
 	return release.TemplateIdentity{
-		Name:          "podinfo-canary",
+		Name:          "safelane-demo-api-canary",
 		Version:       "v0.1.0-fixture",
 		ContentDigest: hexDigest("a1b2"),
 		FileCount:     5,
@@ -22,8 +22,8 @@ func testTemplateIdentity() release.TemplateIdentity {
 
 func testEnvelopeTarget() release.Target {
 	return release.Target{
-		Application: "podinfo", Environment: "production",
-		Cluster: "safelane-demo", Namespace: "podinfo",
+		Application: "safelane-demo-api", Environment: "production",
+		Cluster: "safelane-demo", Namespace: "safelane-demo-api",
 	}
 }
 
@@ -32,8 +32,8 @@ func rolloutResource(t *testing.T, stepsYAML string) release.RenderedResource {
 	body := "apiVersion: argoproj.io/v1alpha1\n" +
 		"kind: Rollout\n" +
 		"metadata:\n" +
-		"  name: podinfo\n" +
-		"  namespace: podinfo\n" +
+		"  name: safelane-demo-api\n" +
+		"  namespace: safelane-demo-api\n" +
 		"spec:\n" +
 		"  strategy:\n" +
 		"    canary:\n" +
@@ -42,8 +42,8 @@ func rolloutResource(t *testing.T, stepsYAML string) release.RenderedResource {
 		TemplatePath: "40-rollout.yaml.tmpl",
 		APIVersion:   "argoproj.io/v1alpha1",
 		Kind:         "Rollout",
-		Namespace:    "podinfo",
-		Name:         "podinfo",
+		Namespace:    "safelane-demo-api",
+		Name:         "safelane-demo-api",
 	}, []byte(body))
 	if err != nil {
 		t.Fatalf("NewRenderedResource: %v", err)
@@ -57,9 +57,9 @@ func serviceResource(t *testing.T, digest string) release.RenderedResource {
 		TemplatePath: "10-service.yaml.tmpl",
 		APIVersion:   "v1",
 		Kind:         "Service",
-		Namespace:    "podinfo",
-		Name:         "podinfo-stable",
-	}, []byte("apiVersion: v1\nkind: Service\nmetadata:\n  name: podinfo-stable\n# "+digest+"\n"))
+		Namespace:    "safelane-demo-api",
+		Name:         "safelane-demo-api-stable",
+	}, []byte("apiVersion: v1\nkind: Service\nmetadata:\n  name: safelane-demo-api-stable\n# "+digest+"\n"))
 	if err != nil {
 		t.Fatalf("NewRenderedResource: %v", err)
 	}

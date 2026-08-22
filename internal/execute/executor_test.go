@@ -43,20 +43,20 @@ func (f *fakeRunner) enqueue(out string, err error) {
 func testBundle(t *testing.T) release.RenderedBundle {
 	t.Helper()
 	svc, err := release.NewRenderedResource(release.ResourceRef{
-		TemplatePath: "10-service.yaml.tmpl", APIVersion: "v1", Kind: "Service", Namespace: "podinfo", Name: "podinfo-stable",
-	}, []byte("apiVersion: v1\nkind: Service\nmetadata:\n  name: podinfo-stable\n  namespace: podinfo\n"))
+		TemplatePath: "10-service.yaml.tmpl", APIVersion: "v1", Kind: "Service", Namespace: "safelane-demo-api", Name: "safelane-demo-api-stable",
+	}, []byte("apiVersion: v1\nkind: Service\nmetadata:\n  name: safelane-demo-api-stable\n  namespace: safelane-demo-api\n"))
 	if err != nil {
 		t.Fatalf("test setup: %v", err)
 	}
 	rollout, err := release.NewRenderedResource(release.ResourceRef{
-		TemplatePath: "40-rollout.yaml.tmpl", APIVersion: "argoproj.io/v1alpha1", Kind: "Rollout", Namespace: "podinfo", Name: "podinfo",
-	}, []byte("apiVersion: argoproj.io/v1alpha1\nkind: Rollout\nmetadata:\n  name: podinfo\n  namespace: podinfo\n"+
+		TemplatePath: "40-rollout.yaml.tmpl", APIVersion: "argoproj.io/v1alpha1", Kind: "Rollout", Namespace: "safelane-demo-api", Name: "safelane-demo-api",
+	}, []byte("apiVersion: argoproj.io/v1alpha1\nkind: Rollout\nmetadata:\n  name: safelane-demo-api\n  namespace: safelane-demo-api\n"+
 		"# sha256:3fbc1d9a7e42c8056d1f9b3e7a5c204d8e6b1f39a7c50d28e4b6f19a3c7d50e8\n"))
 	if err != nil {
 		t.Fatalf("test setup: %v", err)
 	}
-	tmpl := release.TemplateIdentity{Name: "podinfo-canary", Version: "v0.1.0-fixture", ContentDigest: "sha256:" + strings.Repeat("a1", 32), FileCount: 5}
-	target := release.Target{Application: "podinfo", Environment: "production", Cluster: "safelane-demo", Namespace: "podinfo"}
+	tmpl := release.TemplateIdentity{Name: "safelane-demo-api-canary", Version: "v0.1.0-fixture", ContentDigest: "sha256:" + strings.Repeat("a1", 32), FileCount: 5}
+	target := release.Target{Application: "safelane-demo-api", Environment: "production", Cluster: "safelane-demo", Namespace: "safelane-demo-api"}
 	digest := "sha256:3fbc1d9a7e42c8056d1f9b3e7a5c204d8e6b1f39a7c50d28e4b6f19a3c7d50e8"
 	bundle, err := release.NewRenderedBundle(tmpl, target, digest, []release.RenderedResource{svc, rollout})
 	if err != nil {
@@ -66,7 +66,7 @@ func testBundle(t *testing.T) release.RenderedBundle {
 }
 
 func newTestExecutor(fr *fakeRunner) *execute.Executor {
-	ex := execute.New(execute.Config{Namespace: "podinfo", Rollout: "podinfo"})
+	ex := execute.New(execute.Config{Namespace: "safelane-demo-api", Rollout: "safelane-demo-api"})
 	ex.Run = fr.run
 	ex.Sleep = func(time.Duration) {} // instant: WaitForGate tests drive time via Now
 	return ex
@@ -74,7 +74,7 @@ func newTestExecutor(fr *fakeRunner) *execute.Executor {
 
 func TestApply_ReportsOneRowPerResourceInBundleOrder(t *testing.T) {
 	fr := &fakeRunner{}
-	fr.enqueue("service/podinfo-stable unchanged\nrollout.argoproj.io/podinfo configured\n", nil)
+	fr.enqueue("service/safelane-demo-api-stable unchanged\nrollout.argoproj.io/safelane-demo-api configured\n", nil)
 	ex := newTestExecutor(fr)
 	bundle := testBundle(t)
 
@@ -99,16 +99,24 @@ func TestReleaseAnnotationAndArgoRetryUseNarrowExactCommands(t *testing.T) {
 	fr.enqueue("retried\n", nil)
 	ex := newTestExecutor(fr)
 	id := release.ReleaseID("rel_01ARZ3NDEKTSV4RRFFQ69G5FAV")
-	if err := ex.AnnotateRelease(context.Background(), id); err != nil { t.Fatal(err) }
-	if err := ex.Retry(context.Background()); err != nil { t.Fatal(err) }
-	wantAnnotation := "annotate rollout podinfo -n podinfo safelane.dev/release-id=" + string(id) + " --overwrite"
-	if got := strings.Join(fr.calls[0], " "); got != wantAnnotation { t.Fatalf("annotation command = %q", got) }
-	if got := strings.Join(fr.calls[1], " "); got != "argo rollouts retry rollout podinfo -n podinfo" { t.Fatalf("retry command = %q", got) }
+	if err := ex.AnnotateRelease(context.Background(), id); err != nil {
+		t.Fatal(err)
+	}
+	if err := ex.Retry(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	wantAnnotation := "annotate rollout safelane-demo-api -n safelane-demo-api safelane.dev/release-id=" + string(id) + " --overwrite"
+	if got := strings.Join(fr.calls[0], " "); got != wantAnnotation {
+		t.Fatalf("annotation command = %q", got)
+	}
+	if got := strings.Join(fr.calls[1], " "); got != "argo rollouts retry rollout safelane-demo-api -n safelane-demo-api" {
+		t.Fatalf("retry command = %q", got)
+	}
 }
 
 func TestApply_SendsTheExactBundleBytesOnStdin(t *testing.T) {
 	fr := &fakeRunner{}
-	fr.enqueue("service/podinfo-stable unchanged\nrollout.argoproj.io/podinfo unchanged\n", nil)
+	fr.enqueue("service/safelane-demo-api-stable unchanged\nrollout.argoproj.io/safelane-demo-api unchanged\n", nil)
 	ex := newTestExecutor(fr)
 	bundle := testBundle(t)
 
@@ -125,7 +133,7 @@ func TestApply_SendsTheExactBundleBytesOnStdin(t *testing.T) {
 
 func TestApply_IsOneCallOverTheWholeBundle(t *testing.T) {
 	fr := &fakeRunner{}
-	fr.enqueue("service/podinfo-stable unchanged\nrollout.argoproj.io/podinfo unchanged\n", nil)
+	fr.enqueue("service/safelane-demo-api-stable unchanged\nrollout.argoproj.io/safelane-demo-api unchanged\n", nil)
 	ex := newTestExecutor(fr)
 
 	if _, err := ex.Apply(context.Background(), testBundle(t)); err != nil {
@@ -142,7 +150,7 @@ func TestApply_IsOneCallOverTheWholeBundle(t *testing.T) {
 
 func TestApply_MismatchedLineCountIsAnError(t *testing.T) {
 	fr := &fakeRunner{}
-	fr.enqueue("service/podinfo-stable unchanged\n", nil) // one line for two resources
+	fr.enqueue("service/safelane-demo-api-stable unchanged\n", nil) // one line for two resources
 	ex := newTestExecutor(fr)
 
 	if _, err := ex.Apply(context.Background(), testBundle(t)); err == nil {
@@ -152,9 +160,9 @@ func TestApply_MismatchedLineCountIsAnError(t *testing.T) {
 
 func TestPrivilegedFlags_ThreadedOnlyWhenConfigured(t *testing.T) {
 	fr := &fakeRunner{}
-	fr.enqueue("service/podinfo-stable unchanged\nrollout.argoproj.io/podinfo unchanged\n", nil)
+	fr.enqueue("service/safelane-demo-api-stable unchanged\nrollout.argoproj.io/safelane-demo-api unchanged\n", nil)
 	ex := execute.New(execute.Config{
-		Namespace: "podinfo", Rollout: "podinfo",
+		Namespace: "safelane-demo-api", Rollout: "safelane-demo-api",
 		ControllerKubeconfig: "controller.kubeconfig", ControllerContext: "safelane-controller",
 	})
 	ex.Run = fr.run
@@ -170,7 +178,7 @@ func TestPrivilegedFlags_ThreadedOnlyWhenConfigured(t *testing.T) {
 
 func TestPrivilegedFlags_AbsentWhenNotConfigured(t *testing.T) {
 	fr := &fakeRunner{}
-	fr.enqueue("service/podinfo-stable unchanged\nrollout.argoproj.io/podinfo unchanged\n", nil)
+	fr.enqueue("service/safelane-demo-api-stable unchanged\nrollout.argoproj.io/safelane-demo-api unchanged\n", nil)
 	ex := newTestExecutor(fr)
 
 	if _, err := ex.Apply(context.Background(), testBundle(t)); err != nil {
@@ -187,7 +195,7 @@ func TestGetStatus_NeverCarriesTheControllerFlags(t *testing.T) {
 	fr := &fakeRunner{}
 	fr.enqueue(`{"status":{"phase":"Progressing"}}`, nil)
 	ex := execute.New(execute.Config{
-		Namespace: "podinfo", Rollout: "podinfo",
+		Namespace: "safelane-demo-api", Rollout: "safelane-demo-api",
 		ControllerKubeconfig: "controller.kubeconfig", ControllerContext: "safelane-controller",
 	})
 	ex.Run = fr.run
@@ -206,9 +214,9 @@ func TestArguments_NeverContainFull(t *testing.T) {
 	// The one flag this package must never generate: `--full` jumps
 	// straight to 100% and would silently defeat every lane.
 	fr := &fakeRunner{}
-	fr.enqueue("service/podinfo-stable unchanged\nrollout.argoproj.io/podinfo unchanged\n", nil)
+	fr.enqueue("service/safelane-demo-api-stable unchanged\nrollout.argoproj.io/safelane-demo-api unchanged\n", nil)
 	fr.enqueue(`{"status":{"phase":"Progressing"}}`, nil)
-	fr.enqueue("rollout.argoproj.io/podinfo promoted\n", nil)
+	fr.enqueue("rollout.argoproj.io/safelane-demo-api promoted\n", nil)
 	ex := newTestExecutor(fr)
 
 	if _, err := ex.Apply(context.Background(), testBundle(t)); err != nil {
@@ -231,9 +239,9 @@ func TestArguments_NeverContainFull(t *testing.T) {
 
 func TestPromote_IsArgoRolloutsPromoteWithTheControllerFlags(t *testing.T) {
 	fr := &fakeRunner{}
-	fr.enqueue("rollout.argoproj.io/podinfo promoted\n", nil)
+	fr.enqueue("rollout.argoproj.io/safelane-demo-api promoted\n", nil)
 	ex := execute.New(execute.Config{
-		Namespace: "podinfo", Rollout: "podinfo",
+		Namespace: "safelane-demo-api", Rollout: "safelane-demo-api",
 		ControllerKubeconfig: "controller.kubeconfig", ControllerContext: "safelane-controller",
 	})
 	ex.Run = fr.run
@@ -242,7 +250,7 @@ func TestPromote_IsArgoRolloutsPromoteWithTheControllerFlags(t *testing.T) {
 		t.Fatalf("Promote: %v", err)
 	}
 	got := strings.Join(fr.calls[0], " ")
-	want := "argo rollouts promote podinfo -n podinfo --kubeconfig controller.kubeconfig --context safelane-controller"
+	want := "argo rollouts promote safelane-demo-api -n safelane-demo-api --kubeconfig controller.kubeconfig --context safelane-controller"
 	if got != want {
 		t.Errorf("promote args = %q, want %q", got, want)
 	}
@@ -298,9 +306,9 @@ func TestClassifyRunError_OtherFailureIsClusterUnreachable(t *testing.T) {
 
 func TestPause_IsArgoRolloutsPauseWithTheControllerFlags(t *testing.T) {
 	fr := &fakeRunner{}
-	fr.enqueue("rollout.argoproj.io/podinfo paused\n", nil)
+	fr.enqueue("rollout.argoproj.io/safelane-demo-api paused\n", nil)
 	ex := execute.New(execute.Config{
-		Namespace: "podinfo", Rollout: "podinfo",
+		Namespace: "safelane-demo-api", Rollout: "safelane-demo-api",
 		ControllerKubeconfig: "controller.kubeconfig", ControllerContext: "safelane-controller",
 	})
 	ex.Run = fr.run
@@ -309,7 +317,7 @@ func TestPause_IsArgoRolloutsPauseWithTheControllerFlags(t *testing.T) {
 		t.Fatalf("Pause: %v", err)
 	}
 	got := strings.Join(fr.calls[0], " ")
-	want := "argo rollouts pause podinfo -n podinfo --kubeconfig controller.kubeconfig --context safelane-controller"
+	want := "argo rollouts pause safelane-demo-api -n safelane-demo-api --kubeconfig controller.kubeconfig --context safelane-controller"
 	if got != want {
 		t.Errorf("pause args = %q, want %q", got, want)
 	}
@@ -329,9 +337,9 @@ func TestPause_ClassifiesAFailureLikeEveryOtherCall(t *testing.T) {
 
 func TestAbort_IsArgoRolloutsAbortWithTheControllerFlags(t *testing.T) {
 	fr := &fakeRunner{}
-	fr.enqueue("rollout.argoproj.io/podinfo aborted\n", nil)
+	fr.enqueue("rollout.argoproj.io/safelane-demo-api aborted\n", nil)
 	ex := execute.New(execute.Config{
-		Namespace: "podinfo", Rollout: "podinfo",
+		Namespace: "safelane-demo-api", Rollout: "safelane-demo-api",
 		ControllerKubeconfig: "controller.kubeconfig", ControllerContext: "safelane-controller",
 	})
 	ex.Run = fr.run
@@ -340,7 +348,7 @@ func TestAbort_IsArgoRolloutsAbortWithTheControllerFlags(t *testing.T) {
 		t.Fatalf("Abort: %v", err)
 	}
 	got := strings.Join(fr.calls[0], " ")
-	want := "argo rollouts abort podinfo -n podinfo --kubeconfig controller.kubeconfig --context safelane-controller"
+	want := "argo rollouts abort safelane-demo-api -n safelane-demo-api --kubeconfig controller.kubeconfig --context safelane-controller"
 	if got != want {
 		t.Errorf("abort args = %q, want %q", got, want)
 	}
@@ -360,8 +368,8 @@ func TestAbort_ClassifiesAFailureLikeEveryOtherCall(t *testing.T) {
 
 func TestPauseAndAbort_NeverGenerateFull(t *testing.T) {
 	fr := &fakeRunner{}
-	fr.enqueue("rollout.argoproj.io/podinfo paused\n", nil)
-	fr.enqueue("rollout.argoproj.io/podinfo aborted\n", nil)
+	fr.enqueue("rollout.argoproj.io/safelane-demo-api paused\n", nil)
+	fr.enqueue("rollout.argoproj.io/safelane-demo-api aborted\n", nil)
 	ex := newTestExecutor(fr)
 
 	if err := ex.Pause(context.Background()); err != nil {

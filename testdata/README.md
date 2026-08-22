@@ -16,11 +16,11 @@ identity, request id — is collected by SafeLane from GitHub, GHCR, and
 ## `project.yml`
 
 Operator-owned runtime configuration used by tests. A real application
-repository gets the same file from `safelane init --adapter codex`.
+repository gets the same skill from `safelane setup`.
 
 ## Release Template fixture
 
 The Release Template fixture lives with the renderer, at
-`internal/render/testdata/release-template/`. `safelane init` copies it into
+`internal/render/testdata/release-template/`. `safelane setup` writes it into
 `.safelane/release-template/` when that directory does not exist. Ahmed owns
 the real template; swapping it in is a `template_path` change in project.yml.

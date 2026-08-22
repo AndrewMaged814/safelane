@@ -7,11 +7,11 @@ description: Create the operator-owned SafeLane application configuration.
 
 The caller's checkout does not own the cluster, namespace, rollout, policy, or controller credential. Letting it infer those values turns local context into production authority.
 
-Run init from the application repository:
+Run deterministic setup from the application repository:
 
-    safelane init --app podinfo --repo AndrewMaged814/podinfo
+    safelane setup
 
-SafeLane creates operator-owned files under ~/.safelane/apps/podinfo/:
+SafeLane creates operator-owned files under ~/.safelane/apps/safelane-demo-api/:
 
     project.yml
     policy.yml

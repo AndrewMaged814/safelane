@@ -14,17 +14,17 @@ func fixtureRequest() release.ReleaseRequest {
 	return release.ReleaseRequest{
 		SchemaVersion: release.RequestSchemaVersion,
 		Target: release.Target{
-			Application: "podinfo", Environment: "production", Cluster: "safelane-demo", Namespace: "podinfo",
+			Application: "safelane-demo-api", Environment: "production", Cluster: "safelane-demo", Namespace: "safelane-demo-api",
 		},
 		Source: release.ClaimedSource{
-			Repository: "acme/podinfo", BaseBranch: "main", MergeCommitSHA: "4f0c1b9e7ac2d5386b1d9f4a5c8e2b7d3a6f0e91",
+			Repository: "acme/safelane-demo-api", BaseBranch: "main", MergeCommitSHA: "4f0c1b9e7ac2d5386b1d9f4a5c8e2b7d3a6f0e91",
 		},
 		PullRequest: release.ClaimedPullRequest{
 			PullRequestNumber: 1, Author: "andrew",
 		},
 		CI: release.ClaimedCI{Workflow: "publish", CheckName: "publish"},
 		Artifact: release.ClaimedArtifact{
-			ImageReference: "ghcr.io/acme/podinfo@sha256:" + repeatHex(),
+			ImageReference: "ghcr.io/acme/safelane-demo-api@sha256:" + repeatHex(),
 		},
 		Caller:   release.CallerIdentity{Identity: "test", Kind: release.CallerCI},
 		Metadata: release.RequestMetadata{RequestID: "req-1", SubmittedAt: time.Now()},

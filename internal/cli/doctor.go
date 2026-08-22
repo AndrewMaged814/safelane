@@ -14,6 +14,7 @@ import (
 	"github.com/AndrewMaged814/safelane/internal/execute"
 	"github.com/AndrewMaged814/safelane/internal/policy"
 	"github.com/AndrewMaged814/safelane/internal/project"
+	"github.com/AndrewMaged814/safelane/internal/release"
 	"github.com/AndrewMaged814/safelane/internal/render"
 	"github.com/AndrewMaged814/safelane/internal/verify/ghcr"
 	githubverify "github.com/AndrewMaged814/safelane/internal/verify/github"
@@ -34,7 +35,7 @@ type doctorFlags struct {
 	projectFile string
 	policyFile  string
 	templateDir string
-	githubToken string
+	jsonOut     bool
 }
 
 func parseDoctorFlags(args []string, stderr io.Writer) (doctorFlags, error) {
@@ -44,7 +45,7 @@ func parseDoctorFlags(args []string, stderr io.Writer) (doctorFlags, error) {
 	fs.StringVar(&f.projectFile, "project", "", "path to project.yml")
 	fs.StringVar(&f.policyFile, "policy", "", "path to policy.yml")
 	fs.StringVar(&f.templateDir, "template-dir", "", "path to the Release Template")
-	fs.StringVar(&f.githubToken, "github-token", os.Getenv("GITHUB_TOKEN"), "GitHub API token (default: GITHUB_TOKEN, then gh auth token)")
+	fs.BoolVar(&f.jsonOut, "json", false, "print a stable command result")
 	if err := fs.Parse(args); err != nil {
 		return f, err
 	}
@@ -190,8 +191,15 @@ func runDoctor(ctx context.Context, args []string, stdout, stderr io.Writer, roo
 		identity := tmpl.Identity()
 		pass("release template", fmt.Sprintf("%d files, digest %s", identity.FileCount, shortDigest(identity.ContentDigest)))
 	}
+	if cfg.Version >= 4 {
+		if _, err := release.ParseImageReference(cfg.Analysis.ProbeImage); err != nil {
+			failEvidence("analysis probe", "not pinned by an immutable OCI digest", "publish the probe and update analysis.probe_image")
+		} else {
+			pass("analysis probe", shortDigest(strings.SplitN(cfg.Analysis.ProbeImage, "@", 2)[1]))
+		}
+	}
 
-	githubToken := f.githubToken
+	githubToken := os.Getenv("GITHUB_TOKEN")
 	var tokenErr error
 	if githubToken == "" && deps.githubToken != nil {
 		githubToken, tokenErr = deps.githubToken(ctx)
@@ -230,22 +238,19 @@ func runDoctor(ctx context.Context, args []string, stdout, stderr io.Writer, roo
 		}
 		failExecution("kubectl", value, "install kubectl and the argo-rollouts plugin")
 		skipKubectlDependents(&report, skip, "kubectl missing")
-		fmt.Fprint(stdout, report.Render())
-		return ExitFail
+		return finishDoctor(report, f.jsonOut, stdout, stderr, ExitFail)
 	}
 	clientVersion, err := parseKubectlVersion(kubectlVersion)
 	if err != nil {
 		failExecution("kubectl", err.Error(), "install a supported kubectl and the argo-rollouts plugin")
 		skipKubectlDependents(&report, skip, "kubectl unavailable")
-		fmt.Fprint(stdout, report.Render())
-		return ExitFail
+		return finishDoctor(report, f.jsonOut, stdout, stderr, ExitFail)
 	}
 	pluginVersion, err := deps.run(ctx, []string{"argo", "rollouts", "version", "--short"}, nil)
 	if err != nil {
 		failExecution("kubectl", fmt.Sprintf("%s, argo-rollouts plugin unavailable", clientVersion), "install kubectl and the argo-rollouts plugin")
 		skipKubectlDependents(&report, skip, "kubectl unavailable")
-		fmt.Fprint(stdout, report.Render())
-		return ExitFail
+		return finishDoctor(report, f.jsonOut, stdout, stderr, ExitFail)
 	}
 	pass("kubectl", fmt.Sprintf("%s, argo-rollouts plugin %s", clientVersion, strings.TrimSpace(string(pluginVersion))))
 
@@ -259,16 +264,14 @@ func runDoctor(ctx context.Context, args []string, stdout, stderr io.Writer, roo
 		failExecution("cluster", fmt.Sprintf("%s: %v", cfg.Target.Cluster, err), "check the kubeconfig context and the cluster state")
 		skip("rollout", "skipped (cluster unreachable)")
 		skip("identity", "skipped (cluster unreachable)")
-		fmt.Fprint(stdout, report.Render())
-		return ExitFail
+		return finishDoctor(report, f.jsonOut, stdout, stderr, ExitFail)
 	}
 	pass("cluster", fmt.Sprintf("%s reachable, namespace %s exists", cfg.Target.Cluster, cfg.Target.Namespace))
 	status, err := ex.GetStatus(ctx)
 	if err != nil {
 		failExecution("rollout", err.Error(), "check that the configured Rollout exists")
 		skip("identity", "skipped (rollout unavailable)")
-		fmt.Fprint(stdout, report.Render())
-		return ExitFail
+		return finishDoctor(report, f.jsonOut, stdout, stderr, ExitFail)
 	}
 	pass("rollout", fmt.Sprintf("%s found, phase %s, image %s", cfg.Target.Rollout, status.Phase, shortDigest(status.ImageDigest)))
 
@@ -278,8 +281,7 @@ func runDoctor(ctx context.Context, args []string, stdout, stderr io.Writer, roo
 	if err != nil {
 		failExecution("identity", err.Error(), "check the configured Kubernetes identities and RBAC")
 		skip("credential separation", "skipped (identity unavailable)")
-		fmt.Fprint(stdout, report.Render())
-		return ExitFail
+		return finishDoctor(report, f.jsonOut, stdout, stderr, ExitFail)
 	}
 	controllerRow := doctorRow{
 		mark: "✓", label: "controller identity",
@@ -318,11 +320,31 @@ func runDoctor(ctx context.Context, args []string, stdout, stderr io.Writer, roo
 		pass("credential separation", "no privileged context in the agent's default kubeconfig")
 	}
 
-	fmt.Fprint(stdout, report.Render())
 	if report.failed > 0 {
-		return ExitFail
+		return finishDoctor(report, f.jsonOut, stdout, stderr, ExitFail)
 	}
-	return ExitOK
+	return finishDoctor(report, f.jsonOut, stdout, stderr, ExitOK)
+}
+
+func finishDoctor(report doctorReport, jsonOut bool, stdout, stderr io.Writer, code int) int {
+	if !jsonOut {
+		fmt.Fprint(stdout, report.Render())
+		return code
+	}
+	rows := make([]map[string]any, 0, len(report.rows))
+	for _, row := range report.rows {
+		rows = append(rows, map[string]any{"status": row.mark, "check": row.label, "value": row.value, "details": row.continuations, "remedy": row.remedy})
+	}
+	state := "ready"
+	next := "safelane release plan --pr <number> --json"
+	if code != ExitOK {
+		state, next = "not_ready", "safelane doctor --json"
+	}
+	envelope := ResultEnvelope{SchemaVersion: "safelane.command.result/v1", Command: "doctor", OK: code == ExitOK, State: state, NextCommand: next, Warnings: []string{}, Result: map[string]any{"checks": rows, "failed": report.failed, "unavailable": report.unavailable, "evidence_ready": report.evidenceReady, "execution_ready": report.executionReady}}
+	if err := jsonEncode(stdout, envelope); err != nil {
+		return writeResultError(stderr, "doctor", err)
+	}
+	return code
 }
 
 func readiness(ready bool) string {
