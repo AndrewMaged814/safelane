@@ -132,9 +132,9 @@ scrapeConfigs:
         action: keep
         regex: argo-rollouts-metrics
 
-  # podinfo's stable/canary Services, discovered as ENDPOINTS rather than pods.
+  # The app's stable/canary Services, discovered as ENDPOINTS rather than pods.
   # The AnalysisTemplate in hack/seed-baseline.sh scopes its query with
-  # service="podinfo-canary", and that label can only come from endpoint
+  # service="<app>-canary", and that label can only come from endpoint
   # discovery -- pod-role discovery has no service name to offer. Without this
   # job the canary query is empty every time, which the successCondition
   # (len(result) > 0 && ...) correctly treats as a failure, so the rollout
@@ -144,11 +144,11 @@ scrapeConfigs:
     kubernetes_sd_configs:
       - role: endpoints
         namespaces:
-          names: [podinfo]
+          names: [${NAMESPACE}]
     relabel_configs:
       - source_labels: [__meta_kubernetes_service_name]
         action: keep
-        regex: podinfo-(stable|canary)
+        regex: ${STABLE_SERVICE}|${CANARY_SERVICE}
       - source_labels: [__meta_kubernetes_service_name]
         target_label: service
       - source_labels: [__meta_kubernetes_namespace]

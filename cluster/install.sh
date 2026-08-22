@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # One command: an empty-ish minikube to a cluster SafeLane can release into.
 #
-#   ./setup/install.sh
+#   ./cluster/install.sh                       # safelane-demo-api (default)
+#   SAFELANE_APP=<name> ./cluster/install.sh   # any app under cluster/apps/
 #
 # Idempotent -- safe to re-run. Each stage is also runnable on its own if you
 # need to redo just one part.
@@ -12,7 +13,7 @@
 #   monitoring/prometheus    the analysis provider, 5s scrape, endpoint-role
 #                            discovery so the `service` label exists
 #   monitoring/grafana       the canary dashboard, anonymous read
-#   podinfo/                 the demo app at a healthy baseline, plus the two
+#   <app>/                   the demo app at a healthy baseline, plus the two
 #                            SafeLane identities and a load generator
 #
 # The identity stage rewrites your default kubeconfig context so the agent runs
@@ -20,8 +21,8 @@
 # preserved as `safelane-admin` and the file is backed up first.
 set -euo pipefail
 
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-export PATH="${HOME}/.local/bin:${PATH}"
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
+HERE="${CLUSTER_DIR}"
 
 stage() { printf '\n\033[1;36m######## %s ########\033[0m\n' "$1"; }
 
@@ -38,36 +39,39 @@ require_admin() {
     echo "Switch to one (kubectl config use-context safelane-admin) and retry." >&2
     exit 1
   fi
-  echo "running as $(kubectl config current-context)"
+  echo "running as $(kubectl config current-context), app ${SAFELANE_APP}"
 }
 
 require_admin
 
-stage "1/5  cluster, ingress, Argo Rollouts"
+stage "1/6  cluster, ingress, Argo Rollouts"
 bash "${HERE}/10-cluster.sh"
 
-stage "2/5  Prometheus and Grafana"
+stage "2/6  Prometheus and Grafana"
 bash "${HERE}/20-monitoring.sh"
 
-stage "3/5  podinfo baseline"
+stage "3/6  ${SAFELANE_APP} baseline"
 bash "${HERE}/30-baseline.sh"
 
-stage "4/5  load generator"
+stage "4/6  load generator"
 bash "${HERE}/40-loadgen.sh"
 
 # Last on purpose: this stage drops the default kubeconfig context to an
 # identity that may only read rollouts. Anything that still needs to create
 # objects has to run before it.
-stage "5/5  SafeLane identities"
+stage "5/6  SafeLane identities"
 bash "${HERE}/50-identities.sh"
 
-cat <<'DONE'
+stage "6/6  analysis probe"
+bash "${HERE}/60-probe.sh"
 
-######## setup complete ########
+cat <<DONE
+
+######## cluster ready ########
 
 Verify:
-  kubectl --context safelane-admin get rollout podinfo -n podinfo
-  kubectl auth can-i patch rollouts --context safelane-caller -n podinfo   # no
+  kubectl --context safelane-admin get rollout ${ROLLOUT} -n ${NAMESPACE}
+  kubectl auth can-i patch rollouts -n ${NAMESPACE}   # no
 
 Watch:
   kubectl argo rollouts dashboard        http://localhost:3100
@@ -75,7 +79,7 @@ Watch:
                                          http://localhost:3000/d/safelane-rollout
 
 Between rehearsals:
-  ./setup/reset.sh
+  ./cluster/reset.sh
 
 Your default kubectl context is now safelane-caller, which can read rollouts
 and nothing else. For ordinary cluster work use --context safelane-admin.

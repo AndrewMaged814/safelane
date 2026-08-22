@@ -7,9 +7,9 @@
 # dirties.
 set -euo pipefail
 
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-export PATH="${HOME}/.local/bin:${PATH}"
-APP="${SAFELANE_APP:-podinfo}"
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
+HERE="${CLUSTER_DIR}"
+APP="${SAFELANE_APP}"
 RECORDS="${SAFELANE_HOME:-${HOME}/.safelane}/apps/${APP}/releases"
 
 # Seeding needs write access; the caller identity deliberately has none.

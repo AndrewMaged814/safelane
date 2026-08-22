@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# Shared app selection. Every stage sources this, so one variable switches the
+# whole folder between applications:
+#
+#   SAFELANE_APP=safelane-demo-api ./cluster/install.sh
+#
+# Per-app data lives in cluster/apps/<app>/ -- app.env plus the two manifests.
+# The scripts stay generic; only the data differs.
+CLUSTER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export PATH="${HOME}/.local/bin:${PATH}"
+
+SAFELANE_APP="${SAFELANE_APP:-safelane-demo-api}"
+APP_DIR="${CLUSTER_DIR}/apps/${SAFELANE_APP}"
+if [ ! -f "${APP_DIR}/app.env" ]; then
+  echo "unknown app '${SAFELANE_APP}'. Available: $(ls "${CLUSTER_DIR}/apps" | tr '\n' ' ')" >&2
+  exit 2
+fi
+# shellcheck disable=SC1090
+. "${APP_DIR}/app.env"
+export SAFELANE_APP APP_DIR NAMESPACE ROLLOUT STABLE_SERVICE CANARY_SERVICE
+
+# resolve_digest <repo> <tag> -- the immutable digest for a GHCR tag.
+resolve_digest() {
+  local repo="$1" tag="$2" token
+  token="$(curl -fsSL "https://ghcr.io/token?scope=repository:${repo}:pull" \
+    | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')"
+  curl -fsSLI -H "Authorization: Bearer ${token}" \
+    -H "Accept: application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.list.v2+json,application/vnd.oci.image.manifest.v1+json,application/vnd.docker.distribution.manifest.v2+json" \
+    "https://ghcr.io/v2/${repo}/manifests/${tag}" \
+    | grep -i '^docker-content-digest' | tr -d '\r' | awk '{print $2}'
+}
+
+# render <file> -- expand only the variables the manifests use, so a $ in the
+# YAML itself survives.
+render() {
+  # `:-` throughout: apps that resolve their digest at run time have no
+  # BASELINE_IMAGE yet when the monitoring stage renders, and `set -u` would
+  # otherwise kill render and hand kubectl an empty document.
+  NAMESPACE="${NAMESPACE:-}" ROLLOUT="${ROLLOUT:-}" BASELINE_IMAGE="${BASELINE_IMAGE:-}" \
+  BASELINE_DIGEST="${BASELINE_DIGEST:-}" STABLE_SERVICE="${STABLE_SERVICE:-}" \
+  CANARY_SERVICE="${CANARY_SERVICE:-}" \
+    envsubst '$NAMESPACE $ROLLOUT $BASELINE_IMAGE $BASELINE_DIGEST $STABLE_SERVICE $CANARY_SERVICE' < "$1"
+}
