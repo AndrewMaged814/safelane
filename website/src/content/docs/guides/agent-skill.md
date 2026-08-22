@@ -11,9 +11,11 @@ The normal installer places it under both `~/.claude/skills/safelane/` and `~/.a
 
 When `/safelane` is active, setup is agent-shaped by default:
 
-1. `setup inspect --json` returns compact repository evidence and a complete validator-ready `proposal`.
-2. The active agent reads only relevant repository files and tailors project-specific checks, risk policy, and runtime assertions.
-3. SafeLane validates and applies the proposal after one approval, then `doctor` verifies readiness.
+1. `setup inspect --json` runs once and returns compact repository evidence plus a small validator-ready `proposal`.
+2. The active agent reads only relevant repository files and tailors evidence-backed risk paths and runtime assertions.
+3. SafeLane compiles required checks, policy, and Release Templates after one approval; `doctor` verifies that the stored target contract matches the live Rollout and Services.
+
+The agent never authors policy YAML or Kubernetes manifests. The setup path needs no schema search, CLI-help discovery, shell JSON processor, or generated script.
 
 For a release, the skill requires one exact merged PR, explains the frozen Safety Contract once, runs `release run` to a terminal outcome, and reports `release proof`. Argo remains responsible for analysis failure, abort, and rollback.
 

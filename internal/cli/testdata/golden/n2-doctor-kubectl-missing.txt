@@ -1,6 +1,6 @@
   ✓ operator config    ~/.safelane/apps/safelane-demo-api/project.yml
   ✓ release policy     ~/.safelane/apps/safelane-demo-api/policy.yml  (version 2, 3 lanes)
-  ✓ release template   5 files, digest sha256:<DIGEST>
+  ✓ release template   4 files, digest sha256:<DIGEST>
   ✓ analysis probe     sha256:<DIGEST>
   ✓ github             api.github.com reachable
   ✓ ghcr               ghcr.io reachable

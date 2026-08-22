@@ -73,17 +73,32 @@ type TemplateFile struct {
 	Content string `json:"content"`
 }
 
-// Proposal is the model's structured setup recommendation.
+// RiskPath is one bounded semantic decision the active agent may make. SafeLane
+// compiles it into the operator-owned policy; the agent never authors policy YAML.
+type RiskPath struct {
+	Glob    string `json:"glob"`
+	Minimum string `json:"minimum"`
+	Reason  string `json:"reason"`
+}
+
+// Proposal is the model's bounded setup recommendation. Infrastructure,
+// mandatory evidence, lanes, required checks, and model configuration are not
+// part of this contract; SafeLane compiles those deterministically.
 type Proposal struct {
 	SchemaVersion         string             `json:"schema_version"`
 	InspectionFingerprint string             `json:"inspection_fingerprint"`
 	Summary               string             `json:"summary"`
-	PolicyHighlights      []string           `json:"policy_highlights"`
-	TemplateHighlights    []string           `json:"template_highlights"`
-	RequiredChecks        []string           `json:"required_checks"`
+	RiskPaths             []RiskPath         `json:"risk_paths"`
 	RuntimeAssertions     []RuntimeAssertion `json:"runtime_assertions"`
-	PolicyYAML            string             `json:"policy_yaml"`
-	TemplateFiles         []TemplateFile     `json:"template_files"`
+}
+
+// CompiledProposal is the operator-owned configuration produced from a valid
+// bounded Proposal and the exact repository Snapshot it cites.
+type CompiledProposal struct {
+	RequiredChecks    []string
+	RuntimeAssertions []RuntimeAssertion
+	PolicyYAML        string
+	TemplateFiles     []TemplateFile
 }
 
 // Runner is the seam for testing and for replacing the agent CLI later.
@@ -276,33 +291,30 @@ func discoverImageRepository(repo string, files []File) string {
 // ConservativeProposal is the no-agent fallback. It is repository-shaped,
 // intentionally guarded, and ready for automatic phase-one activation.
 func ConservativeProposal(s Snapshot) Proposal {
-	checks := append([]string(nil), s.RequiredChecks...)
-	if len(checks) == 0 {
-		checks = []string{"build-and-push"}
+	paths := []RiskPath{{Glob: "src/**", Minimum: "medium", Reason: "Runtime code changes require the standard lane."}}
+	seen := map[string]bool{"src/**": true}
+	for _, file := range s.Files {
+		if file.Path == "Dockerfile" && !seen["Dockerfile"] {
+			paths = append(paths, RiskPath{Glob: "Dockerfile", Minimum: "high", Reason: "Container construction changes require the guarded lane."})
+			seen["Dockerfile"] = true
+		}
+		if strings.HasPrefix(file.Path, ".github/workflows/") && !seen[".github/workflows/**"] {
+			paths = append(paths, RiskPath{Glob: ".github/workflows/**", Minimum: "high", Reason: "Release evidence workflow changes require the guarded lane."})
+			seen[".github/workflows/**"] = true
+		}
 	}
 	return Proposal{
-		SchemaVersion:         "safelane.setup.proposal/v1",
+		SchemaVersion:         "safelane.setup.proposal/v2",
 		InspectionFingerprint: Fingerprint(s),
 		Summary:               "Generated a conservative proposal from repository facts.",
-		PolicyHighlights: []string{
-			"Default lane is guarded; low, medium, and high risk map to fast, standard, and guarded.",
-			"Runtime code and container changes receive a medium floor; workflow changes receive a high floor.",
-			"Mandatory evidence remains the merged commit, passing publish workflow, and immutable GHCR digest.",
-		},
-		TemplateHighlights: []string{
-			"Four operator-owned templates define stable and canary Services, a black-box AnalysisTemplate, and the Rollout.",
-			"Argo runs the external probe against canary-only /api/demo and /version before every progression gate.",
-		},
-		RequiredChecks:    checks,
-		RuntimeAssertions: append([]RuntimeAssertion(nil), s.RuntimeAssertions...),
-		PolicyYAML:        conservativePolicy(s),
-		TemplateFiles:     conservativeTemplate(s),
+		RiskPaths:             paths,
+		RuntimeAssertions:     append([]RuntimeAssertion(nil), s.RuntimeAssertions...),
 	}
 }
 
 // ValidateProposal checks the agent's output before activation.
 func ValidateProposal(p Proposal, s Snapshot) error {
-	if p.SchemaVersion != "safelane.setup.proposal/v1" {
+	if p.SchemaVersion != "safelane.setup.proposal/v2" {
 		return fmt.Errorf("setup: unsupported proposal schema %q", p.SchemaVersion)
 	}
 	if p.InspectionFingerprint == "" || p.InspectionFingerprint != Fingerprint(s) {
@@ -314,18 +326,25 @@ func ValidateProposal(p Proposal, s Snapshot) error {
 	if strings.TrimSpace(p.Summary) == "" {
 		return errors.New("setup: recommendation has no summary")
 	}
-	if err := validateHighlights("policy_highlights", p.PolicyHighlights); err != nil {
-		return err
+	if len(p.RiskPaths) == 0 || len(p.RiskPaths) > 20 {
+		return errors.New("setup: recommendation must contain 1-20 risk paths")
 	}
-	if err := validateHighlights("template_highlights", p.TemplateHighlights); err != nil {
-		return err
-	}
-	if len(p.RequiredChecks) == 0 {
-		return errors.New("setup: recommendation has no required CI checks")
-	}
-	for _, check := range p.RequiredChecks {
-		if strings.TrimSpace(check) == "" || strings.ContainsAny(check, "\r\n") {
-			return fmt.Errorf("setup: recommendation has an unsafe required check name")
+	seenPaths := map[string]bool{}
+	for _, rule := range p.RiskPaths {
+		clean := filepath.ToSlash(filepath.Clean(rule.Glob))
+		if clean != rule.Glob || clean == "." || strings.HasPrefix(clean, "../") || strings.Contains(clean, "/../") || strings.ContainsAny(rule.Glob, "\r\n") {
+			return fmt.Errorf("setup: recommendation has an unsafe risk path %q", rule.Glob)
+		}
+		if seenPaths[rule.Glob] {
+			return fmt.Errorf("setup: risk path %q is duplicated", rule.Glob)
+		}
+		seenPaths[rule.Glob] = true
+		if rule.Minimum != "low" && rule.Minimum != "medium" && rule.Minimum != "high" {
+			return fmt.Errorf("setup: risk path %q has invalid minimum %q", rule.Glob, rule.Minimum)
+		}
+		reason := strings.TrimSpace(rule.Reason)
+		if reason == "" || len(reason) > 280 || strings.ContainsAny(reason, "\r\n") {
+			return fmt.Errorf("setup: risk path %q requires a one-line reason", rule.Glob)
 		}
 	}
 	if len(p.RuntimeAssertions) == 0 {
@@ -348,33 +367,44 @@ func ValidateProposal(p Proposal, s Snapshot) error {
 			return fmt.Errorf("setup: critical surface %q has no runtime assertion", surface)
 		}
 	}
-	if !strings.Contains(p.PolicyYAML, "merged_commit_on_default_branch") ||
-		!strings.Contains(p.PolicyYAML, "passing_publish_workflow") ||
-		!strings.Contains(p.PolicyYAML, "immutable_ghcr_digest") {
-		return errors.New("setup: recommendation removed mandatory evidence")
+	return nil
+}
+
+// CompileProposal turns bounded semantic decisions into the complete operator
+// configuration. This is the only setup path that authors policy or manifests.
+func CompileProposal(p Proposal, s Snapshot) (CompiledProposal, error) {
+	if err := ValidateProposal(p, s); err != nil {
+		return CompiledProposal{}, err
 	}
-	if err := validatePolicyYAML(p.PolicyYAML); err != nil {
-		return fmt.Errorf("setup: invalid recommended policy: %w", err)
+	checks := append([]string(nil), s.RequiredChecks...)
+	if len(checks) == 0 {
+		checks = []string{"build-and-push"}
 	}
-	if len(p.TemplateFiles) == 0 {
-		return errors.New("setup: recommendation has no Release Template files")
+	compiled := CompiledProposal{
+		RequiredChecks:    checks,
+		RuntimeAssertions: append([]RuntimeAssertion(nil), p.RuntimeAssertions...),
+		PolicyYAML:        conservativePolicy(p.RiskPaths),
+		TemplateFiles:     conservativeTemplate(s),
 	}
-	for _, file := range p.TemplateFiles {
+	if err := validatePolicyYAML(compiled.PolicyYAML); err != nil {
+		return CompiledProposal{}, fmt.Errorf("setup: SafeLane compiled an invalid policy: %w", err)
+	}
+	for _, file := range compiled.TemplateFiles {
 		if !safeTemplatePath(file.Path) || strings.TrimSpace(file.Content) == "" {
-			return fmt.Errorf("setup: invalid Release Template file %q", file.Path)
+			return CompiledProposal{}, fmt.Errorf("setup: SafeLane compiled an invalid Release Template file %q", file.Path)
 		}
 	}
 	files := fstest.MapFS{}
-	for _, file := range p.TemplateFiles {
+	for _, file := range compiled.TemplateFiles {
 		files[file.Path] = &fstest.MapFile{Data: []byte(file.Content)}
 	}
 	if _, err := render.LoadFS(files); err != nil {
-		return fmt.Errorf("setup: invalid Release Template: %w", err)
+		return CompiledProposal{}, fmt.Errorf("setup: SafeLane compiled an invalid Release Template: %w", err)
 	}
-	if err := validateMandatoryAnalysis(p.TemplateFiles); err != nil {
-		return err
+	if err := validateMandatoryAnalysis(compiled.TemplateFiles); err != nil {
+		return CompiledProposal{}, err
 	}
-	return nil
+	return compiled, nil
 }
 
 func validateMandatoryAnalysis(files []TemplateFile) error {
@@ -393,19 +423,6 @@ func validateMandatoryAnalysis(files []TemplateFile) error {
 	} {
 		if !strings.Contains(content, required) {
 			return fmt.Errorf("setup: Release Template is missing mandatory canary analysis element %q", required)
-		}
-	}
-	return nil
-}
-
-func validateHighlights(name string, highlights []string) error {
-	if len(highlights) == 0 || len(highlights) > 6 {
-		return fmt.Errorf("setup: recommendation must contain 1-6 %s", name)
-	}
-	for _, highlight := range highlights {
-		text := strings.TrimSpace(highlight)
-		if text == "" || strings.ContainsAny(text, "\r\n") || len(text) > 280 {
-			return fmt.Errorf("setup: recommendation has an invalid %s item", name)
 		}
 	}
 	return nil
@@ -443,16 +460,10 @@ func validatePolicyYAML(raw string) error {
 	return nil
 }
 
-func conservativePolicy(s Snapshot) string {
-	paths := []string{"    - { glob: \"src/**\", minimum: medium }"}
-	for _, file := range s.Files {
-		if file.Path == "Dockerfile" {
-			paths = append(paths, "    - { glob: \"Dockerfile\", minimum: high }")
-		}
-		if strings.HasPrefix(file.Path, ".github/workflows/") {
-			paths = append(paths, "    - { glob: \".github/workflows/**\", minimum: high }")
-			break
-		}
+func conservativePolicy(rules []RiskPath) string {
+	paths := make([]string, 0, len(rules))
+	for _, rule := range rules {
+		paths = append(paths, fmt.Sprintf("    - { glob: %q, minimum: %s }", rule.Glob, rule.Minimum))
 	}
 	return fmt.Sprintf(`version: 2
 

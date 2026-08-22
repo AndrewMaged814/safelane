@@ -63,7 +63,7 @@ safelane setup apply --proposal C:\absolute\proposal.json --yes
 safelane doctor
 ```
 
-The proposal is rejected atomically when its inspection fingerprint is stale, its assertions are missing, or it targets unsafe/unknown fields. Setup writes operator configuration outside the application repository.
+The proposal contains only evidence-backed risk-path floors and runtime assertions. SafeLane deterministically owns required checks, mandatory evidence, lanes, model configuration, policy YAML, and Release Templates. It rejects stale fingerprints, missing assertions, unsafe risk paths, and unknown fields atomically, then writes operator configuration outside the application repository.
 
 ## Install
 

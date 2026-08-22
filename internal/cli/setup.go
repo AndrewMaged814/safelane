@@ -66,11 +66,12 @@ func runDeterministicSetup(_ context.Context, args []string, stdin io.Reader, st
 		return writeResultError(stderr, "setup", err)
 	}
 	proposal := setupengine.ConservativeProposal(snapshot)
-	if err := setupengine.ValidateProposal(proposal, snapshot); err != nil {
+	compiled, err := setupengine.CompileProposal(proposal, snapshot)
+	if err != nil {
 		return writeResultError(stderr, "setup", err)
 	}
 	if !f.jsonOut {
-		renderSetupPreview(stdout, snapshot, proposal)
+		renderSetupPreview(stdout, snapshot, proposal, compiled)
 	}
 	if !f.yes && !confirmApply(stdin, stderr) {
 		return ExitDecision
@@ -82,7 +83,7 @@ func runDeterministicSetup(_ context.Context, args []string, stdin io.Reader, st
 	if err := ensureSetupTargetAbsent(loc); err != nil {
 		return writeResultError(stderr, "setup", err)
 	}
-	if err := activateSetup(loc, snapshot, proposal); err != nil {
+	if err := activateSetup(loc, snapshot, compiled); err != nil {
 		return writeResultError(stderr, "setup", err)
 	}
 	next := "safelane doctor"
@@ -155,11 +156,12 @@ func runSetupApply(_ context.Context, args []string, stdin io.Reader, stdout, st
 	if err != nil {
 		return writeResultError(stderr, "setup apply", err)
 	}
-	if err := setupengine.ValidateProposal(proposal, snapshot); err != nil {
+	compiled, err := setupengine.CompileProposal(proposal, snapshot)
+	if err != nil {
 		return writeResultError(stderr, "setup apply", err)
 	}
 	if !*jsonOut {
-		renderSetupPreview(stdout, snapshot, proposal)
+		renderSetupPreview(stdout, snapshot, proposal, compiled)
 	}
 	if !*yes && !confirmApply(stdin, stderr) {
 		return ExitDecision
@@ -171,7 +173,7 @@ func runSetupApply(_ context.Context, args []string, stdin io.Reader, stdout, st
 	if err := ensureSetupTargetAbsent(loc); err != nil {
 		return writeResultError(stderr, "setup apply", err)
 	}
-	if err := activateSetup(loc, snapshot, proposal); err != nil {
+	if err := activateSetup(loc, snapshot, compiled); err != nil {
 		return writeResultError(stderr, "setup apply", err)
 	}
 	next := "safelane doctor"
@@ -208,18 +210,18 @@ func confirmApply(stdin io.Reader, stderr io.Writer) bool {
 	return strings.TrimSpace(line) == "APPLY"
 }
 
-func renderSetupPreview(w io.Writer, snapshot setupengine.Snapshot, proposal setupengine.Proposal) {
-	fmt.Fprintf(w, "SafeLane setup\n\nRepository: %s\nApplication: %s\nImage: %s\nRequired CI: %s\nAssertions:\n", snapshot.Repository, snapshot.Application, snapshot.ImageRepository, strings.Join(proposal.RequiredChecks, ", "))
-	for _, assertion := range proposal.RuntimeAssertions {
+func renderSetupPreview(w io.Writer, snapshot setupengine.Snapshot, proposal setupengine.Proposal, compiled setupengine.CompiledProposal) {
+	fmt.Fprintf(w, "SafeLane setup\n\nRepository: %s\nApplication: %s\nImage: %s\nRequired CI: %s\nAssertions:\n", snapshot.Repository, snapshot.Application, snapshot.ImageRepository, strings.Join(compiled.RequiredChecks, ", "))
+	for _, assertion := range compiled.RuntimeAssertions {
 		fmt.Fprintf(w, "  - %s: %s (%s)\n", assertion.Surface, assertion.Expectation, assertion.Covers)
 	}
-	fmt.Fprintln(w, "Policy:")
-	for _, item := range proposal.PolicyHighlights {
-		fmt.Fprintf(w, "  - %s\n", item)
+	fmt.Fprintln(w, "Risk floors:")
+	for _, rule := range proposal.RiskPaths {
+		fmt.Fprintf(w, "  - %s → %s: %s\n", rule.Glob, rule.Minimum, rule.Reason)
 	}
 }
 
-func activateSetup(loc project.Locations, snapshot setupengine.Snapshot, proposal setupengine.Proposal) error {
+func activateSetup(loc project.Locations, snapshot setupengine.Snapshot, compiled setupengine.CompiledProposal) error {
 	appsDir := filepath.Dir(loc.AppDir)
 	if err := os.MkdirAll(appsDir, 0o755); err != nil {
 		return err
@@ -230,21 +232,21 @@ func activateSetup(loc project.Locations, snapshot setupengine.Snapshot, proposa
 	}
 	defer os.RemoveAll(stageDir)
 	stage := project.Locations{Home: loc.Home, AppDir: stageDir, ProjectFile: filepath.Join(stageDir, "project.yml"), PolicyFile: filepath.Join(stageDir, "policy.yml"), TemplateDir: filepath.Join(stageDir, "release-template"), ReleasesDir: filepath.Join(stageDir, "releases")}
-	assertions := make([]project.RuntimeAssertion, 0, len(proposal.RuntimeAssertions))
-	for _, assertion := range proposal.RuntimeAssertions {
+	assertions := make([]project.RuntimeAssertion, 0, len(compiled.RuntimeAssertions))
+	for _, assertion := range compiled.RuntimeAssertions {
 		assertions = append(assertions, project.RuntimeAssertion{ID: assertion.ID, Surface: assertion.Surface, Expectation: assertion.Expectation, Covers: assertion.Covers})
 	}
-	projectYAML := project.YAML(snapshot.Application, snapshot.Repository, snapshot.DefaultBranch, snapshot.ImageRepository, proposal.RequiredChecks, assertions)
+	projectYAML := project.YAML(snapshot.Application, snapshot.Repository, snapshot.DefaultBranch, snapshot.ImageRepository, compiled.RequiredChecks, assertions)
 	if _, err := writeInitFile(stage.ProjectFile, projectYAML); err != nil {
 		return err
 	}
-	if _, err := writeInitFile(stage.PolicyFile, []byte(proposal.PolicyYAML)); err != nil {
+	if _, err := writeInitFile(stage.PolicyFile, []byte(compiled.PolicyYAML)); err != nil {
 		return err
 	}
 	if err := os.MkdirAll(stage.TemplateDir, 0o755); err != nil {
 		return err
 	}
-	for _, file := range proposal.TemplateFiles {
+	for _, file := range compiled.TemplateFiles {
 		if _, err := writeInitFile(filepath.Join(stage.TemplateDir, filepath.FromSlash(file.Path)), []byte(file.Content)); err != nil {
 			return err
 		}

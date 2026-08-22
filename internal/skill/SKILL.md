@@ -19,19 +19,21 @@ manual, conservative, or non-agent setup:
 
 For agent-shaped setup:
 
-1. Run `safelane setup inspect --json`.
-2. Use the returned `proposal` as the complete proposal contract and baseline.
-   Do not search SafeLane's source or binary for a schema. Preserve its
-   `schema_version`, `inspection_fingerprint`, mandatory evidence, external
-   probe, and templates unless repository evidence requires a specific change.
+1. Run `safelane setup inspect --json` exactly once and keep that result.
+2. Use its returned `proposal` as the complete bounded decision contract.
+   SafeLane owns required checks, mandatory evidence, lanes, model configuration,
+   policy YAML, and Release Templates. The proposal contains only `summary`,
+   cited `risk_paths`, and concrete `runtime_assertions` plus its schema and
+   inspection fingerprint.
 3. Treat the returned file list as compact evidence, not source text. Read only
    repository files relevant to the reported checks, critical surfaces, Kubernetes
    resources, and uncertainties using this active session's normal file tools.
-4. Tailor only project-specific judgments supported by those files: required
-   static checks, risk-path floors, and concrete runtime assertions. The baseline
-   is already valid, so leave unrelated boilerplate unchanged.
-5. Write the proposal object—not the entire inspection—to an absolute temporary
-   path. Explain the project-specific choices once, then ask approval.
+4. Tailor only evidence-backed risk-path floors and runtime assertions. Keep each
+   risk-path reason specific enough for the user to verify.
+5. Write the small proposal object to an absolute temporary path with the active
+   session's native file-writing tool. The workflow requires no CLI-help lookup,
+   schema discovery, shell JSON processor, or generated script. Explain the
+   project-specific decisions once, then ask approval.
 6. After approval, run `safelane setup apply --proposal <absolute-path> --yes --json`.
 7. For the first-party demo, run `safelane demo up --yes --json` so the probe
    digest and private credentials are bound. Then run `safelane doctor`.

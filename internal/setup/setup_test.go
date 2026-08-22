@@ -55,7 +55,7 @@ func TestSnapshotJSONContainsCompactFileEvidenceNotSourceContent(t *testing.T) {
 	}
 }
 
-func TestDiscoverIncludesAReadyValidAgentProposal(t *testing.T) {
+func TestDiscoverIncludesAReadyValidBoundedAgentProposal(t *testing.T) {
 	root := t.TempDir()
 	runGit(t, root, "init")
 	runGit(t, root, "remote", "add", "origin", "https://github.com/AndrewMaged814/safelane-demo-api.git")
@@ -74,6 +74,18 @@ func TestDiscoverIncludesAReadyValidAgentProposal(t *testing.T) {
 	}
 	if len(snapshot.Proposal.RuntimeAssertions) != 4 {
 		t.Fatalf("proposal runtime assertions = %d, want 4", len(snapshot.Proposal.RuntimeAssertions))
+	}
+	raw, err := json.Marshal(snapshot.Proposal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{"policy_yaml", "template_files", "required_checks", "template_highlights"} {
+		if strings.Contains(string(raw), forbidden) {
+			t.Fatalf("bounded proposal exposed operator-owned field %q: %s", forbidden, raw)
+		}
+	}
+	if len(raw) > 2500 {
+		t.Fatalf("bounded proposal is %d bytes, want at most 2500", len(raw))
 	}
 	if err := ValidateProposal(*snapshot.Proposal, snapshot); err != nil {
 		t.Fatalf("inspection proposal is not directly applicable: %v", err)
@@ -109,44 +121,44 @@ func TestConservativeProposalIsProjectShapedAndValid(t *testing.T) {
 	if err := ValidateProposal(proposal, snapshot); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(proposal.PolicyYAML, `glob: "Dockerfile"`) {
+	compiled, err := CompileProposal(proposal, snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(compiled.PolicyYAML, `glob: "Dockerfile"`) {
 		t.Fatal("fallback policy did not use repository-shaped Dockerfile rule")
 	}
-	if len(proposal.PolicyHighlights) == 0 || len(proposal.TemplateHighlights) == 0 {
-		t.Fatal("fallback proposal did not include structured recommendation highlights")
+	if len(proposal.RiskPaths) == 0 {
+		t.Fatal("fallback proposal did not include bounded risk-path decisions")
 	}
-	if len(proposal.TemplateFiles) != 4 {
-		t.Fatalf("fallback template files = %d, want two services, analysis, and rollout", len(proposal.TemplateFiles))
-	}
-}
-
-func TestValidateProposalRejectsMultiDocumentTemplateFile(t *testing.T) {
-	snapshot := validSnapshot()
-	proposal := ConservativeProposal(snapshot)
-	proposal.TemplateFiles[0].Content += "---\napiVersion: v1\nkind: Service\nmetadata:\n  name: second\n"
-
-	if err := ValidateProposal(proposal, snapshot); err == nil || !strings.Contains(err.Error(), "multi_document_template") {
-		t.Fatalf("error = %v, want multi_document_template", err)
+	if len(compiled.TemplateFiles) != 4 {
+		t.Fatalf("compiled template files = %d, want two services, analysis, and rollout", len(compiled.TemplateFiles))
 	}
 }
 
-func TestValidateProposalRejectsTemplateThatDropsExternalCanaryProbe(t *testing.T) {
+func TestCompileProposalKeepsInfrastructureOperatorOwned(t *testing.T) {
 	snapshot := validSnapshot()
+	snapshot.Files = append(snapshot.Files, File{Path: "infra/bootstrap.ps1", Content: "selector:\n  app: stale-repository-contract\ntargetPort: 8080"})
 	proposal := ConservativeProposal(snapshot)
-	for i := range proposal.TemplateFiles {
-		proposal.TemplateFiles[i].Content = strings.ReplaceAll(proposal.TemplateFiles[i].Content, "{{ .ProbeImage }}", "busybox:latest")
+	compiled, err := CompileProposal(proposal, snapshot)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if err := ValidateProposal(proposal, snapshot); err == nil || !strings.Contains(err.Error(), "ProbeImage") {
-		t.Fatalf("error = %v, want mandatory ProbeImage rejection", err)
+	var all strings.Builder
+	for _, file := range compiled.TemplateFiles {
+		all.WriteString(file.Content)
+	}
+	if strings.Contains(all.String(), "stale-repository-contract") || !strings.Contains(all.String(), "app.kubernetes.io/name: app") {
+		t.Fatalf("compiled infrastructure followed repository prose instead of the operator contract:\n%s", all.String())
 	}
 }
 
-func TestValidateProposalRejectsMissingRequiredChecks(t *testing.T) {
+func TestValidateProposalRejectsInvalidRiskPath(t *testing.T) {
 	snapshot := validSnapshot()
 	proposal := ConservativeProposal(snapshot)
-	proposal.RequiredChecks = nil
-	if err := ValidateProposal(proposal, snapshot); err == nil || !strings.Contains(err.Error(), "required CI checks") {
-		t.Fatalf("error = %v, want required CI checks rejection", err)
+	proposal.RiskPaths = append(proposal.RiskPaths, RiskPath{Glob: "../outside/**", Minimum: "high", Reason: "escape"})
+	if err := ValidateProposal(proposal, snapshot); err == nil || !strings.Contains(err.Error(), "risk path") {
+		t.Fatalf("error = %v, want unsafe risk path rejection", err)
 	}
 }
 

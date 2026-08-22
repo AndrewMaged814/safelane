@@ -2,13 +2,16 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/AndrewMaged814/safelane/internal/execute"
@@ -260,7 +263,8 @@ func runDoctor(ctx context.Context, args []string, stdout, stderr io.Writer, roo
 	})
 	ex.Run = deps.run
 	rolloutArgs := []string{"get", "rollout", cfg.Target.Rollout, "-n", cfg.Target.Namespace, "-o", "json"}
-	if _, err := deps.run(ctx, rolloutArgs, nil); err != nil {
+	rolloutRaw, err := deps.run(ctx, rolloutArgs, nil)
+	if err != nil {
 		failExecution("cluster", fmt.Sprintf("%s: %v", cfg.Target.Cluster, err), "check the kubeconfig context and the cluster state")
 		skip("rollout", "skipped (cluster unreachable)")
 		skip("identity", "skipped (cluster unreachable)")
@@ -274,6 +278,16 @@ func runDoctor(ctx context.Context, args []string, stdout, stderr io.Writer, roo
 		return finishDoctor(report, f.jsonOut, stdout, stderr, ExitFail)
 	}
 	pass("rollout", fmt.Sprintf("%s found, phase %s, image %s", cfg.Target.Rollout, status.Phase, shortDigest(status.ImageDigest)))
+	if !tmpl.IsZero() {
+		contract, contractErr := render.InspectTargetContract(tmpl, cfg.Application, cfg.Target.Namespace)
+		if contractErr != nil {
+			failExecution("template compatibility", contractErr.Error(), "fix the Release Template and retry")
+		} else if contractErr = validateLiveTargetContract(ctx, deps.run, paths, cfg.Target.Namespace, contract, rolloutRaw); contractErr != nil {
+			failExecution("template compatibility", contractErr.Error(), "restore the template/live selector and port contract before releasing")
+		} else {
+			pass("template compatibility", "stored Rollout and Services match the live target")
+		}
+	}
 
 	controllerIdentity := "system:serviceaccount:" + cfg.Target.Namespace + ":safelane-controller"
 	callerIdentity := "system:serviceaccount:" + cfg.Target.Namespace + ":safelane-caller"
@@ -324,6 +338,104 @@ func runDoctor(ctx context.Context, args []string, stdout, stderr io.Writer, roo
 		return finishDoctor(report, f.jsonOut, stdout, stderr, ExitFail)
 	}
 	return finishDoctor(report, f.jsonOut, stdout, stderr, ExitOK)
+}
+
+func validateLiveTargetContract(ctx context.Context, run execute.Runner, paths runtimePaths, namespace string, expected render.TargetContract, rolloutRaw []byte) error {
+	type livePort struct {
+		Name          string `json:"name"`
+		ContainerPort int    `json:"containerPort"`
+		TargetPort    any    `json:"targetPort"`
+	}
+	type liveRollout struct {
+		Spec struct {
+			Selector struct {
+				MatchLabels map[string]string `json:"matchLabels"`
+			} `json:"selector"`
+			Template struct {
+				Metadata struct {
+					Labels map[string]string `json:"labels"`
+				} `json:"metadata"`
+				Spec struct {
+					Containers []struct {
+						Ports []livePort `json:"ports"`
+					} `json:"containers"`
+				} `json:"spec"`
+			} `json:"template"`
+		} `json:"spec"`
+	}
+	var rollout liveRollout
+	if err := json.Unmarshal(rolloutRaw, &rollout); err != nil {
+		return fmt.Errorf("decode live Rollout contract: %w", err)
+	}
+	if !maps.Equal(expected.RolloutSelector, rollout.Spec.Selector.MatchLabels) {
+		return fmt.Errorf("Rollout selector differs: template=%v live=%v", expected.RolloutSelector, rollout.Spec.Selector.MatchLabels)
+	}
+	if !containsLabels(rollout.Spec.Template.Metadata.Labels, expected.PodLabels) {
+		return fmt.Errorf("pod labels differ: template=%v live=%v", expected.PodLabels, rollout.Spec.Template.Metadata.Labels)
+	}
+	for _, service := range []render.ServiceContract{expected.StableService, expected.CanaryService} {
+		args := make([]string, 0, 12)
+		if paths.controllerKubeconfig != "" {
+			args = append(args, "--kubeconfig", paths.controllerKubeconfig)
+		}
+		if paths.controllerContext != "" {
+			args = append(args, "--context", paths.controllerContext)
+		}
+		args = append(args, "get", "service", service.Name, "-n", namespace, "-o", "json")
+		raw, err := run(ctx, args, nil)
+		if err != nil {
+			return fmt.Errorf("read live Service %s: %w", service.Name, err)
+		}
+		var live struct {
+			Spec struct {
+				Selector map[string]string `json:"selector"`
+				Ports    []livePort        `json:"ports"`
+			} `json:"spec"`
+		}
+		if err := json.Unmarshal(raw, &live); err != nil {
+			return fmt.Errorf("decode live Service %s: %w", service.Name, err)
+		}
+		if !containsLabels(live.Spec.Selector, service.Selector) {
+			return fmt.Errorf("Service %s selector differs: template=%v live=%v", service.Name, service.Selector, live.Spec.Selector)
+		}
+		if len(live.Spec.Ports) != 1 || normalizeLivePort(live.Spec.Ports[0].TargetPort) != service.TargetPort {
+			return fmt.Errorf("Service %s targetPort differs: template=%s live=%v", service.Name, service.TargetPort, live.Spec.Ports)
+		}
+	}
+	for _, port := range expected.ContainerPorts {
+		found := false
+		for _, container := range rollout.Spec.Template.Spec.Containers {
+			for _, live := range container.Ports {
+				if live.Name == port.Name && live.ContainerPort == port.Port {
+					found = true
+				}
+			}
+		}
+		if !found {
+			return fmt.Errorf("Rollout container port differs: template=%s:%d", port.Name, port.Port)
+		}
+	}
+	return nil
+}
+
+func containsLabels(actual, expected map[string]string) bool {
+	for key, value := range expected {
+		if actual[key] != value {
+			return false
+		}
+	}
+	return true
+}
+
+func normalizeLivePort(value any) string {
+	switch value := value.(type) {
+	case string:
+		return value
+	case float64:
+		return strconv.Itoa(int(value))
+	default:
+		return fmt.Sprint(value)
+	}
 }
 
 func finishDoctor(report doctorReport, jsonOut bool, stdout, stderr io.Writer, code int) int {

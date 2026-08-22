@@ -13,6 +13,7 @@ import (
 
 	"github.com/AndrewMaged814/safelane/internal/policy"
 	"github.com/AndrewMaged814/safelane/internal/project"
+	setupengine "github.com/AndrewMaged814/safelane/internal/setup"
 )
 
 func doctorRuntime(t *testing.T) (projectFile, policyFile, templateDir string) {
@@ -34,9 +35,17 @@ func doctorRuntime(t *testing.T) (projectFile, policyFile, templateDir string) {
 	if err := os.Mkdir(templateDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	for i := 0; i < 5; i++ {
-		name := filepath.Join(templateDir, string(rune('a'+i))+".yaml.tmpl")
-		if err := os.WriteFile(name, []byte("kind: ConfigMap\n"), 0o644); err != nil {
+	snapshot := setupengine.Snapshot{
+		Application: "safelane-demo-api", RequiredChecks: []string{"Test"},
+		RuntimeAssertions: []setupengine.RuntimeAssertion{{ID: "demo-response", Surface: "GET /api/demo", Expectation: "status ok", Covers: "correctness"}},
+	}
+	compiled, err := setupengine.CompileProposal(setupengine.ConservativeProposal(snapshot), snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range compiled.TemplateFiles {
+		name := filepath.Join(templateDir, file.Path)
+		if err := os.WriteFile(name, []byte(file.Content), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -69,13 +78,51 @@ func healthyDoctorRunner(t *testing.T) (func(context.Context, []string, []byte) 
 			return []byte("v1.7.2\n"), nil
 		case "get rollout safelane-demo-api -n safelane-demo-api -o json":
 			return []byte(`{"status":{"phase":"Healthy","stableRS":"abc","currentPodHash":"abc"},` +
-				`"spec":{"template":{"spec":{"containers":[{"image":"ghcr.io/andrewmaged814/safelane-demo-api@sha256:` + digest + `"}]}}}}`), nil
+				`"spec":{"selector":{"matchLabels":{"app.kubernetes.io/name":"safelane-demo-api"}},` +
+				`"strategy":{"canary":{"stableService":"safelane-demo-api-stable","canaryService":"safelane-demo-api-canary"}},` +
+				`"template":{"metadata":{"labels":{"app.kubernetes.io/name":"safelane-demo-api"}},` +
+				`"spec":{"containers":[{"image":"ghcr.io/andrewmaged814/safelane-demo-api@sha256:` + digest + `",` +
+				`"ports":[{"name":"http","containerPort":8080}]}]}}}}`), nil
 		case "config get-contexts -o name":
 			return []byte("safelane-caller\n"), nil
+		}
+		if strings.Contains(joined, "get service safelane-demo-api-stable -n safelane-demo-api -o json") ||
+			strings.Contains(joined, "get service safelane-demo-api-canary -n safelane-demo-api -o json") {
+			return []byte(`{"spec":{"selector":{"app.kubernetes.io/name":"safelane-demo-api","rollouts-pod-template-hash":"abc"},` +
+				`"ports":[{"name":"http","port":80,"targetPort":"http"}]}}`), nil
 		}
 		return nil, errors.New("unexpected kubectl call: " + strings.Join(args, " "))
 	}
 	return run, &calls
+}
+
+func TestDoctorRejectsHealthyRolloutWhoseLiveContractDiffersFromTemplate(t *testing.T) {
+	projectFile, policyFile, templateDir := doctorRuntime(t)
+	healthy, _ := healthyDoctorRunner(t)
+	run := func(ctx context.Context, args []string, stdin []byte) ([]byte, error) {
+		if strings.Join(args, " ") == "get rollout safelane-demo-api -n safelane-demo-api -o json" {
+			digest := strings.Repeat("1", 64)
+			return []byte(`{"status":{"phase":"Healthy","stableRS":"abc","currentPodHash":"abc"},` +
+				`"spec":{"selector":{"matchLabels":{"app":"safelane-demo-api"}},` +
+				`"strategy":{"canary":{"stableService":"safelane-demo-api-stable","canaryService":"safelane-demo-api-canary"}},` +
+				`"template":{"metadata":{"labels":{"app":"safelane-demo-api"}},` +
+				`"spec":{"containers":[{"image":"ghcr.io/andrewmaged814/safelane-demo-api@sha256:` + digest + `",` +
+				`"ports":[{"containerPort":8080}]}]}}}}`), nil
+		}
+		return healthy(ctx, args, stdin)
+	}
+	deps := doctorDeps{
+		run: run, lookPath: func(string) (string, error) { return "found", nil },
+		githubPing: func(context.Context, string) (string, error) { return "AndrewMaged814", nil },
+		ghcrPing:   func(context.Context) error { return nil },
+	}
+	var stdout, stderr bytes.Buffer
+	code := runDoctor(context.Background(), []string{
+		"--project", projectFile, "--policy", policyFile, "--template-dir", templateDir,
+	}, &stdout, &stderr, ".", deps)
+	if code != ExitFail || !strings.Contains(stdout.String(), "template compatibility") || !strings.Contains(stdout.String(), "selector") {
+		t.Fatalf("doctor accepted incompatible template/live contract: exit=%d stderr=%s\n%s", code, stderr.String(), stdout.String())
+	}
 }
 
 func TestDoctorClusterReachabilityUsesCallerRolloutRead(t *testing.T) {

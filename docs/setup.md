@@ -19,12 +19,12 @@ safelane doctor
 ```
 
 `setup inspect` is read-only. Its JSON includes an inspection fingerprint,
-uncertainties, and a complete validator-ready `proposal`. The active agent starts
-from that proposal and changes only repository-supported judgments; it never has
-to discover SafeLane's schema or author policy and Kubernetes boilerplate from
-scratch.
+uncertainties, and a small validator-ready `proposal`. The active agent changes
+only evidence-backed risk-path floors and runtime assertions. Required checks,
+mandatory evidence, lanes, model configuration, policy YAML, and Release
+Templates remain deterministic SafeLane output.
 
-`setup apply` validates the complete proposal atomically. It rejects stale fingerprints, unknown fields, unsafe targets, invalid policy, or missing assertions. Interactive use requires typing `APPLY`; noninteractive use requires `--yes`.
+`setup apply` validates the bounded proposal and compiles the complete operator configuration atomically. It rejects stale fingerprints, unknown fields, unsafe risk paths, or missing assertions. Interactive use requires typing `APPLY`; noninteractive use requires `--yes`.
 
 ## Demo environment
 
@@ -36,4 +36,4 @@ safelane demo up --yes
 
 Docker must be running. SafeLane downloads checksum-verified pinned Kind, kubectl, and Argo Rollouts CLI binaries under `~/.safelane/demo/bin`, owns only the cluster named `safelane-demo`, keeps its kubeconfig under the SafeLane home directory, installs the pinned controller, resolves published fixtures to immutable digests, and binds the operator configuration when setup already exists. The private tool directory is visible only to SafeLane processes; the command never changes the ambient PATH or Kubernetes context.
 
-Run `safelane doctor` after setup. Doctor reports external prerequisites and target readiness without changing them.
+Run `safelane doctor` after setup. Doctor reports external prerequisites and target readiness without changing them, including whether the stored Rollout and Service selectors and ports match the live target.
