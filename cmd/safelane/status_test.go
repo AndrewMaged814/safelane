@@ -10,7 +10,7 @@ func TestNoArgumentsPrintsPrimaryWorkflowHelpAndSucceeds(t *testing.T) {
 	if code := run(nil, &stdout, &stderr); code != 0 {
 		t.Fatalf("run exit = %d, want 0", code)
 	}
-	for _, command := range [][]byte{[]byte("setup"), []byte("doctor"), []byte("release"), []byte("demo")} {
+	for _, command := range [][]byte{[]byte("setup"), []byte("doctor"), []byte("release")} {
 		if !bytes.Contains(stdout.Bytes(), command) {
 			t.Fatalf("help does not include %q:\n%s", command, stdout.String())
 		}
@@ -18,7 +18,7 @@ func TestNoArgumentsPrintsPrimaryWorkflowHelpAndSucceeds(t *testing.T) {
 }
 
 func TestDeletedCommandsAreOrdinaryUsageErrors(t *testing.T) {
-	for _, args := range [][]string{{"init"}, {"rollout", "start"}, {"status"}, {"proof", "rel_01"}, {"release", "inspect"}, {"release", "--pr", "1"}, {"setup", "apply", "--proposal", "proposal.json", "--yes"}} {
+	for _, args := range [][]string{{"init"}, {"rollout", "start"}, {"status"}, {"proof", "rel_01"}, {"release", "inspect"}, {"release", "--pr", "1"}, {"setup", "apply", "--proposal", "proposal.json", "--yes"}, {"demo", "up"}, {"demo", "down"}} {
 		var stdout, stderr bytes.Buffer
 		if code := run(args, &stdout, &stderr); code != 2 {
 			t.Errorf("%v exit = %d, want 2", args, code)

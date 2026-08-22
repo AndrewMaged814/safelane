@@ -54,9 +54,7 @@ For agent-shaped setup:
    A schema lookup, JSON processor, or generated helper script is unnecessary.
 6. Explain the compiled plan once and ask one approval. After approval, run the
    returned `next_command`, which applies the immutable setup ID.
-7. For the first-party demo, run `safelane demo up --yes --json` so the probe
-   digest and private credentials are bound. Then run `safelane doctor`.
-   Setup is complete only when doctor passes.
+7. Run `safelane doctor`. Setup is complete only when doctor passes.
 
 ## Release
 
