@@ -44,23 +44,26 @@ require_admin() {
 
 require_admin
 
-stage "1/5  cluster, ingress, Argo Rollouts"
+stage "1/6  cluster, ingress, Argo Rollouts"
 bash "${HERE}/10-cluster.sh"
 
-stage "2/5  Prometheus and Grafana"
+stage "2/6  Prometheus and Grafana"
 bash "${HERE}/20-monitoring.sh"
 
-stage "3/5  ${SAFELANE_APP} baseline"
+stage "3/6  ${SAFELANE_APP} baseline"
 bash "${HERE}/30-baseline.sh"
 
-stage "4/5  load generator"
+stage "4/6  load generator"
 bash "${HERE}/40-loadgen.sh"
 
 # Last on purpose: this stage drops the default kubeconfig context to an
 # identity that may only read rollouts. Anything that still needs to create
 # objects has to run before it.
-stage "5/5  SafeLane identities"
+stage "5/6  SafeLane identities"
 bash "${HERE}/50-identities.sh"
+
+stage "6/6  analysis probe"
+bash "${HERE}/60-probe.sh"
 
 cat <<DONE
 

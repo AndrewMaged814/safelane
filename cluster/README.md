@@ -3,8 +3,13 @@
 Everything SafeLane needs on the target cluster, in one command.
 
 ```bash
-./cluster/install.sh
+./cluster/install.sh                                # podinfo (default)
+SAFELANE_APP=safelane-demo-api ./cluster/install.sh
 ```
+
+Per-app data lives in `cluster/apps/<app>/`: an `app.env` plus the two
+manifests that differ between applications. The scripts are generic; only the
+data changes.
 
 SafeLane itself does not provision clusters — it verifies evidence, decides a
 lane, renders manifests and coordinates Argo. This folder is the other half:
@@ -16,9 +21,10 @@ the infrastructure workstream's environment, reproducible.
 |---|---|---|
 | 1 | `10-cluster.sh` | minikube running, `ingress-nginx`, Argo Rollouts (pinned) |
 | 2 | `20-monitoring.sh` | Prometheus and Grafana via Helm |
-| 3 | `30-baseline.sh` | `podinfo` at a healthy baseline digest, Services, AnalysisTemplate, Ingress |
-| 4 | `40-loadgen.sh` | constant traffic through the ingress |
+| 3 | `30-baseline.sh` | the app at a healthy baseline digest, Services, and any AnalysisTemplate or Ingress |
+| 4 | `40-loadgen.sh` | constant traffic, through the ingress or straight at the Service |
 | 5 | `50-identities.sh` | `safelane-caller` and `safelane-controller` ServiceAccounts |
+| 6 | `60-probe.sh` | pins the analysis probe to an immutable digest |
 
 Every stage is idempotent and independently runnable. Identities run **last**:
 that stage drops the default context to an identity that may only read
@@ -68,8 +74,25 @@ SafeLane is bypassed entirely.
 | `ARGO_ROLLOUTS_VERSION` | `v1.9.1` |
 | `PROM_CHART_VERSION` | `29.23.0` |
 | `GRAFANA_CHART_VERSION` | `10.5.15` |
-| `SAFELANE_APP` | `podinfo` |
+| `SAFELANE_APP` | `podinfo` — selects `cluster/apps/<app>/` |
 
 Pin Argo Rollouts and do not bump it casually: `ComputeStepHash` is not stable
 across controller versions, and a change there can reset `currentStepIndex`
 mid-rollout.
+
+## The probe
+
+`safelane setup` writes a placeholder for the analysis probe image:
+
+```
+probe_image: ghcr.io/<owner>/<probe>@sha256:REPLACE_WITH_PUBLISHED_DIGEST
+```
+
+Something has to resolve the real digest and substitute it. The only code that
+ever did was `safelane demo up`, which no longer exists — so `safelane doctor`
+reports *"analysis probe not pinned by an immutable OCI digest"* and the
+release cannot run. Stage 6 does that substitution.
+
+The proper home for this is `safelane setup` itself: the command that writes
+the placeholder should be the one that fills it. Until it does, this keeps the
+configuration usable.
