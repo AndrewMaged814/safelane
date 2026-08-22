@@ -35,12 +35,8 @@ use requires `--yes`.
 
 ## Demo environment
 
-To create the isolated Kind environment and seed a healthy first-party baseline:
-
-```bash
-safelane demo up --yes
-```
-
-Docker must be running. SafeLane downloads checksum-verified pinned Kind, kubectl, and Argo Rollouts CLI binaries under `~/.safelane/demo/bin`, owns only the cluster named `safelane-demo`, keeps its kubeconfig under the SafeLane home directory, installs the pinned controller, resolves published fixtures to immutable digests, and binds the operator configuration when setup already exists. The private tool directory is visible only to SafeLane processes; the command never changes the ambient PATH or Kubernetes context.
+SafeLane no longer provisions clusters. Provide a reachable cluster with Argo
+Rollouts, a traffic router and a metrics provider, then point the operator
+configuration at it.
 
 Run `safelane doctor` after setup. Doctor reports external prerequisites and target readiness without changing them, including whether the stored Rollout and Service selectors and ports match the live target.

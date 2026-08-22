@@ -35,7 +35,6 @@ type commandRuntime struct {
 func main() { os.Exit(run(os.Args[1:], os.Stdout, os.Stderr)) }
 
 func run(args []string, stdout, stderr io.Writer) int {
-	prependManagedDemoTools()
 	app, args, err := extractGlobalApp(args)
 	if err != nil {
 		fmt.Fprintf(stderr, "safelane: %v\n", err)
@@ -77,19 +76,6 @@ func activateDemoCaller(projectFile string) func() {
 		} else {
 			_ = os.Unsetenv("KUBECONFIG")
 		}
-	}
-}
-
-// prependManagedDemoTools makes demo-owned kubectl and its Argo plugin visible
-// only to this SafeLane process. It never changes the user's ambient PATH.
-func prependManagedDemoTools() {
-	home, err := project.Home()
-	if err != nil {
-		return
-	}
-	bin := filepath.Join(home, "demo", "bin")
-	if info, err := os.Stat(bin); err == nil && info.IsDir() {
-		_ = os.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	}
 }
 
@@ -147,7 +133,7 @@ func newRootCommand(rt commandRuntime) *cobra.Command {
 	root.SetErr(rt.stderr)
 	root.PersistentFlags().String("app", rt.app, "select an application outside its repository")
 	root.AddCommand(setupGroup(rt), legacyLeaf(rt, "doctor [--json]", "Check whether SafeLane can release right now", cli.DoctorCommand(rt.root), injectProject))
-	root.AddCommand(releaseGroup(rt), demoGroup(rt), completionCommand(root), versionCommand())
+	root.AddCommand(releaseGroup(rt), completionCommand(root), versionCommand())
 	return root
 }
 
@@ -221,16 +207,6 @@ func setupGroup(rt commandRuntime) *cobra.Command {
 		legacyLeaf(rt, "apply <setup-id> [--yes] [--json]", "Apply one immutable setup plan", cli.SetupApplyCommand(rt.root), func(_ commandRuntime, args []string) []string { return args }),
 	)
 	return setup
-}
-
-func demoGroup(rt commandRuntime) *cobra.Command {
-	demo := &cobra.Command{Use: "demo", Short: "Manage the isolated SafeLane Kind demo", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error { return cmd.Help() }}
-	demo.AddCommand(
-		legacyLeaf(rt, "up [--yes] [--json]", "Create or reconcile the demo", cli.DemoCommand("up"), func(_ commandRuntime, args []string) []string { return args }),
-		legacyLeaf(rt, "reset [--yes] [--json]", "Archive records and restore demo fixtures", cli.DemoCommand("reset"), func(_ commandRuntime, args []string) []string { return args }),
-		legacyLeaf(rt, "down [--yes] [--json]", "Delete only the owned demo cluster", cli.DemoCommand("down"), func(_ commandRuntime, args []string) []string { return args }),
-	)
-	return demo
 }
 
 func completionCommand(root *cobra.Command) *cobra.Command {
