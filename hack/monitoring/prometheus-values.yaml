@@ -1,0 +1,159 @@
+# prometheus-community/prometheus — SafeLane values
+#
+# Deliberately NOT kube-prometheus-stack. That chart brings the Prometheus
+# Operator, Alertmanager, node-exporter and kube-state-metrics (~2 GiB on a
+# laptop with ~2.5 GiB free), defaults to a 30s scrape when this demo needs 5s,
+# and manages scrape config through PodMonitor CRDs — which would mean
+# rewriting the labelmap relabel that is the most fragile working part of this
+# repo. This chart keeps a plain prometheus.yml, so the scrape config below is
+# the same one the raw manifests use.
+#
+# Everything except the server is switched off, and every default scrape job
+# SafeLane does not need is disabled. Two targets, on a laptop that has 2.5 GiB
+# to spare.
+
+alertmanager:
+  enabled: false
+kube-state-metrics:
+  enabled: false
+prometheus-node-exporter:
+  enabled: false
+prometheus-pushgateway:
+  enabled: false
+
+server:
+  # Makes the Service `prometheus.monitoring.svc.cluster.local:9090` — byte
+  # for byte the address the raw manifests produce. The AnalysisTemplate
+  # therefore does not know or care which path deployed Prometheus, and the
+  # manifest fallback stays a drop-in replacement.
+  fullnameOverride: prometheus
+  # Matches k8s/prometheus/deployment.yaml so switching between the Helm and
+  # manifest paths cannot change the Prometheus version underneath the demo.
+  image:
+    repository: prom/prometheus
+    tag: v3.13.2
+  global:
+    # 5s, not the chart default. rate() needs two samples in its window; a
+    # slower scrape means no result for minutes, which Argo reports as a
+    # metric-provider Error rather than a failure.
+    scrape_interval: 5s
+    evaluation_interval: 5s
+    # The chart ships an explicit `scrape_timeout: 10s`, and Prometheus refuses
+    # to start when the global timeout exceeds the interval:
+    #   "global scrape timeout greater than scrape interval"
+    # The raw manifests never hit this because they leave the timeout unset.
+    scrape_timeout: 4s
+  retention: 2h
+  persistentVolume:
+    enabled: false
+  service:
+    servicePort: 9090
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 768Mi
+  extraFlags:
+    - web.enable-lifecycle
+
+# The chart's default jobs are a map keyed by job name. Anything SafeLane does
+# not query is dead weight on a 7.6 GiB laptop, so it is switched off rather
+# than scraped and ignored.
+#
+# NOTE: entries here are APPENDED to serverFiles.prometheus.yml.scrape_configs
+# rather than replacing them. Putting SafeLane's jobs in serverFiles instead
+# produced `found multiple scrape configs with job name "kubernetes-pods"` and
+# a CrashLoopBackOff. Define jobs here, in this map, and nowhere else.
+scrapeConfigs:
+  kubernetes-api-servers:
+    enabled: false
+  kubernetes-nodes:
+    enabled: false
+  kubernetes-nodes-cadvisor:
+    enabled: false
+  kubernetes-pods:
+    enabled: false
+  kubernetes-pods-slow:
+    enabled: false
+  kubernetes-service-endpoints:
+    enabled: false
+  kubernetes-service-endpoints-slow:
+    enabled: false
+  kubernetes-services:
+    enabled: false
+  prometheus-pushgateway:
+    enabled: false
+  # Kept: Prometheus scraping itself, so Grafana can show whether the thing
+  # driving the rollback is alive.
+  prometheus:
+    enabled: true
+
+  # SafeLane's own target. Same relabel rules as k8s/prometheus/configmap.yaml.
+  safelane-pods:
+    enabled: true
+    kubernetes_sd_configs:
+      - role: pod
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+        action: keep
+        regex: "true"
+      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+        action: replace
+        target_label: __metrics_path__
+        regex: (.+)
+      - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+        action: replace
+        regex: ([^:]+)(?::\d+)?;(\d+)
+        replacement: $1:$2
+        target_label: __address__
+      # THE load-bearing rule. Argo's canaryMetadata/stableMetadata put
+      # role=canary / role=stable on the pods; this turns that pod label into a
+      # real metric label so the analysis query can scope to the canary.
+      # Without it the canary-scoped query is always empty and nothing on
+      # screen tells you why.
+      - action: labelmap
+        regex: __meta_kubernetes_pod_label_(.+)
+      - source_labels: [__meta_kubernetes_namespace]
+        target_label: namespace
+      - source_labels: [__meta_kubernetes_pod_name]
+        target_label: pod
+
+  # The Argo Rollouts controller's own metrics, so Grafana can show what the
+  # controller decided alongside what the canary was doing.
+  argo-rollouts:
+    enabled: true
+    kubernetes_sd_configs:
+      - role: endpoints
+        namespaces:
+          names: [argo-rollouts]
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_service_name]
+        action: keep
+        regex: argo-rollouts-metrics
+
+  # podinfo's stable/canary Services, discovered as ENDPOINTS rather than pods.
+  # The AnalysisTemplate in hack/seed-baseline.sh scopes its query with
+  # service="podinfo-canary", and that label can only come from endpoint
+  # discovery -- pod-role discovery has no service name to offer. Without this
+  # job the canary query is empty every time, which the successCondition
+  # (len(result) > 0 && ...) correctly treats as a failure, so the rollout
+  # would abort for the wrong reason.
+  safelane-endpoints:
+    enabled: true
+    kubernetes_sd_configs:
+      - role: endpoints
+        namespaces:
+          names: [podinfo]
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_service_name]
+        action: keep
+        regex: podinfo-(stable|canary)
+      - source_labels: [__meta_kubernetes_service_name]
+        target_label: service
+      - source_labels: [__meta_kubernetes_namespace]
+        target_label: namespace
+      - source_labels: [__meta_kubernetes_pod_name]
+        target_label: pod
+      - action: labelmap
+        regex: __meta_kubernetes_pod_label_(.+)
