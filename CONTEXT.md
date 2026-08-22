@@ -24,6 +24,14 @@ _Avoid_: Vague concern, risk score
 A concrete, executable claim about the canary-only application surface, such as response semantics, success rate, latency, or artifact identity.
 _Avoid_: Health check, generic healthy metric
 
+**Semantic Findings**:
+Evidence-backed application meaning supplied by a replaceable repository analyst during setup: application risk paths and behavioral assertion intents. SafeLane may use conservative internal findings when no analyst is present and always compiles intents into executable Runtime Assertions.
+_Avoid_: Agent proposal, setup baseline
+
+**Setup Plan**:
+The immutable, content-addressed operator configuration SafeLane compiles from repository facts, Semantic Findings, and product safety rules before setup approval.
+_Avoid_: Editable setup proposal, generated baseline
+
 **Change Assessment**:
 The combined deterministic and semantic account of hazards and reversibility. A semantic assessor may raise deterministic risk but never lower it or choose operations.
 _Avoid_: Model decision, confidence score

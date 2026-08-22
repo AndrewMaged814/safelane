@@ -67,24 +67,29 @@ func TestSetupApplyRejectsStaleFingerprintBeforeWriting(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	proposal := setupengine.ConservativeProposal(snapshot)
-	proposal.InspectionFingerprint = "sha256:stale"
-	raw, _ := json.Marshal(proposal)
-	path := filepath.Join(t.TempDir(), "proposal.json")
-	if err := os.WriteFile(path, raw, 0o600); err != nil {
+	findings := testAgentFindings(snapshot)
+	raw, _ := json.Marshal(findings)
+	var stdout, stderr bytes.Buffer
+	if code := runSetupPlan(context.Background(), []string{"--findings", "-", "--json"}, bytes.NewReader(raw), &stdout, &stderr, root); code != ExitOK {
+		t.Fatalf("plan exit=%d stderr=%s", code, stderr.String())
+	}
+	var result ResultEnvelope
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
 		t.Fatal(err)
 	}
-	var stdout, stderr bytes.Buffer
-	code := runSetupApply(context.Background(), []string{"--proposal", path, "--yes"}, strings.NewReader(""), &stdout, &stderr, root)
-	if code != ExitFail || !strings.Contains(stderr.String(), "fingerprint is stale") {
+	writeSetupFixture(t, filepath.Join(root, "Program.cs"), `app.MapGet("/api/demo", () => new { status = "changed" }); app.MapGet("/version", () => "abc");`)
+	stdout.Reset()
+	stderr.Reset()
+	code := runSetupApply(context.Background(), []string{result.Result["setup_id"].(string), "--yes"}, strings.NewReader(""), &stdout, &stderr, root)
+	if code != ExitFail || !strings.Contains(stderr.String(), "setup plan is stale") {
 		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
 	}
 	if _, err := os.Stat(project.ForApp(home, "safelane-demo-api").ProjectFile); !os.IsNotExist(err) {
-		t.Fatalf("stale proposal wrote configuration: %v", err)
+		t.Fatalf("stale plan wrote configuration: %v", err)
 	}
 }
 
-func TestSetupInspectBoundedProposalAppliesWithoutSchemaOrToolDiscovery(t *testing.T) {
+func TestSetupInspectFindingsPlanAndExactApply(t *testing.T) {
 	root, home := setupRepository(t)
 	var inspectOut, inspectErr bytes.Buffer
 	if code := runSetupInspect(context.Background(), []string{"--json"}, &inspectOut, &inspectErr, root); code != ExitOK {
@@ -94,35 +99,40 @@ func TestSetupInspectBoundedProposalAppliesWithoutSchemaOrToolDiscovery(t *testi
 	if err := json.Unmarshal(inspectOut.Bytes(), &inspection); err != nil {
 		t.Fatalf("decode inspection: %v", err)
 	}
-	if inspection.Proposal == nil {
-		t.Fatal("inspection did not provide a proposal")
+	if strings.Contains(inspectOut.String(), `"proposal"`) {
+		t.Fatalf("inspection exposed an editable baseline: %s", inspectOut.String())
 	}
-	inspection.Proposal.RiskPaths = append(inspection.Proposal.RiskPaths, setupengine.RiskPath{
-		Glob: "infra/**", Minimum: "high", Reason: "Infrastructure changes alter the release target.",
-	})
-	inspection.Proposal.RuntimeAssertions[0].Expectation = "HTTP 200 and JSON status equals ok for phase one"
-	raw, err := json.Marshal(inspection.Proposal)
+	findings := testAgentFindings(inspection)
+	raw, err := json.Marshal(findings)
 	if err != nil {
 		t.Fatal(err)
 	}
-	proposalPath := filepath.Join(t.TempDir(), "proposal.json")
-	if err := os.WriteFile(proposalPath, raw, 0o600); err != nil {
+	var planOut, planErr bytes.Buffer
+	if code := runSetupPlan(context.Background(), []string{"--findings", "-", "--json"}, bytes.NewReader(raw), &planOut, &planErr, root); code != ExitOK {
+		t.Fatalf("plan exit=%d stderr=%s", code, planErr.String())
+	}
+	var result ResultEnvelope
+	if err := json.Unmarshal(planOut.Bytes(), &result); err != nil {
 		t.Fatal(err)
 	}
+	setupID, _ := result.Result["setup_id"].(string)
+	if !setupIDPattern.MatchString(setupID) || result.State != "planned" {
+		t.Fatalf("plan result = %+v", result)
+	}
 	var applyOut, applyErr bytes.Buffer
-	if code := runSetupApply(context.Background(), []string{"--proposal", proposalPath, "--yes", "--json"}, strings.NewReader(""), &applyOut, &applyErr, root); code != ExitOK {
+	if code := runSetupApply(context.Background(), []string{setupID, "--yes", "--json"}, strings.NewReader(""), &applyOut, &applyErr, root); code != ExitOK {
 		t.Fatalf("apply exit=%d stderr=%s", code, applyErr.String())
 	}
 	projectFile := project.ForApp(home, "safelane-demo-api").ProjectFile
 	if _, err := os.Stat(projectFile); err != nil {
-		t.Fatalf("direct inspection proposal was not applied: %v", err)
+		t.Fatalf("frozen setup plan was not applied: %v", err)
 	}
 	cfg, err := project.Load(projectFile)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := cfg.Analysis.Assertions[0].Expectation; got != "HTTP 200 and JSON status equals ok for phase one" {
-		t.Fatalf("applied assertion = %q; agent proposal did not shape project config", got)
+	if got := cfg.Analysis.Assertions[0].Expectation; got != `HTTP 200 and JSON status equals "ok"` {
+		t.Fatalf("compiled assertion = %q; SafeLane did not compile the supported probe contract", got)
 	}
 	policyRaw, err := os.ReadFile(project.ForApp(home, "safelane-demo-api").PolicyFile)
 	if err != nil {
@@ -133,29 +143,40 @@ func TestSetupInspectBoundedProposalAppliesWithoutSchemaOrToolDiscovery(t *testi
 	}
 }
 
-func TestSetupApplyRejectsAgentAuthoredInfrastructure(t *testing.T) {
+func TestSetupPlanRejectsAgentAuthoredInfrastructure(t *testing.T) {
 	root, home := setupRepository(t)
 	snapshot, err := setupengine.Discover(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw, err := json.Marshal(snapshot.Proposal)
+	raw, err := json.Marshal(testAgentFindings(snapshot))
 	if err != nil {
 		t.Fatal(err)
 	}
 	raw = bytes.TrimSuffix(raw, []byte("}"))
 	raw = append(raw, []byte(`,"template_files":[{"path":"20-rollout.yaml.tmpl","content":"agent owned"}]}`)...)
-	path := filepath.Join(t.TempDir(), "proposal.json")
-	if err := os.WriteFile(path, raw, 0o600); err != nil {
-		t.Fatal(err)
-	}
 	var stdout, stderr bytes.Buffer
-	code := runSetupApply(context.Background(), []string{"--proposal", path, "--yes"}, strings.NewReader(""), &stdout, &stderr, root)
+	code := runSetupPlan(context.Background(), []string{"--findings", "-"}, bytes.NewReader(raw), &stdout, &stderr, root)
 	if code != ExitFail || !strings.Contains(stderr.String(), `unknown field "template_files"`) {
 		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
 	}
 	if _, err := os.Stat(project.ForApp(home, "safelane-demo-api").ProjectFile); !os.IsNotExist(err) {
 		t.Fatalf("agent-authored infrastructure wrote configuration: %v", err)
+	}
+}
+
+func testAgentFindings(snapshot setupengine.Snapshot) setupengine.Findings {
+	evidence := []setupengine.Evidence{{File: "Program.cs", Line: 1}}
+	return setupengine.Findings{
+		SchemaVersion:         "safelane.setup.findings/v1",
+		InspectionFingerprint: snapshot.InspectionFingerprint,
+		Summary:               "Application behavior and runtime code need explicit coverage.",
+		RiskPaths: []setupengine.RiskPath{{
+			Glob: "infra/**", Minimum: "high", Reason: "Infrastructure changes alter application behavior.", Evidence: evidence,
+		}},
+		AssertionIntents: []setupengine.AssertionIntent{{
+			Surface: "GET /api/demo", Covers: "correctness", Evidence: evidence,
+		}},
 	}
 }
 

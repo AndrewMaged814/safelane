@@ -20,21 +20,40 @@ manual, conservative, or non-agent setup:
 For agent-shaped setup:
 
 1. Run `safelane setup inspect --json` exactly once and keep that result.
-2. Use its returned `proposal` as the complete bounded decision contract.
-   SafeLane owns required checks, mandatory evidence, lanes, model configuration,
-   policy YAML, and Release Templates. The proposal contains only `summary`,
-   cited `risk_paths`, and concrete `runtime_assertions` plus its schema and
-   inspection fingerprint.
-3. Treat the returned file list as compact evidence, not source text. Read only
+2. Treat the returned file list as compact evidence, not source text. Read only
    repository files relevant to the reported checks, critical surfaces, Kubernetes
    resources, and uncertainties using this active session's normal file tools.
-4. Tailor only evidence-backed risk-path floors and runtime assertions. Keep each
-   risk-path reason specific enough for the user to verify.
-5. Write the small proposal object to an absolute temporary path with the active
-   session's native file-writing tool. The workflow requires no CLI-help lookup,
-   schema discovery, shell JSON processor, or generated script. Explain the
-   project-specific decisions once, then ask approval.
-6. After approval, run `safelane setup apply --proposal <absolute-path> --yes --json`.
+3. Submit only application-specific semantic findings. SafeLane owns CI and
+   container risk floors plus availability, latency, artifact identity, lanes,
+   policy, Kubernetes templates, credentials, validation, and mutation.
+4. Every risk path and assertion intent must cite an inspected repository
+   `file` and one-based `line`. Use this exact contract:
+
+```json
+{
+  "schema_version": "safelane.setup.findings/v1",
+  "inspection_fingerprint": "<value returned by inspect>",
+  "summary": "<project-specific semantic findings>",
+  "risk_paths": [{
+    "glob": "src/Feature/**",
+    "minimum": "high",
+    "reason": "<reviewable failure consequence>",
+    "evidence": [{"file": "src/Feature/Handler.cs", "line": 41}]
+  }],
+  "assertion_intents": [{
+    "surface": "GET /api/demo",
+    "covers": "correctness",
+    "evidence": [{"file": "src/Feature/Handler.cs", "line": 18}]
+  }]
+}
+```
+
+5. Pass that JSON directly to
+   `safelane setup plan --findings - --json`. Use the active session's native
+   temporary-file writer with an absolute path only when stdin is unavailable.
+   A schema lookup, JSON processor, or generated helper script is unnecessary.
+6. Explain the compiled plan once and ask one approval. After approval, run the
+   returned `next_command`, which applies the immutable setup ID.
 7. For the first-party demo, run `safelane demo up --yes --json` so the probe
    digest and private credentials are bound. Then run `safelane doctor`.
    Setup is complete only when doctor passes.

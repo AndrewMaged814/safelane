@@ -59,11 +59,12 @@ Human setup is deterministic and conservative. An active Codex or Claude session
 
 ```bash
 safelane setup inspect --json
-safelane setup apply --proposal C:\absolute\proposal.json --yes
+safelane setup plan --findings - --json
+safelane setup apply setup_... --yes
 safelane doctor
 ```
 
-The proposal contains only evidence-backed risk-path floors and runtime assertions. SafeLane deterministically owns required checks, mandatory evidence, lanes, model configuration, policy YAML, and Release Templates. It rejects stale fingerprints, missing assertions, unsafe risk paths, and unknown fields atomically, then writes operator configuration outside the application repository.
+The agent submits only evidence-backed application risk paths and semantic assertion intents. SafeLane maps those intents to executable probe assertions, adds its product safety floors, compiles and persists the exact operator configuration, and returns an immutable setup ID. One approval applies that ID; the agent never edits a SafeLane baseline, policy YAML, or Kubernetes manifest.
 
 ## Install
 

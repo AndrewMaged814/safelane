@@ -13,18 +13,25 @@ SafeLane discovers the GitHub remote, default branch, workflow checks, image wor
 The active agent session can propose a smarter policy without a nested process:
 
 ```bash
-safelane setup inspect --json > inspection.json
-safelane setup apply --proposal /absolute/path/proposal.json --yes
+safelane setup inspect --json
+safelane setup plan --findings - --json
+safelane setup apply setup_... --yes
 safelane doctor
 ```
 
-`setup inspect` is read-only. Its JSON includes an inspection fingerprint,
-uncertainties, and a small validator-ready `proposal`. The active agent changes
-only evidence-backed risk-path floors and runtime assertions. Required checks,
-mandatory evidence, lanes, model configuration, policy YAML, and Release
-Templates remain deterministic SafeLane output.
+`setup inspect` returns fingerprinted facts, uncertainties, mandatory product
+assertions, and compact file evidence. It persists that inspection under the
+SafeLane home directory but does not edit the application repository or return
+an editable baseline.
+The active agent contributes only application-specific risk paths and semantic
+assertion intents, each with file/line evidence. SafeLane accepts only intents
+that its configured probe can compile into executable Runtime Assertions.
 
-`setup apply` validates the bounded proposal and compiles the complete operator configuration atomically. It rejects stale fingerprints, unknown fields, unsafe risk paths, or missing assertions. Interactive use requires typing `APPLY`; noninteractive use requires `--yes`.
+`setup plan` validates those findings, adds SafeLane-owned safety floors, compiles
+the complete configuration, and persists it under a content-addressed setup ID.
+`setup apply <setup-id>` rechecks the repository fingerprint and applies that
+exact plan atomically. Interactive use requires typing `APPLY`; noninteractive
+use requires `--yes`.
 
 ## Demo environment
 

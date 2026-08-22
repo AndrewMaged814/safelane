@@ -1,5 +1,5 @@
 // Package setup implements SafeLane's deterministic, repository-aware setup.
-// Agent-authored proposals are an explicit inspect/apply workflow and never
+// Agent-authored findings are an explicit inspect/plan/apply workflow and never
 // execute a nested coding-agent process.
 package setup
 
@@ -50,24 +50,36 @@ type Snapshot struct {
 	RequiredChecks        []string           `json:"required_checks"`
 	KubernetesFiles       []string           `json:"kubernetes_files"`
 	CriticalSurfaces      []string           `json:"critical_surfaces"`
-	RuntimeAssertions     []RuntimeAssertion `json:"runtime_assertions"`
+	MandatoryAssertions   []RuntimeAssertion `json:"mandatory_runtime_assertions"`
 	Uncertainties         []string           `json:"uncertainties"`
 	Files                 []File             `json:"files"`
 	InspectionFingerprint string             `json:"inspection_fingerprint"`
-	// Proposal is a complete, validator-ready baseline for the active agent to
-	// preserve or tailor. SafeLane, not the skill, owns this contract.
-	Proposal *Proposal `json:"proposal,omitempty"`
 }
 
-// RuntimeAssertion is a concrete black-box check proposed from discovered routes.
+// Evidence ties one semantic finding to repository text the operator can review.
+type Evidence struct {
+	File string `json:"file"`
+	Line int    `json:"line"`
+}
+
+// RuntimeAssertion is a concrete black-box claim about a discovered route.
 type RuntimeAssertion struct {
-	ID          string `json:"id"`
-	Surface     string `json:"surface"`
-	Expectation string `json:"expectation"`
-	Covers      string `json:"covers"`
+	ID          string     `json:"id"`
+	Surface     string     `json:"surface"`
+	Expectation string     `json:"expectation"`
+	Covers      string     `json:"covers"`
+	Evidence    []Evidence `json:"evidence,omitempty"`
 }
 
-// TemplateFile is one operator-owned Release Template file proposed by the agent.
+// AssertionIntent identifies semantic coverage the analyst requires. SafeLane
+// compiles it into an executable Runtime Assertion supported by the probe.
+type AssertionIntent struct {
+	Surface  string     `json:"surface"`
+	Covers   string     `json:"covers"`
+	Evidence []Evidence `json:"evidence"`
+}
+
+// TemplateFile is one operator-owned Release Template file compiled by SafeLane.
 type TemplateFile struct {
 	Path    string `json:"path"`
 	Content string `json:"content"`
@@ -76,29 +88,39 @@ type TemplateFile struct {
 // RiskPath is one bounded semantic decision the active agent may make. SafeLane
 // compiles it into the operator-owned policy; the agent never authors policy YAML.
 type RiskPath struct {
-	Glob    string `json:"glob"`
-	Minimum string `json:"minimum"`
-	Reason  string `json:"reason"`
+	Glob     string     `json:"glob"`
+	Minimum  string     `json:"minimum"`
+	Reason   string     `json:"reason"`
+	Evidence []Evidence `json:"evidence,omitempty"`
 }
 
-// Proposal is the model's bounded setup recommendation. Infrastructure,
-// mandatory evidence, lanes, required checks, and model configuration are not
-// part of this contract; SafeLane compiles those deterministically.
-type Proposal struct {
-	SchemaVersion         string             `json:"schema_version"`
-	InspectionFingerprint string             `json:"inspection_fingerprint"`
-	Summary               string             `json:"summary"`
-	RiskPaths             []RiskPath         `json:"risk_paths"`
-	RuntimeAssertions     []RuntimeAssertion `json:"runtime_assertions"`
+// Findings are the replaceable semantic analyst's bounded, evidence-backed
+// input. SafeLane remains the sole setup authority and configuration compiler.
+type Findings struct {
+	SchemaVersion         string            `json:"schema_version"`
+	InspectionFingerprint string            `json:"inspection_fingerprint"`
+	Summary               string            `json:"summary"`
+	RiskPaths             []RiskPath        `json:"risk_paths"`
+	AssertionIntents      []AssertionIntent `json:"assertion_intents"`
 }
 
-// CompiledProposal is the operator-owned configuration produced from a valid
-// bounded Proposal and the exact repository Snapshot it cites.
-type CompiledProposal struct {
-	RequiredChecks    []string
-	RuntimeAssertions []RuntimeAssertion
-	PolicyYAML        string
-	TemplateFiles     []TemplateFile
+// CompiledSetup is the operator-owned configuration produced from valid
+// Semantic Findings and the exact repository Snapshot they cite.
+type CompiledSetup struct {
+	RequiredChecks    []string           `json:"required_checks"`
+	RuntimeAssertions []RuntimeAssertion `json:"runtime_assertions"`
+	PolicyYAML        string             `json:"policy_yaml"`
+	TemplateFiles     []TemplateFile     `json:"template_files"`
+}
+
+// Plan is the immutable, content-addressed setup SafeLane presents and applies.
+type Plan struct {
+	SchemaVersion  string        `json:"schema_version"`
+	ID             string        `json:"id"`
+	FindingsSource string        `json:"findings_source"`
+	Snapshot       Snapshot      `json:"snapshot"`
+	Findings       Findings      `json:"findings"`
+	Compiled       CompiledSetup `json:"compiled"`
 }
 
 // Runner is the seam for testing and for replacing the agent CLI later.
@@ -130,20 +152,17 @@ func Discover(root string) (Snapshot, error) {
 		CriticalSurfaces: discoverCriticalSurfaces(files),
 		Files:            files,
 	}
-	snapshot.RuntimeAssertions = assertionsFor(snapshot.CriticalSurfaces)
-	if len(snapshot.RuntimeAssertions) == 0 {
-		snapshot.Uncertainties = append(snapshot.Uncertainties, "No concrete application behavior route was discovered; setup apply requires at least one runtime assertion.")
+	snapshot.MandatoryAssertions = mandatoryAssertionsFor(snapshot.CriticalSurfaces)
+	if len(semanticAssertionsFor(snapshot.CriticalSurfaces)) == 0 {
+		snapshot.Uncertainties = append(snapshot.Uncertainties, "No concrete application behavior route was discovered; setup plan requires at least one semantic runtime assertion.")
 	}
 	snapshot.InspectionFingerprint = Fingerprint(snapshot)
-	proposal := ConservativeProposal(snapshot)
-	snapshot.Proposal = &proposal
 	return snapshot, nil
 }
 
-// Fingerprint binds an agent proposal to the exact repository inspection.
+// Fingerprint binds agent findings to the exact repository inspection.
 func Fingerprint(snapshot Snapshot) string {
 	snapshot.InspectionFingerprint = ""
-	snapshot.Proposal = nil
 	raw, _ := json.Marshal(snapshot)
 	sum := sha256.Sum256(raw)
 	return fmt.Sprintf("sha256:%x", sum)
@@ -174,7 +193,19 @@ func discoverCriticalSurfaces(files []File) []string {
 	return surfaces
 }
 
-func assertionsFor(surfaces []string) []RuntimeAssertion {
+func semanticAssertionsFor(surfaces []string) []RuntimeAssertion {
+	has := map[string]bool{}
+	for _, surface := range surfaces {
+		has[surface] = true
+	}
+	var assertions []RuntimeAssertion
+	if has["GET /api/demo"] {
+		assertions = append(assertions, RuntimeAssertion{ID: "demo-response", Surface: "GET /api/demo", Expectation: `HTTP 200 and JSON status equals "ok"`, Covers: "correctness"})
+	}
+	return assertions
+}
+
+func mandatoryAssertionsFor(surfaces []string) []RuntimeAssertion {
 	has := map[string]bool{}
 	for _, surface := range surfaces {
 		has[surface] = true
@@ -182,7 +213,6 @@ func assertionsFor(surfaces []string) []RuntimeAssertion {
 	var assertions []RuntimeAssertion
 	if has["GET /api/demo"] {
 		assertions = append(assertions,
-			RuntimeAssertion{ID: "demo-response", Surface: "GET /api/demo", Expectation: `HTTP 200 and JSON status equals "ok"`, Covers: "correctness"},
 			RuntimeAssertion{ID: "demo-success-rate", Surface: "GET /api/demo", Expectation: "success rate is at least 95 percent over 20 requests", Covers: "availability"},
 			RuntimeAssertion{ID: "demo-latency", Surface: "GET /api/demo", Expectation: "p95 latency is at most 500ms over 20 requests", Covers: "latency"},
 		)
@@ -288,11 +318,140 @@ func discoverImageRepository(repo string, files []File) string {
 	return "ghcr.io/" + strings.ToLower(repo)
 }
 
-// ConservativeProposal is the no-agent fallback. It is repository-shaped,
-// intentionally guarded, and ready for automatic phase-one activation.
-func ConservativeProposal(s Snapshot) Proposal {
-	paths := []RiskPath{{Glob: "src/**", Minimum: "medium", Reason: "Runtime code changes require the standard lane."}}
-	seen := map[string]bool{"src/**": true}
+// ConservativeFindings are the semantic fallback used by non-agent setup.
+func ConservativeFindings(s Snapshot) Findings {
+	intents := make([]AssertionIntent, 0)
+	for _, assertion := range semanticAssertionsFor(s.CriticalSurfaces) {
+		intents = append(intents, AssertionIntent{Surface: assertion.Surface, Covers: assertion.Covers})
+	}
+	return Findings{
+		SchemaVersion:         "safelane.setup.findings/v1",
+		InspectionFingerprint: Fingerprint(s),
+		Summary:               "SafeLane selected conservative semantic findings from repository facts.",
+		RiskPaths:             []RiskPath{{Glob: "src/**", Minimum: "medium", Reason: "Runtime code changes require the standard lane."}},
+		AssertionIntents:      intents,
+	}
+}
+
+// ValidateFindings checks semantic input before SafeLane compiles a plan.
+// Agent findings require citations; the trusted deterministic fallback does not.
+func ValidateFindings(p Findings, s Snapshot, requireEvidence bool) error {
+	if p.SchemaVersion != "safelane.setup.findings/v1" {
+		return fmt.Errorf("setup: unsupported findings schema %q", p.SchemaVersion)
+	}
+	if p.InspectionFingerprint == "" || p.InspectionFingerprint != Fingerprint(s) {
+		return errors.New("setup: findings inspection fingerprint is stale or does not match this repository")
+	}
+	if len(semanticAssertionsFor(s.CriticalSurfaces)) == 0 {
+		return errors.New("setup: no semantic application surface was discovered")
+	}
+	if strings.TrimSpace(p.Summary) == "" {
+		return errors.New("setup: findings have no summary")
+	}
+	if len(p.RiskPaths) == 0 || len(p.RiskPaths) > 20 {
+		return errors.New("setup: findings must contain 1-20 application risk paths")
+	}
+	seenPaths := map[string]bool{}
+	reservedPaths := map[string]bool{"Dockerfile": true, ".github/workflows/**": true}
+	for _, rule := range p.RiskPaths {
+		clean := filepath.ToSlash(filepath.Clean(rule.Glob))
+		if clean != rule.Glob || clean == "." || strings.HasPrefix(clean, "../") || strings.Contains(clean, "/../") || strings.ContainsAny(rule.Glob, "\r\n") {
+			return fmt.Errorf("setup: recommendation has an unsafe risk path %q", rule.Glob)
+		}
+		if seenPaths[rule.Glob] {
+			return fmt.Errorf("setup: risk path %q is duplicated", rule.Glob)
+		}
+		seenPaths[rule.Glob] = true
+		if reservedPaths[rule.Glob] {
+			return fmt.Errorf("setup: risk path %q is owned by SafeLane's product floors", rule.Glob)
+		}
+		if rule.Minimum != "low" && rule.Minimum != "medium" && rule.Minimum != "high" {
+			return fmt.Errorf("setup: risk path %q has invalid minimum %q", rule.Glob, rule.Minimum)
+		}
+		reason := strings.TrimSpace(rule.Reason)
+		if reason == "" || strings.ContainsAny(reason, "\r\n") {
+			return fmt.Errorf("setup: risk path %q requires a one-line reason", rule.Glob)
+		}
+		if err := validateEvidence(rule.Evidence, s, requireEvidence); err != nil {
+			return fmt.Errorf("setup: risk path %q: %w", rule.Glob, err)
+		}
+	}
+	if len(p.AssertionIntents) == 0 {
+		return errors.New("setup: findings have no semantic assertion intents")
+	}
+	supportedAssertions := map[string]RuntimeAssertion{}
+	for _, assertion := range semanticAssertionsFor(s.CriticalSurfaces) {
+		supportedAssertions[assertion.Surface+"\x00"+assertion.Covers] = assertion
+	}
+	seenAssertions := map[string]bool{}
+	coveredSurfaces := map[string]bool{}
+	reservedCovers := map[string]bool{"availability": true, "latency": true, "artifact-identity": true}
+	for _, intent := range p.AssertionIntents {
+		if strings.TrimSpace(intent.Surface) == "" || strings.TrimSpace(intent.Covers) == "" {
+			return errors.New("setup: assertion intents require surface and covers")
+		}
+		key := intent.Surface + "\x00" + intent.Covers
+		if seenAssertions[key] {
+			return fmt.Errorf("setup: assertion intent for %q and %q is duplicated", intent.Surface, intent.Covers)
+		}
+		seenAssertions[key] = true
+		if reservedCovers[intent.Covers] {
+			return fmt.Errorf("setup: assertion intent for %q uses SafeLane-owned coverage %q", intent.Surface, intent.Covers)
+		}
+		if _, ok := supportedAssertions[key]; !ok {
+			return fmt.Errorf("setup: assertion intent for %q and %q is not executable by the configured probe", intent.Surface, intent.Covers)
+		}
+		if err := validateEvidence(intent.Evidence, s, requireEvidence); err != nil {
+			return fmt.Errorf("setup: assertion intent for %q: %w", intent.Surface, err)
+		}
+		coveredSurfaces[intent.Surface] = true
+	}
+	for _, surface := range s.CriticalSurfaces {
+		if surface == "GET /version" {
+			continue
+		}
+		if !coveredSurfaces[surface] {
+			return fmt.Errorf("setup: critical surface %q has no runtime assertion", surface)
+		}
+	}
+	return nil
+}
+
+func compileAssertionIntents(findings Findings, s Snapshot) []RuntimeAssertion {
+	supported := map[string]RuntimeAssertion{}
+	for _, assertion := range semanticAssertionsFor(s.CriticalSurfaces) {
+		supported[assertion.Surface+"\x00"+assertion.Covers] = assertion
+	}
+	assertions := make([]RuntimeAssertion, 0, len(findings.AssertionIntents)+len(s.MandatoryAssertions))
+	for _, intent := range findings.AssertionIntents {
+		assertions = append(assertions, supported[intent.Surface+"\x00"+intent.Covers])
+	}
+	return append(assertions, s.MandatoryAssertions...)
+}
+
+func validateEvidence(items []Evidence, s Snapshot, required bool) error {
+	if required && len(items) == 0 {
+		return errors.New("at least one file/line evidence citation is required")
+	}
+	files := map[string]File{}
+	for _, file := range s.Files {
+		files[file.Path] = file
+	}
+	for _, item := range items {
+		file, ok := files[filepath.ToSlash(item.File)]
+		if !ok || item.Line < 1 {
+			return fmt.Errorf("evidence %s:%d does not identify an inspected file line", item.File, item.Line)
+		}
+		if file.Content != "" && item.Line > strings.Count(file.Content, "\n")+1 {
+			return fmt.Errorf("evidence %s:%d is past the end of the inspected file", item.File, item.Line)
+		}
+	}
+	return nil
+}
+
+func productRiskPaths(s Snapshot) []RiskPath {
+	var paths []RiskPath
+	seen := map[string]bool{}
 	for _, file := range s.Files {
 		if file.Path == "Dockerfile" && !seen["Dockerfile"] {
 			paths = append(paths, RiskPath{Glob: "Dockerfile", Minimum: "high", Reason: "Container construction changes require the guarded lane."})
@@ -303,95 +462,32 @@ func ConservativeProposal(s Snapshot) Proposal {
 			seen[".github/workflows/**"] = true
 		}
 	}
-	return Proposal{
-		SchemaVersion:         "safelane.setup.proposal/v2",
-		InspectionFingerprint: Fingerprint(s),
-		Summary:               "Generated a conservative proposal from repository facts.",
-		RiskPaths:             paths,
-		RuntimeAssertions:     append([]RuntimeAssertion(nil), s.RuntimeAssertions...),
-	}
+	return paths
 }
 
-// ValidateProposal checks the agent's output before activation.
-func ValidateProposal(p Proposal, s Snapshot) error {
-	if p.SchemaVersion != "safelane.setup.proposal/v2" {
-		return fmt.Errorf("setup: unsupported proposal schema %q", p.SchemaVersion)
-	}
-	if p.InspectionFingerprint == "" || p.InspectionFingerprint != Fingerprint(s) {
-		return errors.New("setup: proposal inspection fingerprint is stale or does not match this repository")
-	}
-	if len(s.RuntimeAssertions) == 0 {
-		return errors.New("setup: no concrete runtime assertion was discovered")
-	}
-	if strings.TrimSpace(p.Summary) == "" {
-		return errors.New("setup: recommendation has no summary")
-	}
-	if len(p.RiskPaths) == 0 || len(p.RiskPaths) > 20 {
-		return errors.New("setup: recommendation must contain 1-20 risk paths")
-	}
-	seenPaths := map[string]bool{}
-	for _, rule := range p.RiskPaths {
-		clean := filepath.ToSlash(filepath.Clean(rule.Glob))
-		if clean != rule.Glob || clean == "." || strings.HasPrefix(clean, "../") || strings.Contains(clean, "/../") || strings.ContainsAny(rule.Glob, "\r\n") {
-			return fmt.Errorf("setup: recommendation has an unsafe risk path %q", rule.Glob)
-		}
-		if seenPaths[rule.Glob] {
-			return fmt.Errorf("setup: risk path %q is duplicated", rule.Glob)
-		}
-		seenPaths[rule.Glob] = true
-		if rule.Minimum != "low" && rule.Minimum != "medium" && rule.Minimum != "high" {
-			return fmt.Errorf("setup: risk path %q has invalid minimum %q", rule.Glob, rule.Minimum)
-		}
-		reason := strings.TrimSpace(rule.Reason)
-		if reason == "" || len(reason) > 280 || strings.ContainsAny(reason, "\r\n") {
-			return fmt.Errorf("setup: risk path %q requires a one-line reason", rule.Glob)
-		}
-	}
-	if len(p.RuntimeAssertions) == 0 {
-		return errors.New("setup: recommendation has no runtime assertions")
-	}
-	seenAssertions := map[string]bool{}
-	coveredSurfaces := map[string]bool{}
-	for _, assertion := range p.RuntimeAssertions {
-		if strings.TrimSpace(assertion.ID) == "" || strings.TrimSpace(assertion.Surface) == "" || strings.TrimSpace(assertion.Expectation) == "" || strings.TrimSpace(assertion.Covers) == "" {
-			return errors.New("setup: runtime assertions require id, surface, expectation, and covers")
-		}
-		if seenAssertions[assertion.ID] {
-			return fmt.Errorf("setup: runtime assertion %q is duplicated", assertion.ID)
-		}
-		seenAssertions[assertion.ID] = true
-		coveredSurfaces[assertion.Surface] = true
-	}
-	for _, surface := range s.CriticalSurfaces {
-		if !coveredSurfaces[surface] {
-			return fmt.Errorf("setup: critical surface %q has no runtime assertion", surface)
-		}
-	}
-	return nil
-}
-
-// CompileProposal turns bounded semantic decisions into the complete operator
-// configuration. This is the only setup path that authors policy or manifests.
-func CompileProposal(p Proposal, s Snapshot) (CompiledProposal, error) {
-	if err := ValidateProposal(p, s); err != nil {
-		return CompiledProposal{}, err
+// CompileFindings is the only setup path that authors policy or manifests.
+func CompileFindings(p Findings, s Snapshot, requireEvidence bool) (CompiledSetup, error) {
+	if err := ValidateFindings(p, s, requireEvidence); err != nil {
+		return CompiledSetup{}, err
 	}
 	checks := append([]string(nil), s.RequiredChecks...)
 	if len(checks) == 0 {
 		checks = []string{"build-and-push"}
 	}
-	compiled := CompiledProposal{
+	riskPaths := append(productRiskPaths(s), p.RiskPaths...)
+	assertions := compileAssertionIntents(p, s)
+	compiled := CompiledSetup{
 		RequiredChecks:    checks,
-		RuntimeAssertions: append([]RuntimeAssertion(nil), p.RuntimeAssertions...),
-		PolicyYAML:        conservativePolicy(p.RiskPaths),
+		RuntimeAssertions: assertions,
+		PolicyYAML:        conservativePolicy(riskPaths),
 		TemplateFiles:     conservativeTemplate(s),
 	}
 	if err := validatePolicyYAML(compiled.PolicyYAML); err != nil {
-		return CompiledProposal{}, fmt.Errorf("setup: SafeLane compiled an invalid policy: %w", err)
+		return CompiledSetup{}, fmt.Errorf("setup: SafeLane compiled an invalid policy: %w", err)
 	}
 	for _, file := range compiled.TemplateFiles {
 		if !safeTemplatePath(file.Path) || strings.TrimSpace(file.Content) == "" {
-			return CompiledProposal{}, fmt.Errorf("setup: SafeLane compiled an invalid Release Template file %q", file.Path)
+			return CompiledSetup{}, fmt.Errorf("setup: SafeLane compiled an invalid Release Template file %q", file.Path)
 		}
 	}
 	files := fstest.MapFS{}
@@ -399,12 +495,73 @@ func CompileProposal(p Proposal, s Snapshot) (CompiledProposal, error) {
 		files[file.Path] = &fstest.MapFile{Data: []byte(file.Content)}
 	}
 	if _, err := render.LoadFS(files); err != nil {
-		return CompiledProposal{}, fmt.Errorf("setup: SafeLane compiled an invalid Release Template: %w", err)
+		return CompiledSetup{}, fmt.Errorf("setup: SafeLane compiled an invalid Release Template: %w", err)
 	}
 	if err := validateMandatoryAnalysis(compiled.TemplateFiles); err != nil {
-		return CompiledProposal{}, err
+		return CompiledSetup{}, err
 	}
 	return compiled, nil
+}
+
+// NewPlan freezes the exact validated setup that can later be applied by ID.
+func NewPlan(s Snapshot, findings Findings, compiled CompiledSetup, agentFindings bool) Plan {
+	s.InspectionFingerprint = Fingerprint(s)
+	source := "deterministic"
+	if agentFindings {
+		source = "agent"
+	}
+	plan := Plan{SchemaVersion: "safelane.setup.plan/v1", FindingsSource: source, Snapshot: s, Findings: findings, Compiled: compiled}
+	raw, _ := json.Marshal(plan)
+	sum := sha256.Sum256(raw)
+	plan.ID = fmt.Sprintf("setup_%x", sum[:10])
+	return plan
+}
+
+// ValidatePlan detects malformed or modified plan artifacts before mutation.
+func ValidatePlan(plan Plan) error {
+	if plan.SchemaVersion != "safelane.setup.plan/v1" || plan.ID == "" {
+		return errors.New("setup: invalid setup plan identity")
+	}
+	want := plan.ID
+	plan.ID = ""
+	raw, _ := json.Marshal(plan)
+	sum := sha256.Sum256(raw)
+	if got := fmt.Sprintf("setup_%x", sum[:10]); got != want {
+		return errors.New("setup: setup plan content does not match its ID")
+	}
+	if Fingerprint(plan.Snapshot) != plan.Snapshot.InspectionFingerprint {
+		return errors.New("setup: setup plan contains an invalid inspection fingerprint")
+	}
+	if plan.FindingsSource != "agent" && plan.FindingsSource != "deterministic" {
+		return errors.New("setup: setup plan contains an invalid findings source")
+	}
+	if err := ValidateFindings(plan.Findings, plan.Snapshot, plan.FindingsSource == "agent"); err != nil {
+		return fmt.Errorf("setup: setup plan contains invalid findings: %w", err)
+	}
+	if err := validateCompiledSetup(plan.Compiled); err != nil {
+		return fmt.Errorf("setup: setup plan contains invalid compiled configuration: %w", err)
+	}
+	return nil
+}
+
+func validateCompiledSetup(compiled CompiledSetup) error {
+	if len(compiled.RequiredChecks) == 0 || len(compiled.RuntimeAssertions) == 0 {
+		return errors.New("required checks and runtime assertions must be present")
+	}
+	if err := validatePolicyYAML(compiled.PolicyYAML); err != nil {
+		return err
+	}
+	files := fstest.MapFS{}
+	for _, file := range compiled.TemplateFiles {
+		if !safeTemplatePath(file.Path) || strings.TrimSpace(file.Content) == "" {
+			return fmt.Errorf("invalid Release Template file %q", file.Path)
+		}
+		files[file.Path] = &fstest.MapFile{Data: []byte(file.Content)}
+	}
+	if _, err := render.LoadFS(files); err != nil {
+		return err
+	}
+	return validateMandatoryAnalysis(compiled.TemplateFiles)
 }
 
 func validateMandatoryAnalysis(files []TemplateFile) error {

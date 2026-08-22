@@ -12,8 +12,9 @@ setup → doctor → release plan → release run → release proof
 | Command | Purpose |
 | --- | --- |
 | `safelane setup` | Discover and write conservative operator configuration without invoking an agent. |
-| `safelane setup inspect --json` | Return repository facts and a bounded risk/assertion proposal for the active Codex or Claude session. |
-| `safelane setup apply --proposal <absolute-path>` | Validate bounded agent decisions and compile operator-owned configuration atomically. |
+| `safelane setup inspect --json` | Return and persist fingerprinted repository facts without an editable configuration baseline. |
+| `safelane setup plan --findings <path\|->` | Validate semantic findings and persist SafeLane's exact compiled setup. |
+| `safelane setup apply <setup-id>` | Recheck repository identity and atomically apply one immutable setup plan. |
 | `safelane doctor` | Check configuration, evidence providers, credentials, and stored-template compatibility with the live target. |
 | `safelane release plan --pr <number>` | Freeze the exact PR, assessment, Safety Contract, and rendered bundle without production mutation. |
 | `safelane release run <id>` | Ask once and coordinate Argo to a terminal or decision-required outcome. |

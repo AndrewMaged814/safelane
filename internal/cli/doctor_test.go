@@ -36,10 +36,10 @@ func doctorRuntime(t *testing.T) (projectFile, policyFile, templateDir string) {
 		t.Fatal(err)
 	}
 	snapshot := setupengine.Snapshot{
-		Application: "safelane-demo-api", RequiredChecks: []string{"Test"},
-		RuntimeAssertions: []setupengine.RuntimeAssertion{{ID: "demo-response", Surface: "GET /api/demo", Expectation: "status ok", Covers: "correctness"}},
+		Application: "safelane-demo-api", RequiredChecks: []string{"Test"}, CriticalSurfaces: []string{"GET /api/demo"},
+		MandatoryAssertions: []setupengine.RuntimeAssertion{{ID: "availability", Surface: "GET /api/demo", Expectation: "success rate", Covers: "availability"}},
 	}
-	compiled, err := setupengine.CompileProposal(setupengine.ConservativeProposal(snapshot), snapshot)
+	compiled, err := setupengine.CompileFindings(setupengine.ConservativeFindings(snapshot), snapshot, false)
 	if err != nil {
 		t.Fatal(err)
 	}

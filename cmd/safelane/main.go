@@ -216,8 +216,9 @@ func releaseGroup(rt commandRuntime) *cobra.Command {
 func setupGroup(rt commandRuntime) *cobra.Command {
 	setup := legacyLeaf(rt, "setup [--yes] [--json]", "Create operator-owned configuration from repository facts", cli.SetupCommand(rt.root), func(_ commandRuntime, args []string) []string { return args })
 	setup.AddCommand(
-		legacyLeaf(rt, "inspect [--json]", "Inspect repository facts as JSON without writing", cli.SetupInspectCommand(rt.root), func(_ commandRuntime, args []string) []string { return args }),
-		legacyLeaf(rt, "apply --proposal <absolute-path> [--yes] [--json]", "Validate and apply an agent-authored setup proposal", cli.SetupApplyCommand(rt.root), func(_ commandRuntime, args []string) []string { return args }),
+		legacyLeaf(rt, "inspect [--json]", "Inspect repository facts and persist their fingerprint", cli.SetupInspectCommand(rt.root), func(_ commandRuntime, args []string) []string { return args }),
+		legacyLeaf(rt, "plan --findings <absolute-path|-> [--json]", "Compile agent findings into an immutable setup plan", cli.SetupPlanCommand(rt.root), func(_ commandRuntime, args []string) []string { return args }),
+		legacyLeaf(rt, "apply <setup-id> [--yes] [--json]", "Apply one immutable setup plan", cli.SetupApplyCommand(rt.root), func(_ commandRuntime, args []string) []string { return args }),
 	)
 	return setup
 }

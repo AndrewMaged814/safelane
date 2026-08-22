@@ -55,7 +55,7 @@ func TestSnapshotJSONContainsCompactFileEvidenceNotSourceContent(t *testing.T) {
 	}
 }
 
-func TestDiscoverIncludesAReadyValidBoundedAgentProposal(t *testing.T) {
+func TestDiscoverReturnsFactsAndProductAssertionsWithoutAnAgentBaseline(t *testing.T) {
 	root := t.TempDir()
 	runGit(t, root, "init")
 	runGit(t, root, "remote", "add", "origin", "https://github.com/AndrewMaged814/safelane-demo-api.git")
@@ -66,29 +66,17 @@ func TestDiscoverIncludesAReadyValidBoundedAgentProposal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if snapshot.Proposal == nil {
-		t.Fatal("inspection omitted its ready agent proposal")
+	if len(snapshot.MandatoryAssertions) != 3 {
+		t.Fatalf("mandatory runtime assertions = %d, want availability, latency, and identity", len(snapshot.MandatoryAssertions))
 	}
-	if snapshot.Proposal.InspectionFingerprint != snapshot.InspectionFingerprint {
-		t.Fatalf("proposal fingerprint = %q, inspection = %q", snapshot.Proposal.InspectionFingerprint, snapshot.InspectionFingerprint)
-	}
-	if len(snapshot.Proposal.RuntimeAssertions) != 4 {
-		t.Fatalf("proposal runtime assertions = %d, want 4", len(snapshot.Proposal.RuntimeAssertions))
-	}
-	raw, err := json.Marshal(snapshot.Proposal)
+	raw, err := json.Marshal(snapshot)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, forbidden := range []string{"policy_yaml", "template_files", "required_checks", "template_highlights"} {
+	for _, forbidden := range []string{"\"proposal\"", "policy_yaml", "template_files", "risk_paths"} {
 		if strings.Contains(string(raw), forbidden) {
-			t.Fatalf("bounded proposal exposed operator-owned field %q: %s", forbidden, raw)
+			t.Fatalf("inspection exposed configuration baseline field %q: %s", forbidden, raw)
 		}
-	}
-	if len(raw) > 2500 {
-		t.Fatalf("bounded proposal is %d bytes, want at most 2500", len(raw))
-	}
-	if err := ValidateProposal(*snapshot.Proposal, snapshot); err != nil {
-		t.Fatalf("inspection proposal is not directly applicable: %v", err)
 	}
 }
 
@@ -100,47 +88,39 @@ func TestFingerprintChangesWithFileContentDigest(t *testing.T) {
 	}
 }
 
-func TestFingerprintDoesNotDependOnEmbeddedProposal(t *testing.T) {
-	snapshot := Snapshot{Files: []File{{Path: "src/Program.cs", ContentSHA256: "sha256:first"}}}
-	want := Fingerprint(snapshot)
-	snapshot.Proposal = &Proposal{Summary: "agent changed this draft"}
-	if got := Fingerprint(snapshot); got != want {
-		t.Fatalf("fingerprint changed from %q to %q when only the proposal changed", want, got)
-	}
-}
-
-func TestConservativeProposalIsProjectShapedAndValid(t *testing.T) {
+func TestConservativeFindingsUseTheSameCompilerAsAgentFindings(t *testing.T) {
 	snapshot := Snapshot{
-		Application:       "safelane-demo-api",
-		Repository:        "AndrewMaged814/safelane-demo-api",
-		RequiredChecks:    []string{"Publish image"},
-		Files:             []File{{Path: "Dockerfile"}, {Path: ".github/workflows/ci.yml"}},
-		RuntimeAssertions: []RuntimeAssertion{{ID: "response", Surface: "GET /api/demo", Expectation: "status ok", Covers: "correctness"}},
+		Application:         "safelane-demo-api",
+		Repository:          "AndrewMaged814/safelane-demo-api",
+		RequiredChecks:      []string{"Publish image"},
+		Files:               []File{{Path: "Dockerfile"}, {Path: ".github/workflows/ci.yml"}},
+		CriticalSurfaces:    []string{"GET /api/demo", "GET /version"},
+		MandatoryAssertions: []RuntimeAssertion{{ID: "identity", Surface: "GET /version", Expectation: "commit matches", Covers: "artifact-identity"}},
 	}
-	proposal := ConservativeProposal(snapshot)
-	if err := ValidateProposal(proposal, snapshot); err != nil {
+	findings := ConservativeFindings(snapshot)
+	if err := ValidateFindings(findings, snapshot, false); err != nil {
 		t.Fatal(err)
 	}
-	compiled, err := CompileProposal(proposal, snapshot)
+	compiled, err := CompileFindings(findings, snapshot, false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(compiled.PolicyYAML, `glob: "Dockerfile"`) {
 		t.Fatal("fallback policy did not use repository-shaped Dockerfile rule")
 	}
-	if len(proposal.RiskPaths) == 0 {
-		t.Fatal("fallback proposal did not include bounded risk-path decisions")
+	if len(findings.RiskPaths) == 0 {
+		t.Fatal("fallback findings did not include bounded risk-path decisions")
 	}
 	if len(compiled.TemplateFiles) != 4 {
 		t.Fatalf("compiled template files = %d, want two services, analysis, and rollout", len(compiled.TemplateFiles))
 	}
 }
 
-func TestCompileProposalKeepsInfrastructureOperatorOwned(t *testing.T) {
+func TestCompileFindingsKeepsInfrastructureOperatorOwned(t *testing.T) {
 	snapshot := validSnapshot()
 	snapshot.Files = append(snapshot.Files, File{Path: "infra/bootstrap.ps1", Content: "selector:\n  app: stale-repository-contract\ntargetPort: 8080"})
-	proposal := ConservativeProposal(snapshot)
-	compiled, err := CompileProposal(proposal, snapshot)
+	findings := ConservativeFindings(snapshot)
+	compiled, err := CompileFindings(findings, snapshot, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,26 +133,66 @@ func TestCompileProposalKeepsInfrastructureOperatorOwned(t *testing.T) {
 	}
 }
 
-func TestValidateProposalRejectsInvalidRiskPath(t *testing.T) {
+func TestValidateFindingsRejectsInvalidRiskPath(t *testing.T) {
 	snapshot := validSnapshot()
-	proposal := ConservativeProposal(snapshot)
-	proposal.RiskPaths = append(proposal.RiskPaths, RiskPath{Glob: "../outside/**", Minimum: "high", Reason: "escape"})
-	if err := ValidateProposal(proposal, snapshot); err == nil || !strings.Contains(err.Error(), "risk path") {
+	findings := ConservativeFindings(snapshot)
+	findings.RiskPaths = append(findings.RiskPaths, RiskPath{Glob: "../outside/**", Minimum: "high", Reason: "escape"})
+	if err := ValidateFindings(findings, snapshot, false); err == nil || !strings.Contains(err.Error(), "risk path") {
 		t.Fatalf("error = %v, want unsafe risk path rejection", err)
 	}
 }
 
-func TestValidateProposalRejectsMissingRuntimeAssertions(t *testing.T) {
+func TestValidateFindingsRejectsMissingRuntimeAssertions(t *testing.T) {
 	snapshot := validSnapshot()
-	proposal := ConservativeProposal(snapshot)
-	proposal.RuntimeAssertions = nil
-	if err := ValidateProposal(proposal, snapshot); err == nil || !strings.Contains(err.Error(), "runtime assertions") {
-		t.Fatalf("error = %v, want runtime assertions rejection", err)
+	findings := ConservativeFindings(snapshot)
+	findings.AssertionIntents = nil
+	if err := ValidateFindings(findings, snapshot, false); err == nil || !strings.Contains(err.Error(), "assertion intents") {
+		t.Fatalf("error = %v, want assertion intents rejection", err)
+	}
+}
+
+func TestAgentFindingsRequireRealEvidenceAndCannotClaimProductCoverage(t *testing.T) {
+	snapshot := validSnapshot()
+	findings := ConservativeFindings(snapshot)
+	if err := ValidateFindings(findings, snapshot, true); err == nil || !strings.Contains(err.Error(), "evidence") {
+		t.Fatalf("error = %v, want missing evidence rejection", err)
+	}
+	findings.RiskPaths[0].Evidence = []Evidence{{File: "Program.cs", Line: 1}}
+	findings.AssertionIntents[0].Evidence = []Evidence{{File: "Program.cs", Line: 1}}
+	findings.AssertionIntents[0].Covers = "latency"
+	if err := ValidateFindings(findings, snapshot, true); err == nil || !strings.Contains(err.Error(), "SafeLane-owned coverage") {
+		t.Fatalf("error = %v, want product coverage rejection", err)
+	}
+	findings.AssertionIntents[0].Covers = "correctness"
+	findings.AssertionIntents[0].Surface = "GET /invented"
+	if err := ValidateFindings(findings, snapshot, true); err == nil || !strings.Contains(err.Error(), "not executable") {
+		t.Fatalf("error = %v, want unsupported assertion rejection", err)
+	}
+}
+
+func TestPlanIDBindsTheExactCompiledSetup(t *testing.T) {
+	snapshot := validSnapshot()
+	findings := ConservativeFindings(snapshot)
+	compiled, err := CompileFindings(findings, snapshot, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := NewPlan(snapshot, findings, compiled, false)
+	if err := ValidatePlan(plan); err != nil {
+		t.Fatal(err)
+	}
+	plan.Compiled.PolicyYAML += "\n# changed"
+	if err := ValidatePlan(plan); err == nil || !strings.Contains(err.Error(), "does not match") {
+		t.Fatalf("error = %v, want modified plan rejection", err)
 	}
 }
 
 func validSnapshot() Snapshot {
-	return Snapshot{Application: "app", RequiredChecks: []string{"Test"}, RuntimeAssertions: []RuntimeAssertion{{ID: "response", Surface: "GET /api/demo", Expectation: "status ok", Covers: "correctness"}}}
+	return Snapshot{
+		Application: "app", RequiredChecks: []string{"Test"}, CriticalSurfaces: []string{"GET /api/demo"},
+		MandatoryAssertions: []RuntimeAssertion{{ID: "availability", Surface: "GET /api/demo", Expectation: "success rate", Covers: "availability"}},
+		Files:               []File{{Path: "Program.cs", Content: "route", ContentSHA256: "sha256:route"}},
+	}
 }
 
 func writeFile(t *testing.T, path, body string) {
