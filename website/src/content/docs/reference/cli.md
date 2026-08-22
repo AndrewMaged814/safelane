@@ -23,7 +23,6 @@ setup → doctor → release plan → release run → release proof
 | `safelane release retry <id>` | Re-verify and create a new attempt from a terminal release. |
 | `safelane release accept-risk <id> --hazard <id> --reason <text>` | Record one policy-permitted uncovered hazard decision. |
 | `safelane release pause/resume/abort` | Use the separately audited emergency-control path. |
-| `safelane demo up/reset/down` | Manage only SafeLane's isolated Kind demo. |
 
 ## Agent/CI form
 

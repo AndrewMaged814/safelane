@@ -12,7 +12,7 @@ safelane setup
 safelane doctor
 ```
 
-For the isolated local demonstration, start Docker and run `safelane demo up --yes` before doctor. SafeLane downloads its pinned, checksum-verified Kind, kubectl, and Argo Rollouts CLI tools privately, owns that Kind cluster, and never changes your ambient PATH or Kubernetes context.
+Provision a cluster with Argo Rollouts, a traffic router and a metrics provider before running doctor. SafeLane does not create or own clusters.
 
 ## Release one exact merged PR
 

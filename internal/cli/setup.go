@@ -440,3 +440,16 @@ func activateSetup(loc project.Locations, snapshot setupengine.Snapshot, compile
 	}
 	return nil
 }
+
+// copyFile duplicates one file, creating the target's parent directory.
+// It previously lived alongside the Kind demo; setup is now its only caller.
+func copyFile(source, target string) error {
+	raw, err := os.ReadFile(source)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
+		return err
+	}
+	return os.WriteFile(target, raw, 0o600)
+}

@@ -43,15 +43,9 @@ safelane release run rel_...
 safelane release proof rel_...
 ```
 
-For an isolated local environment:
-
-```bash
-safelane demo up --yes
-safelane demo reset --yes
-safelane demo down --yes
-```
-
-`demo` requires a running Docker engine. SafeLane downloads checksum-verified pinned Kind, kubectl, and Argo Rollouts CLI binaries into its private demo directory, uses the owned cluster `safelane-demo` and a private kubeconfig, and never changes the ambient PATH or Kubernetes context.
+For a local environment, provision the cluster yourself. SafeLane does not manage
+clusters: it verifies, decides, renders and coordinates, and expects a reachable
+target with Argo Rollouts, a traffic router and a metrics provider already in place.
 
 ## Setup with an agent
 
