@@ -3,8 +3,8 @@
 Everything SafeLane needs on the target cluster, in one command.
 
 ```bash
-./cluster/install.sh                                # podinfo (default)
-SAFELANE_APP=safelane-demo-api ./cluster/install.sh
+./cluster/install.sh                        # safelane-demo-api (default)
+SAFELANE_APP=<name> ./cluster/install.sh    # any app under cluster/apps/
 ```
 
 Per-app data lives in `cluster/apps/<app>/`: an `app.env` plus the two
@@ -44,7 +44,7 @@ A cluster without a metrics provider aborts every canary, blaming the change.
 means no numerator and no denominator.
 
 **The scrape config must discover endpoints, not pods.** The analysis query
-scopes on `service="podinfo-canary"`, and only endpoint-role discovery knows
+scopes on `service="<app>-canary"`, and only endpoint-role discovery knows
 which Service currently selects a pod — Argo distinguishes canary from stable
 by pointing each Service's *selector* at a pod-template-hash, never by
 labelling the pod. Pod-role discovery scrapes perfectly happily and produces a
@@ -54,13 +54,13 @@ labelling the pod. Pod-role discovery scrapes perfectly happily and produces a
 ## Identities
 
 `50-identities.sh` rewrites your default kubeconfig context so the agent runs
-as `safelane-caller`, which may read rollouts and nothing else. Your original
+as `safelane-caller-<app>`, which may read rollouts and nothing else. Your original
 context is preserved as `safelane-admin` and the kubeconfig is backed up with a
 timestamp first.
 
 ```bash
-kubectl auth can-i patch rollouts --context safelane-caller -n podinfo   # no
-kubectl --context safelane-admin get pods -n podinfo                     # ordinary work
+kubectl auth can-i patch rollouts -n safelane-demo-api                    # no
+kubectl --context safelane-admin get pods -n safelane-demo-api            # ordinary work
 ```
 
 That denial is enforced by Kubernetes, not by SafeLane — it holds even if
@@ -74,7 +74,7 @@ SafeLane is bypassed entirely.
 | `ARGO_ROLLOUTS_VERSION` | `v1.9.1` |
 | `PROM_CHART_VERSION` | `29.23.0` |
 | `GRAFANA_CHART_VERSION` | `10.5.15` |
-| `SAFELANE_APP` | `podinfo` — selects `cluster/apps/<app>/` |
+| `SAFELANE_APP` | `safelane-demo-api` — selects `cluster/apps/<app>/` |
 
 Pin Argo Rollouts and do not bump it casually: `ComputeStepHash` is not stable
 across controller versions, and a change there can reset `currentStepIndex`

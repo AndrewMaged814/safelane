@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # One command: an empty-ish minikube to a cluster SafeLane can release into.
 #
-#   ./cluster/install.sh                              # podinfo (default)
-#   SAFELANE_APP=safelane-demo-api ./cluster/install.sh
+#   ./cluster/install.sh                       # safelane-demo-api (default)
+#   SAFELANE_APP=<name> ./cluster/install.sh   # any app under cluster/apps/
 #
 # Idempotent -- safe to re-run. Each stage is also runnable on its own if you
 # need to redo just one part.

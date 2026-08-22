@@ -9,7 +9,7 @@
 CLUSTER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export PATH="${HOME}/.local/bin:${PATH}"
 
-SAFELANE_APP="${SAFELANE_APP:-podinfo}"
+SAFELANE_APP="${SAFELANE_APP:-safelane-demo-api}"
 APP_DIR="${CLUSTER_DIR}/apps/${SAFELANE_APP}"
 if [ ! -f "${APP_DIR}/app.env" ]; then
   echo "unknown app '${SAFELANE_APP}'. Available: $(ls "${CLUSTER_DIR}/apps" | tr '\n' ' ')" >&2
