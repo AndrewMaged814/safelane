@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # One command: an empty-ish minikube to a cluster SafeLane can release into.
 #
-#   ./cluster/install.sh
+#   ./cluster/install.sh                              # podinfo (default)
+#   SAFELANE_APP=safelane-demo-api ./cluster/install.sh
 #
 # Idempotent -- safe to re-run. Each stage is also runnable on its own if you
 # need to redo just one part.
@@ -12,7 +13,7 @@
 #   monitoring/prometheus    the analysis provider, 5s scrape, endpoint-role
 #                            discovery so the `service` label exists
 #   monitoring/grafana       the canary dashboard, anonymous read
-#   podinfo/                 the demo app at a healthy baseline, plus the two
+#   <app>/                   the demo app at a healthy baseline, plus the two
 #                            SafeLane identities and a load generator
 #
 # The identity stage rewrites your default kubeconfig context so the agent runs
@@ -20,8 +21,8 @@
 # preserved as `safelane-admin` and the file is backed up first.
 set -euo pipefail
 
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-export PATH="${HOME}/.local/bin:${PATH}"
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
+HERE="${CLUSTER_DIR}"
 
 stage() { printf '\n\033[1;36m######## %s ########\033[0m\n' "$1"; }
 
@@ -38,7 +39,7 @@ require_admin() {
     echo "Switch to one (kubectl config use-context safelane-admin) and retry." >&2
     exit 1
   fi
-  echo "running as $(kubectl config current-context)"
+  echo "running as $(kubectl config current-context), app ${SAFELANE_APP}"
 }
 
 require_admin
@@ -49,7 +50,7 @@ bash "${HERE}/10-cluster.sh"
 stage "2/5  Prometheus and Grafana"
 bash "${HERE}/20-monitoring.sh"
 
-stage "3/5  podinfo baseline"
+stage "3/5  ${SAFELANE_APP} baseline"
 bash "${HERE}/30-baseline.sh"
 
 stage "4/5  load generator"
@@ -61,13 +62,13 @@ bash "${HERE}/40-loadgen.sh"
 stage "5/5  SafeLane identities"
 bash "${HERE}/50-identities.sh"
 
-cat <<'DONE'
+cat <<DONE
 
 ######## cluster ready ########
 
 Verify:
-  kubectl --context safelane-admin get rollout podinfo -n podinfo
-  kubectl auth can-i patch rollouts --context safelane-caller -n podinfo   # no
+  kubectl --context safelane-admin get rollout ${ROLLOUT} -n ${NAMESPACE}
+  kubectl auth can-i patch rollouts -n ${NAMESPACE}   # no
 
 Watch:
   kubectl argo rollouts dashboard        http://localhost:3100

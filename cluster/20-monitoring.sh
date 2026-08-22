@@ -11,7 +11,8 @@
 # which would mean rewriting the relabel rule everything depends on.
 set -euo pipefail
 
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
+HERE="${CLUSTER_DIR}"
 PROM_CHART_VERSION="${PROM_CHART_VERSION:-29.23.0}"
 GRAFANA_CHART_VERSION="${GRAFANA_CHART_VERSION:-10.5.15}"
 
@@ -29,12 +30,14 @@ say "Prometheus"
 # which is the address baked into the rendered AnalysisTemplate.
 helm upgrade --install prometheus prometheus-community/prometheus \
   --version "${PROM_CHART_VERSION}" -n monitoring \
-  -f "${HERE}/prometheus-values.yaml" --wait --timeout 8m
+  -f <(render "${HERE}/prometheus-values.yaml") --wait --timeout 8m
 
 say "Grafana"
 # Applied before the chart: it mounts this ConfigMap, and a missing one leaves
 # the pod in ContainerCreating.
-kubectl apply -f "${HERE}/grafana-dashboard.yaml"
+render "${HERE}/grafana-dashboard.yaml" > /tmp/safelane-dashboard.yaml
+[ -s /tmp/safelane-dashboard.yaml ] || { echo "dashboard rendered empty" >&2; exit 1; }
+kubectl apply -f /tmp/safelane-dashboard.yaml
 helm upgrade --install grafana grafana/grafana \
   --version "${GRAFANA_CHART_VERSION}" -n monitoring \
   -f "${HERE}/grafana-values.yaml" --wait --timeout 8m

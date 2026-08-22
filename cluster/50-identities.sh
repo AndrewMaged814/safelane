@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Mirrors SafeLane's two production identities on the local kind cluster.
+# Mirrors SafeLane's two production identities in the application namespace.
 #
 # Safe to run twice: RBAC and token Secrets are declarative, the preserved
 # admin context is reused, and both generated ServiceAccount kubeconfigs are
@@ -7,13 +7,13 @@
 # context is written only to project.yml's controller_kubeconfig path.
 set -euo pipefail
 
-NAMESPACE=podinfo
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 CALLER=safelane-caller
 CONTROLLER=safelane-controller
 ADMIN_CONTEXT=safelane-admin
 DEFAULT_KUBECONFIG="${HOME:?HOME is required}/.kube/config"
 SAFELANE_CONFIG_HOME="${SAFELANE_HOME:-${HOME}/.safelane}"
-PROJECT_FILE="${SAFELANE_PROJECT_FILE:-${SAFELANE_CONFIG_HOME}/apps/podinfo/project.yml}"
+PROJECT_FILE="${SAFELANE_PROJECT_FILE:-${SAFELANE_CONFIG_HOME}/apps/${SAFELANE_APP}/project.yml}"
 
 yaml_scalar() {
   local key="$1"
