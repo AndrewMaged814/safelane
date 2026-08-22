@@ -17,15 +17,15 @@ flowchart LR
 
 | Lane | Weights |
 | --- | --- |
-| fast | 5 → 100 |
-| standard | 5 → 25 → 50 → 100 |
-| guarded | 1 → 5 → 25 → 50 → 100 |
+| fast | 50 → 100 |
+| standard | 25 → 50 → 100 |
+| guarded | 25 → 50 → 75 → 100 |
 
 The current mapping is low → fast, medium → standard, and high → guarded. default_lane is guarded. Mandatory evidence is a merged commit on the default branch, a passing publish workflow, and an immutable GHCR digest.
 
 ## Why weights are policy data
 
-The agent knows what it wants to do next. It does not know what the operator permits next. Keeping weights in the lane makes rollout advance a policy operation, not a free-form promotion command.
+The agent knows what it wants to do next. It does not know what the operator permits next. Keeping weights in the lane makes each progression request a policy operation, not a free-form promotion command.
 
 ## Why the default is the narrowest lane
 

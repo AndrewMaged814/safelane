@@ -9,7 +9,7 @@ SafeLane reads these files from SAFELANE_HOME (default ~/.safelane). Keep them o
 
 ### project.yml
 
-    version: 3
+    version: 4
     application: safelane-demo-api
     repository:
       name: AndrewMaged814/safelane-demo-api
@@ -19,17 +19,24 @@ SafeLane reads these files from SAFELANE_HOME (default ~/.safelane). Keep them o
       image_repository: ghcr.io/andrewmaged814/safelane-demo-api
       image_tag: sha-{{merge_sha}}
       required_checks:
-        - build-and-push
-        - test
+        - Publish image
+        - Test
       template_path: release-template
     target:
       cluster: safelane-demo
       namespace: safelane-demo-api
       rollout: safelane-demo-api
+    analysis:
+      probe_image: ghcr.io/andrewmaged814/safelane-demo-probe@sha256:<digest>
+      assertions:
+        - id: demo-response
+          surface: GET /api/demo
+          expectation: HTTP 200 and JSON status equals "ok"
+          covers: correctness
     controller_kubeconfig: controller.kubeconfig
     controller_context: safelane-controller
 
-version must be 1, 2, or 3. Version 3 uses required_checks to name every mandatory check. application, environment, cluster, and namespace must be lowercase DNS labels. repository.name is owner/name. The image repository includes a registry.
+Version 4 requires a digest-pinned external probe and concrete runtime assertions. `required_checks` names every mandatory static GitHub check; setup excludes dynamic matrix templates because GitHub expands them into different check-run names. Application, environment, cluster, and namespace must be lowercase DNS labels. `repository.name` is `owner/name`. The image repository includes a registry.
 
 ### policy.yml
 
@@ -39,9 +46,9 @@ version must be 1, 2, or 3. Version 3 uses required_checks to name every mandato
       - passing_publish_workflow
       - immutable_ghcr_digest
     lanes:
-      fast: { weights: [5, 100] }
-      standard: { weights: [5, 25, 50, 100] }
-      guarded: { weights: [1, 5, 25, 50, 100] }
+      fast: { weights: [50, 100] }
+      standard: { weights: [25, 50, 100] }
+      guarded: { weights: [25, 50, 75, 100] }
     risk_to_lane: { low: fast, medium: standard, high: guarded }
     default_lane: guarded
 

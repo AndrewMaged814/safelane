@@ -1,6 +1,6 @@
 ---
 title: Running a Release End to End
-description: The complete inspect, start, advance, and proof workflow.
+description: The complete plan, run, and proof workflow.
 ---
 
 ## A rollout command is too late to discover a bad release
@@ -10,23 +10,22 @@ Start with the release identity. SafeLane does the checking before it touches Ar
 ```mermaid
 flowchart LR
   A["doctor"] --> B["release plan --pr N"]
-  B --> C["rollout start ID"]
-  C --> D["rollout advance ID"]
-  D -->|repeat until complete| D
-  D --> E["proof ID"]
+  B --> C["one Safety Contract approval"]
+  C --> D["release run ID"]
+  D -->|reconcile and progress| D
+  D --> E["release proof ID"]
 ```
 
     safelane doctor
-    safelane release plan --pr 42
+    safelane release plan --pr 42 --json
     safelane release run rel_...
-    safelane release run rel_...
-    safelane release proof --details rel_...
+    safelane release proof rel_... --details
 
-Inspect verifies the merged commit, required publish check, and immutable GHCR digest. Start applies the Rendered Manifest Bundle through the controller identity and stops at gate one. Advance reads Argo status and the lane envelope. Proof joins artifact, decision, execution, and boundary data.
+Plan verifies the exact merged commit, required checks, and immutable GHCR digest, then freezes the Safety Contract without changing Kubernetes. Run asks once, applies the Rendered Manifest Bundle through the controller identity, and remains attached while it reconciles Argo and requests each policy-authorized progression. Proof joins artifact, assessment, decision, execution, boundary, and outcome data.
 
-## Why you never pass --to
+## Why run needs no target weight
 
-The flag exists as a parser-level compatibility surface, but the agent workflow must not use it. The envelope owns the next weight. A caller-selected target would bypass the decision SafeLane just recorded.
+The frozen lane owns every allowed weight. `release run` derives the next progression from that envelope; callers cannot select a target that bypasses the recorded decision. Use `--step` only when you explicitly want at most one authorized progression instead of the default terminal loop.
 
 ## Next
 

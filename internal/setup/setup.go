@@ -240,7 +240,10 @@ func discoverChecks(files []File) []string {
 		}
 		for _, match := range workflowJobName.FindAllStringSubmatch(file.Content, -1) {
 			name := strings.TrimSpace(match[1])
-			if name != "" && !seen[name] {
+			// GitHub expands expressions in matrix job names before creating check
+			// runs. The template itself is never a literal check name, and setup
+			// cannot safely enumerate every matrix expansion from a text scan.
+			if name != "" && !strings.Contains(name, "${{") && !seen[name] {
 				seen[name] = true
 				checks = append(checks, name)
 			}

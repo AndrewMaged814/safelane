@@ -13,7 +13,7 @@ func TestDiscoverDerivesRepositoryAndWorkflowChecksWithoutSecrets(t *testing.T) 
 	root := t.TempDir()
 	runGit(t, root, "init")
 	runGit(t, root, "remote", "add", "origin", "https://github.com/AndrewMaged814/safelane-demo-api.git")
-	writeFile(t, filepath.Join(root, ".github", "workflows", "ci.yml"), "name: CI\n\njobs:\n  test:\n    name: Test\n  publish:\n    name: Publish image\n")
+	writeFile(t, filepath.Join(root, ".github", "workflows", "ci.yml"), "name: CI\n\njobs:\n  test:\n    name: Test\n  publish:\n    name: Publish image\n  fixtures:\n    name: Publish fixture (${{ matrix.name }})\n")
 	writeFile(t, filepath.Join(root, "Dockerfile"), "FROM mcr.microsoft.com/dotnet/aspnet:10.0\n")
 	writeFile(t, filepath.Join(root, ".env"), "TOKEN=must-not-be-sent")
 

@@ -9,23 +9,26 @@ Argo can pause at a canary gate. A timeout can leave the outcome unknown. Retryi
 
 ```mermaid
 flowchart LR
-  A["rollout advance"] --> B{"Outcome?"}
-  B -->|paused / healthy| C["status ID"]
-  B -->|timeout| C
-  B -->|regression| D["rollout abort --reason ..."]
-  C --> E["decide with current record"]
+  A["release run ID"] --> B{"Outcome?"}
+  B -->|timeout / unknown| C["release status ID"]
+  B -->|human decision| D["accept risk or emergency control"]
+  B -->|Argo analysis failure| E["Argo abort and rollback"]
+  C --> F["release run ID reconciles first"]
+  D --> F
+  E --> G["release proof ID"]
 ```
 
     safelane release status rel_...
-    safelane release status --json rel_...
-    safelane release pause rel_...
-    safelane release abort --reason "error rate rose after gate" rel_...
+    safelane release status rel_... --json
+    safelane release pause rel_... --reason "investigating an external incident"
+    safelane release resume rel_... --reason "incident cleared"
+    safelane release abort rel_... --reason "operator emergency stop"
 
-Abort restores stable traffic. It does not invent a new release record.
+Argo owns normal analysis failure, abort, and rollback. `release abort` is a separate emergency-control path; SafeLane records its caller, time, and reason without confusing it with `argo_abort`.
 
 ## Why timeout returns exit code 3
 
-A timeout means SafeLane does not know whether the promotion took effect. That is different from failure. Read status; do not retry rollout advance automatically.
+A timeout means SafeLane does not know whether the last mutation took effect. That is different from failure. Read status, then reconnect with `release run`; it reconciles before it requests another progression.
 
 ## Next
 
