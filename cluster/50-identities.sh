@@ -9,6 +9,11 @@ set -euo pipefail
 
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 CALLER=safelane-caller
+# The ServiceAccount name is the same in every namespace, but the caller's
+# kubectl context lives in the SHARED default kubeconfig -- so its name must be
+# app-scoped. Without this, provisioning a second application silently rebinds
+# `safelane-caller` to the new namespace and the first app's context is gone.
+CALLER_CONTEXT="safelane-caller-${SAFELANE_APP}"
 CONTROLLER=safelane-controller
 ADMIN_CONTEXT=safelane-admin
 DEFAULT_KUBECONFIG="${HOME:?HOME is required}/.kube/config"
@@ -85,7 +90,7 @@ if context_exists "${ADMIN_CONTEXT}"; then
 else
   CURRENT_CONTEXT="$(kubectl --kubeconfig "${DEFAULT_KUBECONFIG}" config current-context)"
   case "${CURRENT_CONTEXT}" in
-    ""|"${CALLER}"|"${CONTROLLER}")
+    ""|"${CALLER}"|safelane-caller-*|"${CONTROLLER}")
       echo "No recoverable administrator context exists; restore ${BACKUP} and retry." >&2
       exit 1
       ;;
@@ -261,11 +266,11 @@ if context_exists "${CONTROLLER}"; then
   kubectl --kubeconfig "${DEFAULT_KUBECONFIG}" config delete-context "${CONTROLLER}" >/dev/null
 fi
 kubectl --kubeconfig "${DEFAULT_KUBECONFIG}" config unset "users.${CONTROLLER}" >/dev/null 2>&1 || true
-kubectl --kubeconfig "${DEFAULT_KUBECONFIG}" config set-credentials "${CALLER}" \
+kubectl --kubeconfig "${DEFAULT_KUBECONFIG}" config set-credentials "${CALLER_CONTEXT}" \
   --token="${CALLER_TOKEN}" >/dev/null
-kubectl --kubeconfig "${DEFAULT_KUBECONFIG}" config set-context "${CALLER}" \
-  --cluster="${CLUSTER_NAME}" --user="${CALLER}" --namespace="${NAMESPACE}" >/dev/null
-kubectl --kubeconfig "${DEFAULT_KUBECONFIG}" config use-context "${CALLER}" >/dev/null
+kubectl --kubeconfig "${DEFAULT_KUBECONFIG}" config set-context "${CALLER_CONTEXT}" \
+  --cluster="${CLUSTER_NAME}" --user="${CALLER_CONTEXT}" --namespace="${NAMESPACE}" >/dev/null
+kubectl --kubeconfig "${DEFAULT_KUBECONFIG}" config use-context "${CALLER_CONTEXT}" >/dev/null
 chmod 600 "${DEFAULT_KUBECONFIG}"
 
 if context_exists "${CONTROLLER}"; then
@@ -273,6 +278,6 @@ if context_exists "${CONTROLLER}"; then
   exit 1
 fi
 
-echo "Caller context ${CALLER} is now active in ${DEFAULT_KUBECONFIG}."
+echo "Caller context ${CALLER_CONTEXT} is now active in ${DEFAULT_KUBECONFIG}."
 echo "Admin context remains recoverable as ${ADMIN_CONTEXT}."
 echo "Controller kubeconfig written to ${CONTROLLER_KUBECONFIG}."
