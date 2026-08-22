@@ -1,7 +1,6 @@
 ---
 name: safelane
 description: Coordinate a merged pull request through SafeLane. Use for SafeLane setup, release, deploy, rollout monitoring, emergency control, or release proof.
-user-invocable: true
 ---
 
 # SafeLane
@@ -12,23 +11,31 @@ promotion, abort, and rollback.
 
 ## Setup
 
-For a normal deterministic setup, run:
+When this skill is active inside Claude or Codex, setup is agent-shaped by
+default. Use deterministic setup only when the user explicitly asks for a
+manual, conservative, or non-agent setup:
 
 `safelane setup`
 
-When the user asks for an agent-shaped setup:
+For agent-shaped setup:
 
 1. Run `safelane setup inspect --json`.
-2. Treat the returned file list as compact evidence, not source text. Read only
+2. Use the returned `proposal` as the complete proposal contract and baseline.
+   Do not search SafeLane's source or binary for a schema. Preserve its
+   `schema_version`, `inspection_fingerprint`, mandatory evidence, external
+   probe, and templates unless repository evidence requires a specific change.
+3. Treat the returned file list as compact evidence, not source text. Read only
    repository files relevant to the reported checks, critical surfaces, Kubernetes
    resources, and uncertainties using this active session's normal file tools.
-3. Build one `safelane.setup.proposal/v1` JSON proposal from that inspection.
-   Preserve its `inspection_fingerprint`. Cite every critical surface and configure
-   a concrete runtime assertion for each identified hazard.
-4. Write the proposal to an absolute temporary path.
-5. Explain the proposal once, then ask approval.
+4. Tailor only project-specific judgments supported by those files: required
+   static checks, risk-path floors, and concrete runtime assertions. The baseline
+   is already valid, so leave unrelated boilerplate unchanged.
+5. Write the proposal object—not the entire inspection—to an absolute temporary
+   path. Explain the project-specific choices once, then ask approval.
 6. After approval, run `safelane setup apply --proposal <absolute-path> --yes --json`.
-7. Run `safelane doctor`. Setup is complete only when doctor passes.
+7. For the first-party demo, run `safelane demo up --yes --json` so the probe
+   digest and private credentials are bound. Then run `safelane doctor`.
+   Setup is complete only when doctor passes.
 
 ## Release
 

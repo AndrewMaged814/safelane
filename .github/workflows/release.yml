@@ -72,15 +72,16 @@ jobs:
           set -euo pipefail
           asset="safelane-${VERSION}-${GOOS}-${GOARCH}"
           package_dir="dist/package"
-          mkdir -p "$package_dir"
+          mkdir -p "$package_dir/safelane-skill"
           binary="safelane"
           if [[ "$GOOS" == "windows" ]]; then binary="safelane.exe"; fi
           go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o "${package_dir}/${binary}" ./cmd/safelane
           cp LICENSE README.md "$package_dir/"
+          cp internal/skill/SKILL.md "$package_dir/safelane-skill/SKILL.md"
           if [[ "$ARCHIVE_KIND" == "zip" ]]; then
-            (cd "$package_dir" && zip -q "../${asset}.zip" "$binary" LICENSE README.md)
+            (cd "$package_dir" && zip -q "../${asset}.zip" "$binary" LICENSE README.md safelane-skill/SKILL.md)
           else
-            tar -C "$package_dir" -czf "dist/${asset}.tar.gz" "$binary" LICENSE README.md
+            tar -C "$package_dir" -czf "dist/${asset}.tar.gz" "$binary" LICENSE README.md safelane-skill/SKILL.md
           fi
       - uses: actions/upload-artifact@v4
         with:

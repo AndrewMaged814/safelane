@@ -79,6 +79,9 @@ Windows PowerShell:
 irm https://raw.githubusercontent.com/AndrewMaged814/SafeLane/main/docs/install.ps1 | iex
 ```
 
+The release archive installs both the SafeLane binary and its canonical Claude/Codex
+skill. Restart the agent session after installing or upgrading.
+
 Build from source with Go 1.26.5 or later:
 
 ```bash

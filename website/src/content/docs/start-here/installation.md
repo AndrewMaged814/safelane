@@ -12,16 +12,18 @@ verify its SHA-256 checksum before replacing an existing installation. Go is not
 
     curl -fsSL https://raw.githubusercontent.com/AndrewMaged814/SafeLane/main/docs/install.sh | sh
 
-The binary is installed to `~/.local/bin/safelane`. If that directory is not already on
-`PATH`, the installer prints the exact follow-up required.
+The binary is installed to `~/.local/bin/safelane`. The SafeLane skill is installed for
+Claude and Codex under `~/.claude/skills/` and `~/.agents/skills/`. If the binary
+directory is not already on `PATH`, the installer prints the exact follow-up required.
 
 ### Windows PowerShell
 
     irm https://raw.githubusercontent.com/AndrewMaged814/SafeLane/main/docs/install.ps1 | iex
 
-The binary is installed to `%LOCALAPPDATA%\SafeLane\bin\safelane.exe`. The installer
-adds that directory to the beginning of the user `PATH`; restart the terminal after the
-first installation.
+The binary is installed to `%LOCALAPPDATA%\SafeLane\bin\safelane.exe`, and the skill is
+installed under `%USERPROFILE%\.claude\skills\` and `%USERPROFILE%\.agents\skills\`.
+The installer adds the binary directory to the beginning of the user `PATH`; restart
+the terminal and agent session after the first installation.
 
 Rerun the same installer command to upgrade. Both installers reuse the same canonical
 path, so upgrades do not leave a second active copy behind.

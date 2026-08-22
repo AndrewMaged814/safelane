@@ -54,6 +54,9 @@ type Snapshot struct {
 	Uncertainties         []string           `json:"uncertainties"`
 	Files                 []File             `json:"files"`
 	InspectionFingerprint string             `json:"inspection_fingerprint"`
+	// Proposal is a complete, validator-ready baseline for the active agent to
+	// preserve or tailor. SafeLane, not the skill, owns this contract.
+	Proposal *Proposal `json:"proposal,omitempty"`
 }
 
 // RuntimeAssertion is a concrete black-box check proposed from discovered routes.
@@ -72,14 +75,15 @@ type TemplateFile struct {
 
 // Proposal is the model's structured setup recommendation.
 type Proposal struct {
-	SchemaVersion         string         `json:"schema_version"`
-	InspectionFingerprint string         `json:"inspection_fingerprint"`
-	Summary               string         `json:"summary"`
-	PolicyHighlights      []string       `json:"policy_highlights"`
-	TemplateHighlights    []string       `json:"template_highlights"`
-	RequiredChecks        []string       `json:"required_checks"`
-	PolicyYAML            string         `json:"policy_yaml"`
-	TemplateFiles         []TemplateFile `json:"template_files"`
+	SchemaVersion         string             `json:"schema_version"`
+	InspectionFingerprint string             `json:"inspection_fingerprint"`
+	Summary               string             `json:"summary"`
+	PolicyHighlights      []string           `json:"policy_highlights"`
+	TemplateHighlights    []string           `json:"template_highlights"`
+	RequiredChecks        []string           `json:"required_checks"`
+	RuntimeAssertions     []RuntimeAssertion `json:"runtime_assertions"`
+	PolicyYAML            string             `json:"policy_yaml"`
+	TemplateFiles         []TemplateFile     `json:"template_files"`
 }
 
 // Runner is the seam for testing and for replacing the agent CLI later.
@@ -116,12 +120,15 @@ func Discover(root string) (Snapshot, error) {
 		snapshot.Uncertainties = append(snapshot.Uncertainties, "No concrete application behavior route was discovered; setup apply requires at least one runtime assertion.")
 	}
 	snapshot.InspectionFingerprint = Fingerprint(snapshot)
+	proposal := ConservativeProposal(snapshot)
+	snapshot.Proposal = &proposal
 	return snapshot, nil
 }
 
 // Fingerprint binds an agent proposal to the exact repository inspection.
 func Fingerprint(snapshot Snapshot) string {
 	snapshot.InspectionFingerprint = ""
+	snapshot.Proposal = nil
 	raw, _ := json.Marshal(snapshot)
 	sum := sha256.Sum256(raw)
 	return fmt.Sprintf("sha256:%x", sum)
@@ -286,9 +293,10 @@ func ConservativeProposal(s Snapshot) Proposal {
 			"Four operator-owned templates define stable and canary Services, a black-box AnalysisTemplate, and the Rollout.",
 			"Argo runs the external probe against canary-only /api/demo and /version before every progression gate.",
 		},
-		RequiredChecks: checks,
-		PolicyYAML:     conservativePolicy(s),
-		TemplateFiles:  conservativeTemplate(s),
+		RequiredChecks:    checks,
+		RuntimeAssertions: append([]RuntimeAssertion(nil), s.RuntimeAssertions...),
+		PolicyYAML:        conservativePolicy(s),
+		TemplateFiles:     conservativeTemplate(s),
 	}
 }
 
@@ -318,6 +326,26 @@ func ValidateProposal(p Proposal, s Snapshot) error {
 	for _, check := range p.RequiredChecks {
 		if strings.TrimSpace(check) == "" || strings.ContainsAny(check, "\r\n") {
 			return fmt.Errorf("setup: recommendation has an unsafe required check name")
+		}
+	}
+	if len(p.RuntimeAssertions) == 0 {
+		return errors.New("setup: recommendation has no runtime assertions")
+	}
+	seenAssertions := map[string]bool{}
+	coveredSurfaces := map[string]bool{}
+	for _, assertion := range p.RuntimeAssertions {
+		if strings.TrimSpace(assertion.ID) == "" || strings.TrimSpace(assertion.Surface) == "" || strings.TrimSpace(assertion.Expectation) == "" || strings.TrimSpace(assertion.Covers) == "" {
+			return errors.New("setup: runtime assertions require id, surface, expectation, and covers")
+		}
+		if seenAssertions[assertion.ID] {
+			return fmt.Errorf("setup: runtime assertion %q is duplicated", assertion.ID)
+		}
+		seenAssertions[assertion.ID] = true
+		coveredSurfaces[assertion.Surface] = true
+	}
+	for _, surface := range s.CriticalSurfaces {
+		if !coveredSurfaces[surface] {
+			return fmt.Errorf("setup: critical surface %q has no runtime assertion", surface)
 		}
 	}
 	if !strings.Contains(p.PolicyYAML, "merged_commit_on_default_branch") ||

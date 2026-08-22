@@ -15,11 +15,13 @@ trap cleanup EXIT HUP INT TERM
 VERSION="v0.0.0-test"
 RELEASE_DIR="${TEST_ROOT}/${VERSION}"
 INSTALL_DIR="${TEST_ROOT}/install"
-mkdir -p "$RELEASE_DIR" "${TEST_ROOT}/package"
+AGENT_HOME="${TEST_ROOT}/agent-home"
+mkdir -p "$RELEASE_DIR" "${TEST_ROOT}/package/safelane-skill"
 printf '#!/bin/sh\necho %s\n' "$VERSION" > "${TEST_ROOT}/package/safelane"
+printf 'test-safelane-skill' > "${TEST_ROOT}/package/safelane-skill/SKILL.md"
 chmod 755 "${TEST_ROOT}/package/safelane"
 ARCHIVE="safelane-${VERSION}-linux-amd64.tar.gz"
-tar -C "${TEST_ROOT}/package" -czf "${RELEASE_DIR}/${ARCHIVE}" safelane
+tar -C "${TEST_ROOT}/package" -czf "${RELEASE_DIR}/${ARCHIVE}" safelane safelane-skill/SKILL.md
 (cd "$RELEASE_DIR" && sha256sum "$ARCHIVE" > checksums.txt)
 
 PORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')"
@@ -39,14 +41,18 @@ done
 SAFELANE_VERSION="$VERSION" \
 SAFELANE_DOWNLOAD_BASE_URL="http://127.0.0.1:${PORT}" \
 SAFELANE_INSTALL_DIR="$INSTALL_DIR" \
+SAFELANE_AGENT_HOME="$AGENT_HOME" \
   sh "${ROOT_DIR}/docs/install.sh"
 
 test -x "${INSTALL_DIR}/safelane"
 test "$("${INSTALL_DIR}/safelane")" = "$VERSION"
+test "$(cat "${AGENT_HOME}/.claude/skills/safelane/SKILL.md")" = "test-safelane-skill"
+test "$(cat "${AGENT_HOME}/.agents/skills/safelane/SKILL.md")" = "test-safelane-skill"
 
 SAFELANE_VERSION="$VERSION" \
 SAFELANE_DOWNLOAD_BASE_URL="http://127.0.0.1:${PORT}" \
 SAFELANE_INSTALL_DIR="$INSTALL_DIR" \
+SAFELANE_AGENT_HOME="$AGENT_HOME" \
   sh "${ROOT_DIR}/docs/install.sh" >/dev/null
 test "$("${INSTALL_DIR}/safelane")" = "$VERSION"
 
@@ -54,6 +60,7 @@ printf 'corrupt' >> "${RELEASE_DIR}/${ARCHIVE}"
 if SAFELANE_VERSION="$VERSION" \
   SAFELANE_DOWNLOAD_BASE_URL="http://127.0.0.1:${PORT}" \
   SAFELANE_INSTALL_DIR="$INSTALL_DIR" \
+  SAFELANE_AGENT_HOME="$AGENT_HOME" \
     sh "${ROOT_DIR}/docs/install.sh" >/dev/null 2>&1; then
   echo "installer accepted an archive with the wrong checksum" >&2
   exit 1

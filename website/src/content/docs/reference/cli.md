@@ -12,7 +12,7 @@ setup → doctor → release plan → release run → release proof
 | Command | Purpose |
 | --- | --- |
 | `safelane setup` | Discover and write conservative operator configuration without invoking an agent. |
-| `safelane setup inspect --json` | Return repository facts for the active Codex or Claude session. |
+| `safelane setup inspect --json` | Return repository facts and a validator-ready proposal for the active Codex or Claude session. |
 | `safelane setup apply --proposal <absolute-path>` | Validate and apply an agent-authored proposal atomically. |
 | `safelane doctor` | Check configuration, evidence providers, credentials, and target readiness. |
 | `safelane release plan --pr <number>` | Freeze the exact PR, assessment, Safety Contract, and rendered bundle without production mutation. |

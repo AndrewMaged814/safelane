@@ -18,7 +18,11 @@ safelane setup apply --proposal /absolute/path/proposal.json --yes
 safelane doctor
 ```
 
-`setup inspect` is read-only. Its JSON includes an inspection fingerprint and uncertainties. The agent must preserve the fingerprint and cite concrete assertions for critical surfaces.
+`setup inspect` is read-only. Its JSON includes an inspection fingerprint,
+uncertainties, and a complete validator-ready `proposal`. The active agent starts
+from that proposal and changes only repository-supported judgments; it never has
+to discover SafeLane's schema or author policy and Kubernetes boilerplate from
+scratch.
 
 `setup apply` validates the complete proposal atomically. It rejects stale fingerprints, unknown fields, unsafe targets, invalid policy, or missing assertions. Interactive use requires typing `APPLY`; noninteractive use requires `--yes`.
 

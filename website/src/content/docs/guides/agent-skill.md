@@ -1,23 +1,21 @@
 ---
-title: Installing the Agent Skill
-description: Install SafeLane's Claude Code workflow for agent-driven releases.
+title: Using the Agent Skill
+description: Run agent-shaped SafeLane setup and one-approval releases from Claude or Codex.
 ---
 
 ## An agent needs the release rules in the same place as the commands
 
-Without a workflow, an agent may skip inspection, choose a lane, retry a timeout, or edit policy. SafeLane includes a Claude Code skill named /safelane.
+Without a workflow, an agent may skip inspection, choose a lane, or retry an uncertain mutation. Every SafeLane release archive includes one canonical `/safelane` skill for Claude and Codex.
 
-The committed skill lives at internal/skill/SKILL.md. Install or link it using your Claude Code skill setup, then start a new session so the skill is loaded.
+The normal installer places it under both `~/.claude/skills/safelane/` and `~/.agents/skills/safelane/`. Restart the agent session after installing or upgrading so it loads the current skill.
 
-The workflow is narrow:
+When `/safelane` is active, setup is agent-shaped by default:
 
-1. Run safelane release plan --pr <n>.
-2. Continue only on exit code 0.
-3. Run safelane release run <id>.
-4. Repeat safelane release run <id> until complete.
-5. Run safelane release proof <id> and report the outcome.
+1. `setup inspect --json` returns compact repository evidence and a complete validator-ready `proposal`.
+2. The active agent reads only relevant repository files and tailors project-specific checks, risk policy, and runtime assertions.
+3. SafeLane validates and applies the proposal after one approval, then `doctor` verifies readiness.
 
-The skill tells the agent not to choose a lane, not to edit SafeLane configuration, not to retry a timeout, and to report refusal codes verbatim.
+For a release, the skill requires one exact merged PR, explains the frozen Safety Contract once, runs `release run` to a terminal outcome, and reports `release proof`. Argo remains responsible for analysis failure, abort, and rollback.
 
 ## Why the skill does not replace Kubernetes permissions
 

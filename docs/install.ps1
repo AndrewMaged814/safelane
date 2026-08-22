@@ -12,6 +12,11 @@ $downloadBase = if ($env:SAFELANE_DOWNLOAD_BASE_URL) {
     "https://github.com/$repo/releases/download"
 }
 $version = $env:SAFELANE_VERSION
+$agentHome = if ($env:SAFELANE_AGENT_HOME) {
+    $env:SAFELANE_AGENT_HOME
+} else {
+    [Environment]::GetFolderPath([Environment+SpecialFolder]::UserProfile)
+}
 
 if (-not $version) {
     # Resolve the latest tag through GitHub's releases redirect instead of the
@@ -73,12 +78,29 @@ try {
     if (-not (Test-Path -LiteralPath $sourceBinary -PathType Leaf)) {
         throw "$filename does not contain safelane.exe"
     }
+    $sourceSkill = Join-Path $extractDir "safelane-skill\SKILL.md"
+    $hasSkill = Test-Path -LiteralPath $sourceSkill -PathType Leaf
 
     New-Item -ItemType Directory -Path $installDir -Force | Out-Null
     $destination = Join-Path $installDir "safelane.exe"
     $stagedDestination = "$destination.new"
     Copy-Item -LiteralPath $sourceBinary -Destination $stagedDestination -Force
     Move-Item -LiteralPath $stagedDestination -Destination $destination -Force
+
+    if ($hasSkill) {
+        foreach ($skillDestination in @(
+            (Join-Path $agentHome ".claude\skills\safelane\SKILL.md"),
+            (Join-Path $agentHome ".agents\skills\safelane\SKILL.md")
+        )) {
+            $skillDirectory = Split-Path -Parent $skillDestination
+            New-Item -ItemType Directory -Path $skillDirectory -Force | Out-Null
+            $stagedSkill = "$skillDestination.new"
+            Copy-Item -LiteralPath $sourceSkill -Destination $stagedSkill -Force
+            Move-Item -LiteralPath $stagedSkill -Destination $skillDestination -Force
+        }
+    } else {
+        Write-Warning "$version predates bundled agent skills; rerun the installer after upgrading to a newer release."
+    }
 
     if ($env:SAFELANE_NO_PATH_UPDATE -ne "1") {
         $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
@@ -96,6 +118,9 @@ try {
     }
 
     Write-Host "SafeLane $version installed to $destination"
+    if ($hasSkill) {
+        Write-Host "SafeLane skill installed for Claude and Codex under $agentHome"
+    }
 } finally {
     if (Test-Path -LiteralPath $tmpDir) {
         Remove-Item -LiteralPath $tmpDir -Recurse -Force

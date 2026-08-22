@@ -6,6 +6,7 @@ REPO="${SAFELANE_REPO:-AndrewMaged814/SafeLane}"
 INSTALL_DIR="${SAFELANE_INSTALL_DIR:-$HOME/.local/bin}"
 DOWNLOAD_BASE="${SAFELANE_DOWNLOAD_BASE_URL:-https://github.com/${REPO}/releases/download}"
 VERSION="${SAFELANE_VERSION:-}"
+AGENT_HOME="${SAFELANE_AGENT_HOME:-$HOME}"
 
 command -v curl >/dev/null 2>&1 || {
   echo "SafeLane installer requires curl." >&2
@@ -68,12 +69,30 @@ if [ "$EXPECTED" != "$ACTUAL" ]; then
   exit 1
 fi
 
-tar -xzf "${TMP_DIR}/${FILENAME}" -C "$TMP_DIR" safelane
+HAS_SKILL=0
+if tar -tzf "${TMP_DIR}/${FILENAME}" | grep -qx 'safelane-skill/SKILL.md'; then
+  HAS_SKILL=1
+  tar -xzf "${TMP_DIR}/${FILENAME}" -C "$TMP_DIR" safelane safelane-skill/SKILL.md
+else
+  tar -xzf "${TMP_DIR}/${FILENAME}" -C "$TMP_DIR" safelane
+fi
 mkdir -p "$INSTALL_DIR"
 install -m 0755 "${TMP_DIR}/safelane" "${INSTALL_DIR}/safelane.new"
 mv -f "${INSTALL_DIR}/safelane.new" "${INSTALL_DIR}/safelane"
+if [ "$HAS_SKILL" -eq 1 ]; then
+  for SKILL_DIR in "${AGENT_HOME}/.claude/skills/safelane" "${AGENT_HOME}/.agents/skills/safelane"; do
+    mkdir -p "$SKILL_DIR"
+    install -m 0644 "${TMP_DIR}/safelane-skill/SKILL.md" "${SKILL_DIR}/SKILL.md.new"
+    mv -f "${SKILL_DIR}/SKILL.md.new" "${SKILL_DIR}/SKILL.md"
+  done
+else
+  echo "Warning: ${VERSION} predates bundled agent skills; rerun after upgrading to a newer release." >&2
+fi
 
 echo "SafeLane ${VERSION} installed to ${INSTALL_DIR}/safelane"
+if [ "$HAS_SKILL" -eq 1 ]; then
+  echo "SafeLane skill installed for Claude and Codex under ${AGENT_HOME}"
+fi
 case ":$PATH:" in
   *":$INSTALL_DIR:"*) ;;
   *) echo "Add ${INSTALL_DIR} to PATH, then restart your shell." ;;

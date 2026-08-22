@@ -84,6 +84,45 @@ func TestSetupApplyRejectsStaleFingerprintBeforeWriting(t *testing.T) {
 	}
 }
 
+func TestSetupInspectProposalAppliesWithoutSchemaDiscovery(t *testing.T) {
+	root, home := setupRepository(t)
+	var inspectOut, inspectErr bytes.Buffer
+	if code := runSetupInspect(context.Background(), []string{"--json"}, &inspectOut, &inspectErr, root); code != ExitOK {
+		t.Fatalf("inspect exit=%d stderr=%s", code, inspectErr.String())
+	}
+	var inspection setupengine.Snapshot
+	if err := json.Unmarshal(inspectOut.Bytes(), &inspection); err != nil {
+		t.Fatalf("decode inspection: %v", err)
+	}
+	if inspection.Proposal == nil {
+		t.Fatal("inspection did not provide a proposal")
+	}
+	inspection.Proposal.RuntimeAssertions[0].Expectation = "HTTP 200 and JSON status equals ok for phase one"
+	raw, err := json.Marshal(inspection.Proposal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proposalPath := filepath.Join(t.TempDir(), "proposal.json")
+	if err := os.WriteFile(proposalPath, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var applyOut, applyErr bytes.Buffer
+	if code := runSetupApply(context.Background(), []string{"--proposal", proposalPath, "--yes", "--json"}, strings.NewReader(""), &applyOut, &applyErr, root); code != ExitOK {
+		t.Fatalf("apply exit=%d stderr=%s", code, applyErr.String())
+	}
+	projectFile := project.ForApp(home, "safelane-demo-api").ProjectFile
+	if _, err := os.Stat(projectFile); err != nil {
+		t.Fatalf("direct inspection proposal was not applied: %v", err)
+	}
+	cfg, err := project.Load(projectFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Analysis.Assertions[0].Expectation; got != "HTTP 200 and JSON status equals ok for phase one" {
+		t.Fatalf("applied assertion = %q; agent proposal did not shape project config", got)
+	}
+}
+
 func setupRepository(t *testing.T) (string, string) {
 	t.Helper()
 	root, home, userHome := t.TempDir(), t.TempDir(), t.TempDir()

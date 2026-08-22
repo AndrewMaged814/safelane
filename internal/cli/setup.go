@@ -210,7 +210,7 @@ func confirmApply(stdin io.Reader, stderr io.Writer) bool {
 
 func renderSetupPreview(w io.Writer, snapshot setupengine.Snapshot, proposal setupengine.Proposal) {
 	fmt.Fprintf(w, "SafeLane setup\n\nRepository: %s\nApplication: %s\nImage: %s\nRequired CI: %s\nAssertions:\n", snapshot.Repository, snapshot.Application, snapshot.ImageRepository, strings.Join(proposal.RequiredChecks, ", "))
-	for _, assertion := range snapshot.RuntimeAssertions {
+	for _, assertion := range proposal.RuntimeAssertions {
 		fmt.Fprintf(w, "  - %s: %s (%s)\n", assertion.Surface, assertion.Expectation, assertion.Covers)
 	}
 	fmt.Fprintln(w, "Policy:")
@@ -230,7 +230,11 @@ func activateSetup(loc project.Locations, snapshot setupengine.Snapshot, proposa
 	}
 	defer os.RemoveAll(stageDir)
 	stage := project.Locations{Home: loc.Home, AppDir: stageDir, ProjectFile: filepath.Join(stageDir, "project.yml"), PolicyFile: filepath.Join(stageDir, "policy.yml"), TemplateDir: filepath.Join(stageDir, "release-template"), ReleasesDir: filepath.Join(stageDir, "releases")}
-	projectYAML := project.YAML(snapshot.Application, snapshot.Repository, snapshot.DefaultBranch, snapshot.ImageRepository, proposal.RequiredChecks)
+	assertions := make([]project.RuntimeAssertion, 0, len(proposal.RuntimeAssertions))
+	for _, assertion := range proposal.RuntimeAssertions {
+		assertions = append(assertions, project.RuntimeAssertion{ID: assertion.ID, Surface: assertion.Surface, Expectation: assertion.Expectation, Covers: assertion.Covers})
+	}
+	projectYAML := project.YAML(snapshot.Application, snapshot.Repository, snapshot.DefaultBranch, snapshot.ImageRepository, proposal.RequiredChecks, assertions)
 	if _, err := writeInitFile(stage.ProjectFile, projectYAML); err != nil {
 		return err
 	}

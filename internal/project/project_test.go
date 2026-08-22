@@ -84,6 +84,23 @@ func TestDefaultYAML_RoundTrip(t *testing.T) {
 	}
 }
 
+func TestYAMLUsesAgentRuntimeAssertions(t *testing.T) {
+	raw := YAML("app", "owner/app", "main", "ghcr.io/owner/app", []string{"Test"}, []RuntimeAssertion{{
+		ID: "behavior", Surface: "GET /api/demo", Expectation: `HTTP 200 and JSON status equals "ok"`, Covers: "correctness",
+	}})
+	path := filepath.Join(t.TempDir(), "project.yml")
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Analysis.Assertions) != 1 || cfg.Analysis.Assertions[0].ID != "behavior" {
+		t.Fatalf("assertions = %+v", cfg.Analysis.Assertions)
+	}
+}
+
 func TestResolveIn_MatchesGitHubRemoteNotDirectoryName(t *testing.T) {
 	clone := filepath.Join(t.TempDir(), "renamed-working-copy")
 	if err := os.Mkdir(clone, 0o755); err != nil {

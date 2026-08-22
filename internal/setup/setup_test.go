@@ -55,11 +55,45 @@ func TestSnapshotJSONContainsCompactFileEvidenceNotSourceContent(t *testing.T) {
 	}
 }
 
+func TestDiscoverIncludesAReadyValidAgentProposal(t *testing.T) {
+	root := t.TempDir()
+	runGit(t, root, "init")
+	runGit(t, root, "remote", "add", "origin", "https://github.com/AndrewMaged814/safelane-demo-api.git")
+	writeFile(t, filepath.Join(root, ".github", "workflows", "ci.yml"), "jobs:\n  test:\n    name: Test\n")
+	writeFile(t, filepath.Join(root, "Program.cs"), `app.MapGet("/api/demo", () => new { status = "ok" }); app.MapGet("/version", () => "abc");`)
+
+	snapshot, err := Discover(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.Proposal == nil {
+		t.Fatal("inspection omitted its ready agent proposal")
+	}
+	if snapshot.Proposal.InspectionFingerprint != snapshot.InspectionFingerprint {
+		t.Fatalf("proposal fingerprint = %q, inspection = %q", snapshot.Proposal.InspectionFingerprint, snapshot.InspectionFingerprint)
+	}
+	if len(snapshot.Proposal.RuntimeAssertions) != 4 {
+		t.Fatalf("proposal runtime assertions = %d, want 4", len(snapshot.Proposal.RuntimeAssertions))
+	}
+	if err := ValidateProposal(*snapshot.Proposal, snapshot); err != nil {
+		t.Fatalf("inspection proposal is not directly applicable: %v", err)
+	}
+}
+
 func TestFingerprintChangesWithFileContentDigest(t *testing.T) {
 	first := Snapshot{Files: []File{{Path: "src/Program.cs", ContentSHA256: "sha256:first"}}}
 	second := Snapshot{Files: []File{{Path: "src/Program.cs", ContentSHA256: "sha256:second"}}}
 	if Fingerprint(first) == Fingerprint(second) {
 		t.Fatal("fingerprint did not bind compact file content digest")
+	}
+}
+
+func TestFingerprintDoesNotDependOnEmbeddedProposal(t *testing.T) {
+	snapshot := Snapshot{Files: []File{{Path: "src/Program.cs", ContentSHA256: "sha256:first"}}}
+	want := Fingerprint(snapshot)
+	snapshot.Proposal = &Proposal{Summary: "agent changed this draft"}
+	if got := Fingerprint(snapshot); got != want {
+		t.Fatalf("fingerprint changed from %q to %q when only the proposal changed", want, got)
 	}
 }
 
@@ -113,6 +147,15 @@ func TestValidateProposalRejectsMissingRequiredChecks(t *testing.T) {
 	proposal.RequiredChecks = nil
 	if err := ValidateProposal(proposal, snapshot); err == nil || !strings.Contains(err.Error(), "required CI checks") {
 		t.Fatalf("error = %v, want required CI checks rejection", err)
+	}
+}
+
+func TestValidateProposalRejectsMissingRuntimeAssertions(t *testing.T) {
+	snapshot := validSnapshot()
+	proposal := ConservativeProposal(snapshot)
+	proposal.RuntimeAssertions = nil
+	if err := ValidateProposal(proposal, snapshot); err == nil || !strings.Contains(err.Error(), "runtime assertions") {
+		t.Fatalf("error = %v, want runtime assertions rejection", err)
 	}
 }
 

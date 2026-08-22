@@ -302,7 +302,7 @@ func DefaultYAML(application, repo, defaultBranch, imageRepository string) []byt
 // YAML renders a project.yml with repository-derived required check names.
 // The legacy DefaultYAML wrapper intentionally preserves init's historical
 // defaults; setup uses this function after inspecting the repository's CI.
-func YAML(application, repo, defaultBranch, imageRepository string, requiredChecks []string) []byte {
+func YAML(application, repo, defaultBranch, imageRepository string, requiredChecks []string, proposedAssertions ...[]RuntimeAssertion) []byte {
 	if application == "" {
 		application = "app"
 	}
@@ -324,6 +324,19 @@ func YAML(application, repo, defaultBranch, imageRepository string, requiredChec
 	var checks strings.Builder
 	for _, check := range requiredChecks {
 		fmt.Fprintf(&checks, "    - %s\n", check)
+	}
+	assertions := []RuntimeAssertion{
+		{ID: "demo-response", Surface: "GET /api/demo", Expectation: `HTTP 200 and JSON status equals "ok"`, Covers: "correctness"},
+		{ID: "demo-success-rate", Surface: "GET /api/demo", Expectation: "success rate is at least 95 percent over 20 requests", Covers: "availability"},
+		{ID: "demo-latency", Surface: "GET /api/demo", Expectation: "p95 latency is at most 500ms over 20 requests", Covers: "latency"},
+		{ID: "canary-identity", Surface: "GET /version", Expectation: "commit equals the inspected merge commit", Covers: "artifact-identity"},
+	}
+	if len(proposedAssertions) > 0 && len(proposedAssertions[0]) > 0 {
+		assertions = proposedAssertions[0]
+	}
+	var assertionYAML strings.Builder
+	for _, assertion := range assertions {
+		fmt.Fprintf(&assertionYAML, "    - id: %q\n      surface: %q\n      expectation: %q\n      covers: %q\n", assertion.ID, assertion.Surface, assertion.Expectation, assertion.Covers)
 	}
 	body := fmt.Sprintf(`version: 4
 
@@ -348,26 +361,11 @@ target:
 analysis:
   probe_image: ghcr.io/andrewmaged814/safelane-demo-probe@sha256:REPLACE_WITH_PUBLISHED_DIGEST
   assertions:
-    - id: demo-response
-      surface: GET /api/demo
-      expectation: HTTP 200 and JSON status equals "ok"
-      covers: correctness
-    - id: demo-success-rate
-      surface: GET /api/demo
-      expectation: success rate is at least 95 percent over 20 requests
-      covers: availability
-    - id: demo-latency
-      surface: GET /api/demo
-      expectation: p95 latency is at most 500ms over 20 requests
-      covers: latency
-    - id: canary-identity
-      surface: GET /version
-      expectation: commit equals the inspected merge commit
-      covers: artifact-identity
+%s
 
 controller_kubeconfig: controller.kubeconfig
 controller_context: safelane-controller
-`, application, repo, defaultBranch, imageRepository, checks.String(), application, application)
+`, application, repo, defaultBranch, imageRepository, checks.String(), application, application, assertionYAML.String())
 	return []byte(body)
 }
 
