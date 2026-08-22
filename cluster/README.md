@@ -1,9 +1,9 @@
-# setup
+# cluster
 
 Everything SafeLane needs on the target cluster, in one command.
 
 ```bash
-./setup/install.sh
+./cluster/install.sh
 ```
 
 SafeLane itself does not provision clusters — it verifies evidence, decides a
@@ -25,7 +25,7 @@ that stage drops the default context to an identity that may only read
 rollouts, so anything which still needs to create objects must precede it.
 
 ```bash
-./setup/reset.sh     # re-seed the baseline and clear release records
+./cluster/reset.sh     # re-seed the baseline and clear release records
 ```
 
 ## Three things that are easy to get wrong

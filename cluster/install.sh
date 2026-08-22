@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # One command: an empty-ish minikube to a cluster SafeLane can release into.
 #
-#   ./setup/install.sh
+#   ./cluster/install.sh
 #
 # Idempotent -- safe to re-run. Each stage is also runnable on its own if you
 # need to redo just one part.
@@ -63,7 +63,7 @@ bash "${HERE}/50-identities.sh"
 
 cat <<'DONE'
 
-######## setup complete ########
+######## cluster ready ########
 
 Verify:
   kubectl --context safelane-admin get rollout podinfo -n podinfo
@@ -75,7 +75,7 @@ Watch:
                                          http://localhost:3000/d/safelane-rollout
 
 Between rehearsals:
-  ./setup/reset.sh
+  ./cluster/reset.sh
 
 Your default kubectl context is now safelane-caller, which can read rollouts
 and nothing else. For ordinary cluster work use --context safelane-admin.
